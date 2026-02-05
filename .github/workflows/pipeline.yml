@@ -1,0 +1,162 @@
+# .github/workflows/pipeline.yml
+# Pipeline — automated execution via GitHub Actions
+#
+# Triggers:
+#   - Manual (workflow_dispatch) with mode selection
+#   - Push to overrides file (auto-reprocesses after issue-based override)
+#   - Scheduled daily run (uncomment cron when ready)
+#
+# Secrets required:
+#   INTERVALS_API_KEY    — intervals.icu API key
+#   INTERVALS_ATHLETE_ID — intervals.icu athlete ID
+#   DROPBOX_TOKEN        — Dropbox API OAuth2 token (for cache + Master storage)
+
+name: Run Pipeline
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: 'Pipeline mode'
+        type: choice
+        options:
+          - UPDATE
+          - FULLPIPE
+          - CACHE
+        default: UPDATE
+      sync:
+        description: 'Sync from intervals.icu first'
+        type: boolean
+        default: true
+  
+  push:
+    paths:
+      - 'activity_overrides.yml'
+  
+  # Uncomment for scheduled daily runs:
+  # schedule:
+  #   - cron: '0 20 * * *'  # Daily at 20:00 UTC (22:00 Stockholm)
+
+# Prevent concurrent runs (latest wins)
+concurrency:
+  group: pipeline
+  cancel-in-progress: true
+
+jobs:
+  pipeline:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    
+    env:
+      INTERVALS_API_KEY: ${{ secrets.INTERVALS_API_KEY }}
+      INTERVALS_ATHLETE_ID: ${{ secrets.INTERVALS_ATHLETE_ID }}
+      DROPBOX_TOKEN: ${{ secrets.DROPBOX_TOKEN }}
+      PIPELINE_SIZE: FULL
+    
+    steps:
+      # ─── Setup ──────────────────────────────────────────────
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+      
+      - name: Install Python dependencies
+        run: |
+          pip install --upgrade pip
+          pip install pandas numpy openpyxl fitparse requests scipy pyyaml
+      
+      # ─── Cache (GitHub Actions layer for speed) ─────────────
+      - name: Restore persec cache
+        uses: actions/cache@v4
+        with:
+          path: persec_cache_FULL
+          key: persec-cache-${{ github.run_number }}
+          restore-keys: |
+            persec-cache-
+      
+      # ─── Download data from Dropbox ─────────────────────────
+      - name: Download pipeline data from Dropbox
+        run: |
+          python ci/dropbox_sync.py download \
+            --items Master_FULL_GPSQ_ID.xlsx \
+                    Master_FULL_GPSQ_ID_simS4.xlsx \
+                    Master_FULL_GPSQ_ID_post.xlsx \
+                    athlete_data.csv \
+                    activities.csv \
+                    activity_overrides.xlsx \
+                    Master_Rebuilt.xlsx \
+                    re_model_s4_FULL.json \
+                    sync_state.json \
+                    TotalHistory.zip
+        continue-on-error: true
+      
+      # ─── Sync from intervals.icu ────────────────────────────
+      - name: Sync from intervals.icu
+        if: ${{ github.event.inputs.sync != 'false' }}
+        run: |
+          python fetch_fit_files.py \
+            --fit-dir TotalHistory \
+            --zip TotalHistory.zip \
+            --state-file sync_state.json
+          
+          python sync_athlete_data.py \
+            --athlete-data athlete_data.csv
+      
+      # ─── Run pipeline ──────────────────────────────────────
+      - name: Run pipeline
+        run: |
+          MODE="${{ github.event.inputs.mode || 'UPDATE' }}"
+          python run_pipeline.py $MODE \
+            --size FULL \
+            --ci \
+            --skip-push
+      
+      # ─── Upload results to Dropbox ─────────────────────────
+      - name: Upload results to Dropbox
+        run: |
+          python ci/dropbox_sync.py upload \
+            --items Master_FULL_GPSQ_ID.xlsx \
+                    Master_FULL_GPSQ_ID_simS4.xlsx \
+                    Master_FULL_GPSQ_ID_post.xlsx \
+                    athlete_data.csv \
+                    re_model_s4_FULL.json \
+                    sync_state.json
+      
+      # ─── Deploy dashboard ──────────────────────────────────
+      - name: Generate dashboard
+        run: python generate_dashboard.py
+        continue-on-error: true
+      
+      - name: Deploy to GitHub Pages
+        uses: peaceiris/actions-gh-pages@v3
+        if: success()
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./docs
+          publish_branch: gh-pages
+        continue-on-error: true
+      
+      # ─── Summary ────────────────────────────────────────────
+      - name: Summary
+        if: always()
+        run: |
+          echo "## Pipeline Run Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- **Mode:** ${{ github.event.inputs.mode || 'UPDATE' }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Trigger:** ${{ github.event_name }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Status:** ${{ job.status }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Time:** $(date -u +%Y-%m-%dT%H:%M:%SZ)" >> $GITHUB_STEP_SUMMARY
+          
+          if [ -f Master_FULL_GPSQ_ID_post.xlsx ]; then
+            SIZE=$(stat -c%s Master_FULL_GPSQ_ID_post.xlsx 2>/dev/null || echo "?")
+            echo "- **Master size:** $SIZE bytes" >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          if [ -d persec_cache_FULL ]; then
+            COUNT=$(find persec_cache_FULL -name "*.npz" | wc -l)
+            echo "- **Cache files:** $COUNT .npz" >> $GITHUB_STEP_SUMMARY
+          fi

@@ -1,0 +1,31 @@
+date,activity_name,distance_km,fit_elev_gain_m,fit_elev_m_per_km,undulation_score,terrain_adj,priority
+2014-06-11,Jog down to Old St pre intervals,4.3,116.6,27.2,25.4,1.0,HIGH
+2014-06-11,Intervals along the canal,6.4,122.4,19.1,14.9,1.0,HIGH
+2014-06-21,Highbury Fields Parkrun,5.0,85.0,17.0,15.1,1.0,HIGH
+2014-07-01,Slow run back home from Parliament Hill,4.4,85.6,19.7,17.0,1.0,HIGH
+2014-08-23,Highbury Fields Parkrun 5k race,5.0,149.8,30.0,14.4,1.0,HIGH
+2014-12-20,Highbury Fields Parkrun 5k,5.0,98.4,19.7,13.0,1.0,HIGH
+2014-12-25,Warm up,1.0,43.5,43.5,11.6,1.0,HIGH
+2016-01-26,5 min on-off intervals,6.5,130.4,20.1,7.2,1.0,HIGH
+2016-03-07,7 x Yasso 800's,11.4,172.2,15.0,3.9,1.0,HIGH
+2013-04-20,Highbury Fields Parkrun,5.0,36.4,7.3,0.0,1.0,medium
+2013-05-11,Parkrun Highbury Fields,5.0,36.2,7.2,0.0,1.0,medium
+2013-07-04,Highbury Fields to Runners Needs,2.9,27.6,9.5,5.8,1.0,medium
+2013-07-06,Highbury Fields 5k Parkrun,5.0,35.2,7.0,0.0,1.0,medium
+2013-09-07,Highbury Fields Parkrun 5k race,5.0,36.4,7.3,0.0,1.0,medium
+2014-01-18,Highbury Fields Parkrun 5k,5.0,36.6,7.3,0.0,1.0,medium
+2014-08-06,Intervals at Varmdo IF,5.3,37.0,7.0,0.0,1.0,medium
+2014-08-11,Intervals at Värmdö IF track,5.7,30.4,5.4,0.0,1.0,medium
+2014-10-25,Highbury Fields Parkrun,5.0,72.0,14.4,7.7,1.0,medium
+2014-11-05,Moonlight run up Lea River to Tottenham Hale,13.2,183.8,13.9,11.6,1.0,medium
+2014-12-25,Highbury Fields Xmas Parkrun,5.0,42.4,8.5,4.5,1.0,medium
+2015-01-03,Highbury Fields Park Run,5.0,34.4,6.9,0.0,1.0,medium
+2015-06-06,Parkrun,5.0,35.2,7.0,0.0,1.0,medium
+2015-08-22,Pre parkrun jog,2.0,14.4,7.2,0.0,1.0,medium
+2015-08-22,Parkrun,5.0,36.2,7.2,0.0,1.0,medium
+2015-10-31,Highbury parkrun,5.0,40.0,8.0,1.9,1.0,medium
+2015-12-12,Warmup,1.1,8.0,7.5,0.0,1.0,medium
+2015-12-12,Parkrun including shoelace stop :-),5.0,38.4,7.7,0.0,1.0,medium
+2015-12-15,To gym,3.5,24.8,7.1,0.0,1.0,medium
+2016-01-02,Highbury Parkrun - sponsored by Lindor and Systembolaget,5.0,33.2,6.6,0.0,1.0,medium
+2016-02-11,Timed pyramid intervals with half length recoveries,10.7,94.0,8.8,1.0,1.0,medium

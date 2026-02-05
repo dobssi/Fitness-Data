@@ -1,0 +1,120 @@
+# .github/workflows/add_override.yml
+# Triggered when an issue is opened with the "override" label.
+# Parses the issue body (from the issue template) and appends to activity_overrides.yml.
+#
+# iPhone workflow:
+#   1. Open GitHub app → Fitness-Data repo → Issues → New Issue
+#   2. Select "Activity Override" template
+#   3. Fill in fields, submit
+#   4. This workflow parses the issue, updates overrides, closes the issue
+#   5. The override push triggers the main pipeline workflow
+
+name: Add Override from Issue
+
+on:
+  issues:
+    types: [opened]
+
+jobs:
+  parse-override:
+    if: contains(github.event.issue.labels.*.name, 'override')
+    runs-on: ubuntu-latest
+    
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Parse issue and update overrides
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const body = context.payload.issue.body || '';
+            
+            // Parse fields from issue body (expects key: value format)
+            const getField = (name) => {
+              const match = body.match(new RegExp(`### ${name}\\s*\\n\\s*(.+)`, 'i'));
+              return match ? match[1].trim() : '';
+            };
+            
+            const file = getField('Activity date or filename');
+            const type = getField('Type');
+            const distance = getField('Distance \\(km\\)');
+            const surface = getField('Surface');
+            const surfaceAdj = getField('Surface adjustment');
+            const tempC = getField('Temperature \\(°C\\)');
+            const notes = getField('Notes');
+            
+            if (!file || file === '_No response_') {
+              await github.rest.issues.createComment({
+                ...context.repo,
+                issue_number: context.issue.number,
+                body: '❌ Missing activity date/filename. Please re-create the issue.'
+              });
+              return;
+            }
+            
+            // Build YAML entry
+            let entry = `  - file: "${file}"`;
+            
+            if (type.includes('Race')) entry += `\n    race: true`;
+            if (type.includes('Parkrun')) {
+              entry += `\n    parkrun: true`;
+              if (!distance || distance === '_No response_') entry += `\n    distance_km: 5.0`;
+            }
+            if (distance && distance !== '_No response_' && !type.includes('Parkrun')) {
+              entry += `\n    distance_km: ${parseFloat(distance)}`;
+            } else if (distance && distance !== '_No response_' && type.includes('Parkrun') && parseFloat(distance) !== 5.0) {
+              entry += `\n    distance_km: ${parseFloat(distance)}`;
+            }
+            if (surface && surface !== '_No response_' && surface !== 'Normal road') {
+              entry += `\n    surface: ${surface.toUpperCase().replace(' ', '_')}`;
+            }
+            if (surfaceAdj && surfaceAdj !== '_No response_') {
+              entry += `\n    surface_adj: ${parseFloat(surfaceAdj)}`;
+            }
+            if (tempC && tempC !== '_No response_') {
+              entry += `\n    temp_c: ${parseFloat(tempC)}`;
+            }
+            if (notes && notes !== '_No response_') {
+              entry += `\n    notes: "${notes}"`;
+            }
+            
+            // Read current overrides file
+            const fs = require('fs');
+            let content = fs.readFileSync('activity_overrides.yml', 'utf8');
+            
+            // Replace empty array or append
+            if (content.includes('overrides: []')) {
+              content = content.replace('overrides: []', `overrides:\n${entry}`);
+            } else {
+              content = content.trimEnd() + `\n${entry}\n`;
+            }
+            
+            fs.writeFileSync('activity_overrides.yml', content);
+            
+            // Summary for the issue comment
+            core.exportVariable('OVERRIDE_ENTRY', entry);
+            core.exportVariable('OVERRIDE_FILE', file);
+      
+      - name: Commit override
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add activity_overrides.yml
+          git commit -m "Override: ${OVERRIDE_FILE}"
+          git push
+      
+      - name: Close issue with confirmation
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const entry = process.env.OVERRIDE_ENTRY || 'entry added';
+            await github.rest.issues.createComment({
+              ...context.repo,
+              issue_number: context.issue.number,
+              body: `✅ Override added and committed.\n\n\`\`\`yaml\n${entry}\n\`\`\`\n\nPipeline will run automatically.`
+            });
+            await github.rest.issues.update({
+              ...context.repo,
+              issue_number: context.issue.number,
+              state: 'closed'
+            });

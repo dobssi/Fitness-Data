@@ -1,0 +1,63 @@
+name: Activity Override
+description: Tag a run with race/surface/distance flags
+title: "Override: "
+labels: ["override"]
+body:
+  - type: input
+    id: file
+    attributes:
+      label: Activity date or filename
+      description: "Date (YYYY-MM-DD) or FIT filename"
+      placeholder: "2026-02-04"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: type
+    attributes:
+      label: Type
+      options:
+        - Normal run
+        - Race
+        - Parkrun
+    validations:
+      required: true
+
+  - type: input
+    id: distance
+    attributes:
+      label: Distance (km)
+      description: "Official distance. Leave blank for normal runs. Parkrun defaults to 5.0"
+      placeholder: "42.195"
+
+  - type: dropdown
+    id: surface
+    attributes:
+      label: Surface
+      options:
+        - Normal road
+        - Trail
+        - Track
+        - Indoor track
+        - Snow
+        - Heavy snow
+
+  - type: input
+    id: surface_adj
+    attributes:
+      label: Surface adjustment
+      description: "Multiplier 0.8-1.2 (leave blank for default)"
+      placeholder: "1.05"
+
+  - type: input
+    id: temp
+    attributes:
+      label: Temperature (°C)
+      description: "Override temperature (for indoor races etc)"
+      placeholder: "18"
+
+  - type: input
+    id: notes
+    attributes:
+      label: Notes
+      placeholder: "Stockholm Marathon, hot day"

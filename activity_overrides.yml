@@ -1,0 +1,29 @@
+# activity_overrides.yml
+# =====================
+# Override file for race flags, surface conditions, and distance corrections.
+# Edit this file to tag activities before running the pipeline.
+#
+# Supported fields:
+#   file:        FIT filename or date (required) — e.g. "2026-02-04_10-30-00.FIT" or "2026-02-04"
+#   race:        true/false — mark as race effort
+#   parkrun:     true/false — mark as parkrun (implies race=true, distance=5.0)
+#   distance_km: official distance in km (e.g. 42.195, 21.1, 10.0, 5.0)
+#   surface:     TRACK, INDOOR_TRACK, TRAIL, SNOW, HEAVY_SNOW
+#   surface_adj: multiplier for surface difficulty (e.g. 1.05 for soft trail)
+#   temp_c:      temperature override in °C (for indoor races)
+#   notes:       free text
+#
+# Examples:
+#   - file: "2026-02-01_10-30-00.FIT"
+#     race: true
+#     distance_km: 42.195
+#     notes: "Stockholm Marathon"
+#
+#   - file: "2026-01-25"
+#     parkrun: true
+#
+#   - file: "2026-01-20_15-00-00.FIT"
+#     surface: TRAIL
+#     surface_adj: 1.035
+
+overrides: []
