@@ -8,8 +8,13 @@ Usage:
   python ci/dropbox_sync.py upload --items file1.xlsx file2.csv
   python ci/dropbox_sync.py download --cache-dir persec_cache_FULL
 
-Environment variables:
-  DROPBOX_TOKEN — OAuth2 access token with files.content.write scope
+Authentication (refresh token — recommended, never expires):
+  DROPBOX_REFRESH_TOKEN — long-lived refresh token
+  DROPBOX_APP_KEY       — app key from Dropbox App Console
+  DROPBOX_APP_SECRET    — app secret from Dropbox App Console
+
+Authentication (legacy — expires after 4 hours):
+  DROPBOX_TOKEN — short-lived OAuth2 access token
   
 Dropbox folder layout:
   /Running and Cycling/DataPipeline/
@@ -38,6 +43,7 @@ except ImportError:
 DROPBOX_BASE = "/Running and Cycling/DataPipeline"
 UPLOAD_URL = "https://content.dropboxapi.com/2/files/upload"
 DOWNLOAD_URL = "https://content.dropboxapi.com/2/files/download"
+TOKEN_URL = "https://api.dropboxapi.com/oauth2/token"
 
 # Dropbox upload limit per request: 150 MB
 # For larger files, use upload_session — but most pipeline files are <50 MB
@@ -45,10 +51,40 @@ MAX_UPLOAD_SIZE = 150 * 1024 * 1024
 
 
 def get_token() -> str:
+    """Get a valid Dropbox access token.
+    
+    Prefers refresh token flow (never expires) over bare access token.
+    """
+    refresh_token = os.environ.get("DROPBOX_REFRESH_TOKEN", "")
+    app_key = os.environ.get("DROPBOX_APP_KEY", "")
+    app_secret = os.environ.get("DROPBOX_APP_SECRET", "")
+
+    if refresh_token and app_key and app_secret:
+        resp = requests.post(TOKEN_URL, data={
+            "grant_type": "refresh_token",
+            "refresh_token": refresh_token,
+            "client_id": app_key,
+            "client_secret": app_secret,
+        }, timeout=30)
+        if resp.status_code == 200:
+            token = resp.json().get("access_token", "")
+            if token:
+                print("  ✓ Obtained fresh access token via refresh token")
+                return token
+        print(f"  ✗ Refresh token exchange failed ({resp.status_code}): {resp.text[:200]}")
+        sys.exit("ERROR: Could not obtain access token from refresh token")
+
+    # Fallback: bare access token (expires after 4 hours)
     token = os.environ.get("DROPBOX_TOKEN", "")
-    if not token:
-        sys.exit("ERROR: DROPBOX_TOKEN environment variable not set")
-    return token
+    if token:
+        print("  ⚠ Using bare access token (may expire). Set DROPBOX_REFRESH_TOKEN for reliability.")
+        return token
+
+    sys.exit(
+        "ERROR: No Dropbox credentials found. Set either:\n"
+        "  - DROPBOX_REFRESH_TOKEN + DROPBOX_APP_KEY + DROPBOX_APP_SECRET (recommended)\n"
+        "  - DROPBOX_TOKEN (legacy, expires after 4 hours)"
+    )
 
 
 def dropbox_upload(local_path: str, remote_path: str, token: str):

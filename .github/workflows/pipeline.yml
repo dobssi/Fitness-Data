@@ -51,6 +51,9 @@ jobs:
       INTERVALS_API_KEY: ${{ secrets.INTERVALS_API_KEY }}
       INTERVALS_ATHLETE_ID: ${{ secrets.INTERVALS_ATHLETE_ID }}
       DROPBOX_TOKEN: ${{ secrets.DROPBOX_TOKEN }}
+      DROPBOX_REFRESH_TOKEN: ${{ secrets.DROPBOX_REFRESH_TOKEN }}
+      DROPBOX_APP_KEY: ${{ secrets.DROPBOX_APP_KEY }}
+      DROPBOX_APP_SECRET: ${{ secrets.DROPBOX_APP_SECRET }}
       PIPELINE_SIZE: FULL
     
     steps:
