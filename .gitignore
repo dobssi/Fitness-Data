@@ -3,6 +3,8 @@
 # =============================================================================
 TotalHistory.zip
 TotalHistory/
+SmallSample.zip
+SampleHistory.zip
 FIT_downloads/
 *.FIT
 *.fit
@@ -14,6 +16,8 @@ stryd_serial_map.json
 
 # Cache directories
 persec_cache_*/
+_weather_cache_openmeteo/
+*.sqlite
 
 # Sync state (per-machine)
 fit_sync_state.json
@@ -76,4 +80,3 @@ desktop.ini
 # =============================================================================
 archive/
 analysis/
-_weather_cache_openmeteo/ 
