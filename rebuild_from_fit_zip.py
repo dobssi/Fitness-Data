@@ -3196,16 +3196,20 @@ def main():
     df["_wx_start_utc"] = start_naive
     df["_wx_end_utc"] = end_naive
 
-    # Group indices by rounded location
-    loc_key = []
+    # Group indices by rounded location AND year.
+    # This avoids fetching 13 years of hourly data for a single location —
+    # each sub-group only needs ~1 API call (≤366 days) instead of ~13.
+    loc_year_key = []
     for i, r in df.iterrows():
         lat = pd.to_numeric(r.get("gps_lat_med"), errors="coerce")
         lon = pd.to_numeric(r.get("gps_lon_med"), errors="coerce")
-        if not (np.isfinite(lat) and np.isfinite(lon)):
-            loc_key.append(None)
+        st = df.at[i, "_wx_start_utc"] if "_wx_start_utc" in df.columns else None
+        if not (np.isfinite(lat) and np.isfinite(lon)) or st is None:
+            loc_year_key.append(None)
         else:
-            loc_key.append((float(np.round(lat, WX_GPS_ROUND_DP)), float(np.round(lon, WX_GPS_ROUND_DP))))
-    df["_wx_loc"] = loc_key
+            yr = pd.Timestamp(st).year
+            loc_year_key.append((float(np.round(lat, WX_GPS_ROUND_DP)), float(np.round(lon, WX_GPS_ROUND_DP)), yr))
+    df["_wx_loc"] = loc_year_key
 
     groups = {}
     for i, k in enumerate(df["_wx_loc"].tolist()):
@@ -3216,9 +3220,9 @@ def main():
     total_groups = len(groups)
     done_groups = 0
 
-    for (lat_r, lon_r), idxs in groups.items():
+    for (lat_r, lon_r, year), idxs in groups.items():
         done_groups += 1
-        # date window for this location group (pad 1 day)
+        # date window for this location+year group (pad 1 day)
         starts = [df.at[i, "_wx_start_utc"] for i in idxs if df.at[i, "_wx_start_utc"] is not None]
         ends = [df.at[i, "_wx_end_utc"] for i in idxs if df.at[i, "_wx_end_utc"] is not None]
         if not starts or not ends:
