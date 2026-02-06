@@ -242,9 +242,14 @@ def _summary_cache_path(persec_cache_dir: str, safe_name: str) -> str:
 
 
 def _load_summary_cache(persec_cache_dir: str, safe_name: str, fit_path: str) -> dict | None:
-    """Load cached summary dict if it exists and FIT hasn't changed.
+    """Load cached summary dict if it exists and is valid.
     
     Returns the summary dict on cache hit, None on miss.
+    
+    Note: We do NOT compare FIT mtime vs cache mtime because zip extraction
+    resets FIT timestamps to the current time, which would invalidate the cache
+    on every FULLPIPE.  The version stamp (_SUMMARY_CACHE_VER) handles
+    invalidation when the parsing logic changes.
     """
     global SUMMARY_CACHE_HITS, SUMMARY_CACHE_MISSES
     if CACHE_FORCE:
@@ -252,15 +257,6 @@ def _load_summary_cache(persec_cache_dir: str, safe_name: str, fit_path: str) ->
     
     summary_path = _summary_cache_path(persec_cache_dir, safe_name)
     if not os.path.exists(summary_path):
-        return None
-    
-    # Check if FIT is newer than summary cache
-    try:
-        fit_mtime = os.path.getmtime(fit_path)
-        cache_mtime = os.path.getmtime(summary_path)
-        if fit_mtime > cache_mtime + 1.0:
-            return None
-    except Exception:
         return None
     
     try:
