@@ -81,7 +81,7 @@ on:
 # Prevent concurrent runs (latest wins)
 concurrency:
   group: pipeline
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   pipeline:
