@@ -150,6 +150,11 @@ def _apply_override(args, file_id: str):
         df = pd.concat([df, pd.DataFrame([new_row])], ignore_index=True)
 
     df.to_excel(xlsx_path, index=False, engine="openpyxl")
+    # Set 'file' column width
+    from openpyxl import load_workbook
+    wb = load_workbook(xlsx_path)
+    wb.active.column_dimensions['A'].width = 25
+    wb.save(xlsx_path)
     summary_parts = []
     if args.race:
         summary_parts.append("race")

@@ -29,46 +29,46 @@ on:
           - DASHBOARD
           - CACHE
         default: UPDATE
-      sync:
-        description: 'Sync from intervals.icu first'
-        type: boolean
-        default: true
       run_name:
-        description: 'Activity name (e.g. Haga parkrun)'
+        description: 'Run name (e.g. Haga parkrun)'
         type: string
         default: ''
-      race:
-        description: 'Race? (true/false)'
-        type: boolean
-        default: false
-      parkrun:
-        description: 'Parkrun? (true/false)'
-        type: boolean
-        default: false
       distance_km:
-        description: 'Official distance km (e.g. 5.0, 21.097)'
-        type: string
-        default: ''
-      surface_adj:
-        description: 'Surface adjustment (e.g. 0.97 for trail)'
-        type: string
-        default: ''
-      surface:
-        description: 'Surface: TRAIL, TRACK, SNOW, etc.'
-        type: string
-        default: ''
-      run_date:
-        description: 'Run date YYYY-MM-DD (default: today)'
+        description: 'Distance km (e.g. 5, 10, 21.097)'
         type: string
         default: ''
       run_number:
-        description: 'Which run today? (1=first, 2=second, blank=only)'
+        description: 'Which run today? (1, 2, 3... blank=only)'
         type: string
         default: ''
       notes:
         description: 'Notes'
         type: string
         default: ''
+      surface:
+        description: 'Surface: TRAIL, TRACK, SNOW, HEAVY_SNOW'
+        type: string
+        default: ''
+      surface_adj:
+        description: 'Surface adj (e.g. 0.97 trail, 1.05 snow)'
+        type: string
+        default: ''
+      run_date:
+        description: 'Run date YYYY-MM-DD (default: today)'
+        type: string
+        default: ''
+      race:
+        description: 'Race?'
+        type: boolean
+        default: false
+      parkrun:
+        description: 'Parkrun?'
+        type: boolean
+        default: false
+      sync:
+        description: 'Sync from intervals.icu'
+        type: boolean
+        default: true
   
   push:
     paths:
