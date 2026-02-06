@@ -115,6 +115,7 @@ Usage:
 import argparse
 import datetime as dt
 import random
+import sys
 import time
 import os
 import re
@@ -3958,4 +3959,4 @@ def main():
     print(f"Wrote: {args.out}")
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())
