@@ -61,6 +61,10 @@ on:
         description: 'Run date YYYY-MM-DD (default: today)'
         type: string
         default: ''
+      run_number:
+        description: 'Which run today? (1=first, 2=second, blank=only)'
+        type: string
+        default: ''
       notes:
         description: 'Notes'
         type: string
@@ -179,6 +183,9 @@ jobs:
           fi
           if [ -n "${{ github.event.inputs.run_date }}" ]; then
             ARGS="$ARGS --date ${{ github.event.inputs.run_date }}"
+          fi
+          if [ -n "${{ github.event.inputs.run_number }}" ]; then
+            ARGS="$ARGS --run-number ${{ github.event.inputs.run_number }}"
           fi
           if [ -n "${{ github.event.inputs.notes }}" ]; then
             ARGS="$ARGS --notes \"${{ github.event.inputs.notes }}\""
