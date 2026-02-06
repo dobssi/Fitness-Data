@@ -191,6 +191,21 @@ jobs:
             ARGS="$ARGS --notes \"${{ github.event.inputs.notes }}\""
           fi
           eval python ci/apply_run_metadata.py $ARGS
+
+      # Upload overrides immediately so queued runs see changes
+      - name: Save metadata to Dropbox
+        if: >-
+          ${{ github.event.inputs.run_name != '' ||
+              github.event.inputs.race == 'true' ||
+              github.event.inputs.parkrun == 'true' ||
+              github.event.inputs.distance_km != '' ||
+              github.event.inputs.surface_adj != '' ||
+              github.event.inputs.surface != '' ||
+              github.event.inputs.notes != '' }}
+        run: |
+          python ci/dropbox_sync.py upload \
+            --items activity_overrides.xlsx
+        continue-on-error: true
       
       # ─── Run pipeline ──────────────────────────────────────
       - name: Run pipeline
