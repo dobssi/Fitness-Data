@@ -33,6 +33,38 @@ on:
         description: 'Sync from intervals.icu first'
         type: boolean
         default: true
+      run_name:
+        description: 'Activity name (e.g. Haga parkrun)'
+        type: string
+        default: ''
+      race:
+        description: 'Race? (true/false)'
+        type: boolean
+        default: false
+      parkrun:
+        description: 'Parkrun? (true/false)'
+        type: boolean
+        default: false
+      distance_km:
+        description: 'Official distance km (e.g. 5.0, 21.097)'
+        type: string
+        default: ''
+      surface_adj:
+        description: 'Surface adjustment (e.g. 0.97 for trail)'
+        type: string
+        default: ''
+      surface:
+        description: 'Surface: TRAIL, TRACK, SNOW, etc.'
+        type: string
+        default: ''
+      run_date:
+        description: 'Run date YYYY-MM-DD (default: today)'
+        type: string
+        default: ''
+      notes:
+        description: 'Notes'
+        type: string
+        default: ''
   
   push:
     paths:
@@ -115,6 +147,44 @@ jobs:
           python sync_athlete_data.py \
             --athlete-data athlete_data.csv
       
+      # ─── Apply run metadata from dispatch inputs ────────────
+      - name: Apply run metadata
+        if: >-
+          ${{ github.event.inputs.run_name != '' ||
+              github.event.inputs.race == 'true' ||
+              github.event.inputs.parkrun == 'true' ||
+              github.event.inputs.distance_km != '' ||
+              github.event.inputs.surface_adj != '' ||
+              github.event.inputs.surface != '' ||
+              github.event.inputs.notes != '' }}
+        run: |
+          ARGS=""
+          if [ -n "${{ github.event.inputs.run_name }}" ]; then
+            ARGS="$ARGS --run-name \"${{ github.event.inputs.run_name }}\""
+          fi
+          if [ "${{ github.event.inputs.race }}" = "true" ]; then
+            ARGS="$ARGS --race"
+          fi
+          if [ "${{ github.event.inputs.parkrun }}" = "true" ]; then
+            ARGS="$ARGS --parkrun"
+          fi
+          if [ -n "${{ github.event.inputs.distance_km }}" ]; then
+            ARGS="$ARGS --distance ${{ github.event.inputs.distance_km }}"
+          fi
+          if [ -n "${{ github.event.inputs.surface_adj }}" ]; then
+            ARGS="$ARGS --surface-adj ${{ github.event.inputs.surface_adj }}"
+          fi
+          if [ -n "${{ github.event.inputs.surface }}" ]; then
+            ARGS="$ARGS --surface ${{ github.event.inputs.surface }}"
+          fi
+          if [ -n "${{ github.event.inputs.run_date }}" ]; then
+            ARGS="$ARGS --date ${{ github.event.inputs.run_date }}"
+          fi
+          if [ -n "${{ github.event.inputs.notes }}" ]; then
+            ARGS="$ARGS --notes \"${{ github.event.inputs.notes }}\""
+          fi
+          eval python ci/apply_run_metadata.py $ARGS
+      
       # ─── Run pipeline ──────────────────────────────────────
       - name: Run pipeline
         run: |
@@ -139,6 +209,7 @@ jobs:
                     athlete_data.csv \
                     re_model_s4_FULL.json \
                     sync_state.json \
+                    activity_overrides.xlsx \
                     index.html \
                     _weather_cache_openmeteo/openmeteo_cache.sqlite
       

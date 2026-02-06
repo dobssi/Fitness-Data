@@ -2810,11 +2810,63 @@ def match_strava(master: pd.DataFrame, act: pd.DataFrame, tz_local: str, pending
     # v41: For unmatched rows, check pending_activities before falling back to generic names
     if pending is not None and len(pending) > 0:
         pending_used = 0
+        # v50: Build date-based lookup for pending entries like "2026-02-10" or "2026-02-10 #2"
+        import re as _re
+        _date_pat = _re.compile(r'^(\d{4}-\d{2}-\d{2})\s*(?:#(\d+))?$')
+        pending_by_date = {}  # date_str -> [(seq_or_None, row), ...]
+        pending_by_file = {}  # filename -> row
+        for pkey in pending.index:
+            m = _date_pat.match(str(pkey).strip())
+            if m:
+                d = m.group(1)
+                seq = int(m.group(2)) if m.group(2) else None
+                if d not in pending_by_date:
+                    pending_by_date[d] = []
+                pending_by_date[d].append((seq, pending.loc[pkey]))
+            else:
+                pending_by_file[str(pkey)] = pending.loc[pkey]
+
+        # Build per-day run lists for seq resolution
+        day_runs = {}  # date_str -> [fit_file, ...]  (sorted chronologically)
+        if pending_by_date:
+            for idx2, row2 in out.iterrows():
+                d2 = pd.Timestamp(row2.get("date"))
+                if pd.isna(d2):
+                    continue
+                ds = d2.strftime("%Y-%m-%d")
+                if ds not in day_runs:
+                    day_runs[ds] = []
+                day_runs[ds].append((d2, row2.get("file", "")))
+            for ds in day_runs:
+                day_runs[ds].sort(key=lambda x: x[0])
+
         for idx, row in out.iterrows():
             if pd.isna(row.get("activity_name")) or row.get("activity_name") == "":
                 fit_file = row.get("file", "")
-                if fit_file in pending.index:
-                    pend_row = pending.loc[fit_file]
+                pend_row = None
+
+                # Try exact filename match first
+                if fit_file in pending_by_file:
+                    pend_row = pending_by_file[fit_file]
+                else:
+                    # Try date-based match
+                    d = pd.Timestamp(row.get("date"))
+                    if not pd.isna(d):
+                        ds = d.strftime("%Y-%m-%d")
+                        if ds in pending_by_date:
+                            for seq, prow in pending_by_date[ds]:
+                                if seq is None:
+                                    # Matches all runs that day
+                                    pend_row = prow
+                                    break
+                                else:
+                                    # Match Nth run
+                                    runs = day_runs.get(ds, [])
+                                    if 0 < seq <= len(runs) and runs[seq - 1][1] == fit_file:
+                                        pend_row = prow
+                                        break
+
+                if pend_row is not None:
                     # v49: Handle duplicate index entries (loc returns DataFrame instead of Series)
                     if isinstance(pend_row, pd.DataFrame):
                         pend_row = pend_row.iloc[0]
