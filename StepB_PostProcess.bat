@@ -33,7 +33,7 @@ if not defined VALID (
 )
 
 REM ---- File paths ----
-set "PIPELINE_VER=49"
+set "PIPELINE_VER=50"
 set "CACHE_DIR=persec_cache_%SIZE%"
 set "MODEL_JSON=re_model_s4_%SIZE%.json"
 set "OVERRIDE_FILE=activity_overrides.xlsx"

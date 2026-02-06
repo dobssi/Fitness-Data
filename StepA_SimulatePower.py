@@ -1,6 +1,9 @@
-# File: StepA_SimulatePower_v49.py
+# File: StepA_SimulatePower_v50.py
 # Purpose: Step A - Simulate pre-Stryd power (S4-tuned) using RE model
-# Date: 2026-01-27
+# Date: 2026-02-06
+#
+# v50 changes:
+#   - Fast cache index via build_cache_index_fast() (~30s -> <1s startup)
 #
 # v45 changes:
 #   - Version bump (see v45_handover.md for details)
@@ -79,6 +82,14 @@ def _hash_file(path: str) -> str:
 # ----------------------------
 
 def _build_cache_index(cache_dir: str) -> Tuple[List[int], List[str]]:
+    """Build sorted (keys, paths) for bisect cache lookup.
+    v50: Uses _cache_index.json for fast startup instead of opening all .npz files."""
+    try:
+        from rebuild_from_fit_zip import build_cache_index_fast
+        return build_cache_index_fast(cache_dir)
+    except ImportError:
+        pass
+    # Fallback: scan .npz files directly
     items: List[Tuple[int, str]] = []
     for fn in os.listdir(cache_dir):
         if not fn.lower().endswith(".npz"):
@@ -367,7 +378,7 @@ def _rf_metrics(t: np.ndarray, v: np.ndarray, p: np.ndarray, hr: np.ndarray, *, 
 
 
 def parse_args() -> argparse.Namespace:
-    p = argparse.ArgumentParser(description="Step A (v49): simulate per-second power for pre-Stryd runs (S4 scale) and fill canonical columns.")
+    p = argparse.ArgumentParser(description="Step A (v50): simulate per-second power for pre-Stryd runs (S4 scale) and fill canonical columns.")
     p.add_argument("--master", required=True)
     p.add_argument("--persec-cache-dir", required=True)
     p.add_argument("--model-json", required=True)

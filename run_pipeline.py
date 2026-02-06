@@ -1,14 +1,24 @@
 """
-run_pipeline.py — Cross-platform pipeline orchestrator
-=======================================================
+run_pipeline.py — Cross-platform pipeline orchestrator v50
+============================================================
 Replaces Run_Full_Pipeline.bat for both local and CI/CD execution.
 
+Modes:
+  FULLPIPE    — Full rebuild from FITs → Steps 1-4 → dashboard
+  UPDATE      — Append new FITs → Steps 2-4 (auto-skips if nothing new)
+  FROM_MODEL  — Skip Step 1, run Steps 2-4 (changed RE model logic)
+  FROM_SIM    — Skip Steps 1-2, run Steps 3-4 (changed sim power logic)
+  FROM_STEPB  — Skip Steps 1-3, run Step 4 only (changed StepB logic)
+  DASHBOARD   — Dashboard generation only (no pipeline steps)
+  CACHE       — Cache update only (no pipeline steps)
+
 Usage:
-  python run_pipeline.py                  # Full pipeline (default)
-  python run_pipeline.py UPDATE           # Incremental update
-  python run_pipeline.py CACHE            # Cache update only
-  python run_pipeline.py --sync           # Sync from intervals.icu first
-  python run_pipeline.py --size FULL      # Dataset size (SMALL/MEDIUM/FULL)
+  python run_pipeline.py                    # Full pipeline (default)
+  python run_pipeline.py UPDATE             # Incremental update
+  python run_pipeline.py FROM_STEPB         # Re-run StepB only
+  python run_pipeline.py FROM_MODEL --sync  # Re-run from model fit
+  python run_pipeline.py DASHBOARD          # Regenerate dashboard only
+  python run_pipeline.py --size FULL        # Dataset size (SMALL/MEDIUM/FULL)
 
 For GitHub Actions:
   python run_pipeline.py UPDATE --sync --ci
@@ -28,7 +38,7 @@ from datetime import datetime
 # =============================================================================
 # CONFIGURATION
 # =============================================================================
-PIPELINE_VER = 49
+PIPELINE_VER = 50
 PY = sys.executable  # Use the same Python that's running this script
 
 # File naming templates
@@ -123,9 +133,11 @@ def run_sync(args):
 
 
 def main():
+    ALL_ACTIONS = ["FULLPIPE", "UPDATE", "FROM_MODEL", "FROM_SIM", "FROM_STEPB",
+                   "DASHBOARD", "CACHE"]
     parser = argparse.ArgumentParser(description=f"Pipeline v{PIPELINE_VER} orchestrator")
     parser.add_argument("action", nargs="?", default="FULLPIPE",
-                        choices=["FULLPIPE", "UPDATE", "CACHE"],
+                        choices=ALL_ACTIONS,
                         help="Pipeline action (default: FULLPIPE)")
     parser.add_argument("--size", default="FULL",
                         choices=["SMALL", "MEDIUM", "FULL"],
@@ -169,6 +181,22 @@ def main():
         run_sync(args)
     
     # =================================================================
+    # Determine which steps to run based on action
+    # =================================================================
+    #   FULLPIPE   → Steps 1, 2, 3, 4, dashboard
+    #   UPDATE     → Step 1 (append) → 2, 3, 4 if new runs; skip if not
+    #   FROM_MODEL → Steps 2, 3, 4, dashboard
+    #   FROM_SIM   → Steps 3, 4, dashboard
+    #   FROM_STEPB → Step 4, dashboard
+    #   DASHBOARD  → dashboard only
+    #   CACHE      → cache update only
+    
+    run_step1 = action in ("FULLPIPE", "UPDATE")
+    run_step2 = action in ("FULLPIPE", "UPDATE", "FROM_MODEL")
+    run_step3 = action in ("FULLPIPE", "UPDATE", "FROM_MODEL", "FROM_SIM")
+    run_step4 = action in ("FULLPIPE", "UPDATE", "FROM_MODEL", "FROM_SIM", "FROM_STEPB")
+    
+    # =================================================================
     # CACHE MODE
     # =================================================================
     if action == "CACHE":
@@ -184,92 +212,145 @@ def main():
         return rc
     
     # =================================================================
-    # STEP 1: Rebuild master
+    # DASHBOARD-ONLY MODE
     # =================================================================
-    rebuild_cmd = [
-        PY, "-u", REBUILD_SCRIPT,
-        "--fit-zip", fit_zip,
-        "--template", TEMPLATE,
-        "--strava", STRAVA_CSV,
-        "--tz", TZ,
-        "--persec-cache-dir", cache_dir,
-        "--out", out_master,
-    ]
-    
-    if action == "UPDATE" and os.path.exists(out_master):
-        rebuild_cmd.extend(["--append-master-in", out_master])
-        rc = run(rebuild_cmd, "(1/4) UPDATE master (append new runs)")
-    else:
-        if action == "UPDATE":
-            print(f"  [WARN] Base master not found ({out_master}) — falling back to full rebuild")
-        rc = run(rebuild_cmd, "(1/4) Rebuild master")
-    
-    if rc != 0:
+    if action == "DASHBOARD":
+        if not os.path.exists(DASHBOARD_SCRIPT):
+            print("[FAIL] Dashboard script not found")
+            return 1
+        rc = run([PY, "-u", DASHBOARD_SCRIPT],
+                 "Generate mobile dashboard", critical=True)
+        if rc == 0 and not args.skip_push and os.path.exists(PUSH_SCRIPT):
+            run([PY, "-u", PUSH_SCRIPT],
+                "Push dashboard to GitHub Pages", critical=False)
         return rc
     
-    # Verify cache
-    npz_count = count_npz(cache_dir)
-    print(f"  Cache .npz files: {npz_count}")
-    if npz_count < 10:
-        print(f"\n[FAIL] ERROR: Cache has too few .npz files ({npz_count})")
-        return 1
+    # =================================================================
+    # Validate prerequisites for FROM_* modes
+    # =================================================================
+    if action in ("FROM_MODEL", "FROM_SIM", "FROM_STEPB"):
+        # Check that required input files exist
+        if action == "FROM_STEPB" and not os.path.exists(out_sim):
+            print(f"  [FAIL] FROM_STEPB requires {out_sim} — run FROM_SIM or FULLPIPE first")
+            return 1
+        if action == "FROM_SIM" and not os.path.exists(out_master):
+            print(f"  [FAIL] FROM_SIM requires {out_master} — run FULLPIPE or UPDATE first")
+            return 1
+        if action == "FROM_SIM" and not os.path.exists(model_json):
+            print(f"  [FAIL] FROM_SIM requires {model_json} — run FROM_MODEL or FULLPIPE first")
+            return 1
+        if action == "FROM_MODEL" and not os.path.exists(out_master):
+            print(f"  [FAIL] FROM_MODEL requires {out_master} — run FULLPIPE or UPDATE first")
+            return 1
+    
+    # =================================================================
+    # STEP 1: Rebuild master
+    # =================================================================
+    no_new_runs = False
+    
+    if run_step1:
+        rebuild_cmd = [
+            PY, "-u", REBUILD_SCRIPT,
+            "--fit-zip", fit_zip,
+            "--template", TEMPLATE,
+            "--strava", STRAVA_CSV,
+            "--tz", TZ,
+            "--persec-cache-dir", cache_dir,
+            "--out", out_master,
+        ]
+        
+        if action == "UPDATE" and os.path.exists(out_master):
+            rebuild_cmd.extend(["--append-master-in", out_master])
+            rc = run(rebuild_cmd, "(1/4) UPDATE master (append new runs)")
+        else:
+            if action == "UPDATE":
+                print(f"  [WARN] Base master not found ({out_master}) — falling back to full rebuild")
+            rc = run(rebuild_cmd, "(1/4) Rebuild master")
+        
+        # Exit code 2 = success but no new runs (quick mode)
+        if rc == 2 and action == "UPDATE":
+            no_new_runs = True
+            run_step2 = run_step3 = run_step4 = False
+            print(f"\n  [OK] No new runs detected — skipping Steps 2-4")
+            rc = 0
+        
+        if rc != 0:
+            return rc
+        
+        # Verify cache
+        npz_count = count_npz(cache_dir)
+        print(f"  Cache .npz files: {npz_count}")
+        if npz_count < 10 and not no_new_runs:
+            print(f"\n[FAIL] ERROR: Cache has too few .npz files ({npz_count})")
+            return 1
+    else:
+        first_step = action.replace("FROM_", "")
+        print(f"\n  [SKIP] Step 1 (rebuild) — starting from {first_step}")
     
     # =================================================================
     # STEP 2: Fit RE model
     # =================================================================
-    rc = run(
-        [PY, "-u", MODEL_SCRIPT,
-         "--master", out_master,
-         "--persec-cache-dir", cache_dir,
-         "--out-model", model_json],
-        "(2/4) Step A: Fit RE model (S4 scale)"
-    )
-    
-    if rc != 0:
-        # Try to reuse existing model
-        if os.path.exists(model_json):
-            print(f"  [WARN] Reusing existing model: {model_json}")
-        else:
-            print(f"  [FAIL] No model available — cannot continue")
-            return 1
+    if run_step2:
+        rc = run(
+            [PY, "-u", MODEL_SCRIPT,
+             "--master", out_master,
+             "--persec-cache-dir", cache_dir,
+             "--out-model", model_json],
+            "(2/4) Step A: Fit RE model (S4 scale)"
+        )
+        
+        if rc != 0:
+            if os.path.exists(model_json):
+                print(f"  [WARN] Reusing existing model: {model_json}")
+            else:
+                print(f"  [FAIL] No model available — cannot continue")
+                return 1
+    else:
+        if run_step3 or run_step4:
+            print(f"  [SKIP] Step 2 (RE model) — using existing {model_json}")
     
     # =================================================================
     # STEP 3: Simulate power (pre-Stryd)
     # =================================================================
-    rc = run(
-        [PY, "-u", SIM_SCRIPT,
-         "--master", out_master,
-         "--persec-cache-dir", cache_dir,
-         "--model-json", model_json,
-         "--override-file", OVERRIDE_FILE,
-         "--out", out_sim],
-        "(3/4) Step A: Simulate power (pre-Stryd eras)"
-    )
-    if rc != 0:
-        return rc
+    if run_step3:
+        rc = run(
+            [PY, "-u", SIM_SCRIPT,
+             "--master", out_master,
+             "--persec-cache-dir", cache_dir,
+             "--model-json", model_json,
+             "--override-file", OVERRIDE_FILE,
+             "--out", out_sim],
+            "(3/4) Step A: Simulate power (pre-Stryd eras)"
+        )
+        if rc != 0:
+            return rc
+    else:
+        if run_step4:
+            print(f"  [SKIP] Step 3 (sim power) — using existing {out_sim}")
     
     # =================================================================
     # STEP 4: StepB post-processing
     # =================================================================
-    rc = run(
-        [PY, "-u", STEPB_SCRIPT,
-         "--master", out_sim,
-         "--persec-cache-dir", cache_dir,
-         "--model-json", model_json,
-         "--override-file", OVERRIDE_FILE,
-         "--athlete-data", ATHLETE_DATA,
-         "--strava", STRAVA_CSV,
-         "--out", out_final,
-         "--mass-kg", str(MASS_KG),
-         "--tz", TZ,
-         "--progress-every", "50",
-         "--runner-dob", DOB,
-         "--runner-gender", GENDER,
-         "--incremental"],
-        "(4/4) Step B: Post-processing"
-    )
-    if rc != 0:
-        return rc
+    if run_step4:
+        rc = run(
+            [PY, "-u", STEPB_SCRIPT,
+             "--master", out_sim,
+             "--persec-cache-dir", cache_dir,
+             "--model-json", model_json,
+             "--override-file", OVERRIDE_FILE,
+             "--athlete-data", ATHLETE_DATA,
+             "--strava", STRAVA_CSV,
+             "--out", out_final,
+             "--mass-kg", str(MASS_KG),
+             "--tz", TZ,
+             "--progress-every", "50",
+             "--runner-dob", DOB,
+             "--runner-gender", GENDER,
+             "--incremental"],
+            "(4/4) Step B: Post-processing"
+        )
+        if rc != 0:
+            return rc
     
     # =================================================================
     # Dashboard
@@ -287,8 +368,17 @@ def main():
     # =================================================================
     # Summary
     # =================================================================
+    npz_count = count_npz(cache_dir)
+    steps_run = []
+    if run_step1: steps_run.append("1:Rebuild")
+    if run_step2: steps_run.append("2:Model")
+    if run_step3: steps_run.append("3:SimPower")
+    if run_step4: steps_run.append("4:StepB")
+    steps_desc = ", ".join(steps_run) if steps_run else "none (dashboard only)"
+    
     print(f"\n{'=' * 60}")
     print(f"  [OK] Pipeline v{PIPELINE_VER} completed successfully!")
+    print(f"  Action: {action}  Steps: {steps_desc}")
     print(f"{'=' * 60}")
     print(f"  Master:     {out_master}")
     print(f"  Simulated:  {out_sim}")

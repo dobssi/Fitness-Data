@@ -22,6 +22,10 @@ on:
         options:
           - UPDATE
           - FULLPIPE
+          - FROM_MODEL
+          - FROM_SIM
+          - FROM_STEPB
+          - DASHBOARD
           - CACHE
         default: UPDATE
       sync:
@@ -94,7 +98,8 @@ jobs:
                     Master_Rebuilt.xlsx \
                     re_model_s4_FULL.json \
                     sync_state.json \
-                    TotalHistory.zip
+                    TotalHistory.zip \
+                    _weather_cache_openmeteo/openmeteo_cache.sqlite
         continue-on-error: true
       
       # ─── Sync from intervals.icu ────────────────────────────
@@ -133,7 +138,8 @@ jobs:
                     athlete_data.csv \
                     re_model_s4_FULL.json \
                     sync_state.json \
-                    index.html
+                    index.html \
+                    _weather_cache_openmeteo/openmeteo_cache.sqlite
       
       # ─── Deploy dashboard to GitHub Pages ──────────────────
       - name: Prepare dashboard for Pages

@@ -2,7 +2,7 @@
 setlocal EnableExtensions EnableDelayedExpansion
 cd /d "%~dp0"
 
-REM File: Run_Full_Pipeline_v49.bat
+REM File: Run_Full_Pipeline_v50.bat
 REM Changelist v48:
 REM   - Fixed DOB in config.py (was 05-07, corrected to 05-27)
 REM   - Consolidated weather_overrides.csv into activity_overrides.xlsx
@@ -93,7 +93,7 @@ set "OVERRIDE_FILE=activity_overrides.xlsx"
 set "ATHLETE_DATA=athlete_data.csv"
 
 REM ---- Outputs / working dirs (v47) ----
-set "PIPELINE_VER=49"
+set "PIPELINE_VER=50"
 set "CACHE_DIR=persec_cache_%SIZE%"
 set "MODEL_JSON=re_model_s4_%SIZE%.json"
 set "OUT_MASTER=Master_%SIZE%_GPSQ_ID.xlsx"
@@ -216,7 +216,7 @@ echo Sim:    %OUT_SIM%
 echo Final:  %OUT_FINAL%
 echo Cache:  %CACHE_DIR%
 echo.
-echo v49 changes:
+echo v50 changes:
 echo   - Fixed DOB in config.py (was 05-07, corrected to 05-27)
 echo   - Consolidated weather_overrides.csv into activity_overrides.xlsx
 echo   - Removed dead --weather-overrides arg from StepB

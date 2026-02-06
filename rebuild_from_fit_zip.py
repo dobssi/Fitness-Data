@@ -1,6 +1,13 @@
-# File: rebuild_from_fit_zip_v49.py
+# File: rebuild_from_fit_zip_v50.py
 # Purpose: Rebuild master log from FIT ZIP (+ optional per-second cache).
-# Date: 2026-02-05
+# Date: 2026-02-06
+#
+# Changelist v50 (2026-02-06):
+# - Cache index file: writes _cache_index.json alongside .npz files for fast lookup
+#   (avoids opening 3000+ .npz files to read timestamps on every step)
+# - Dead code removal: unreachable code after return in compute_weather_averages()
+# - Timestamp.utcnow() deprecation fix
+# - PIPELINE_VER bumped to 50
 #
 # Changelist v49 (2026-02-05):
 # - Reduced shrinkage on power_adjuster_to_S4 regression:
@@ -217,6 +224,77 @@ def _should_write_cache(cache_path: str, fit_path: str) -> bool:
         return False
     except Exception:
         return True
+
+# --- v50: Cache index file for fast lookup ---
+# Instead of opening 3000+ .npz files to read timestamps, we maintain a JSON index.
+import json as _json
+
+CACHE_INDEX_FILE = "_cache_index.json"
+
+def _load_cache_index(cache_dir: str) -> dict:
+    """Load cache index from JSON file. Returns {filename_stem: epoch_s}."""
+    idx_path = os.path.join(cache_dir, CACHE_INDEX_FILE)
+    if os.path.exists(idx_path):
+        try:
+            with open(idx_path, "r") as f:
+                return _json.load(f)
+        except Exception:
+            pass
+    return {}
+
+def _save_cache_index(cache_dir: str, index: dict) -> None:
+    """Save cache index to JSON file."""
+    idx_path = os.path.join(cache_dir, CACHE_INDEX_FILE)
+    try:
+        with open(idx_path, "w") as f:
+            _json.dump(index, f)
+    except Exception as e:
+        print(f"  Warning: could not write cache index: {e}")
+
+def _update_cache_index_entry(cache_dir: str, npz_filename: str, epoch_s: float) -> None:
+    """Add/update a single entry in the cache index."""
+    stem = npz_filename[:-4] if npz_filename.endswith(".npz") else npz_filename
+    idx = _load_cache_index(cache_dir)
+    idx[stem] = int(round(epoch_s))
+    _save_cache_index(cache_dir, idx)
+
+def rebuild_cache_index(cache_dir: str) -> dict:
+    """Rebuild cache index from scratch by scanning all .npz files.
+    Called once if index file is missing or stale. Returns the index dict."""
+    import numpy as _np
+    index = {}
+    npz_files = [f for f in os.listdir(cache_dir) if f.lower().endswith(".npz")]
+    print(f"  Rebuilding cache index from {len(npz_files)} .npz files...")
+    for fn in npz_files:
+        fp = os.path.join(cache_dir, fn)
+        try:
+            z = _np.load(fp, allow_pickle=True)
+            ts = z.get("ts", None)
+            if ts is not None:
+                ts0 = float(_np.asarray(ts).reshape(-1)[0])
+                index[fn[:-4]] = int(round(ts0))
+        except Exception:
+            continue
+    _save_cache_index(cache_dir, index)
+    print(f"  Cache index rebuilt: {len(index)} entries")
+    return index
+
+def build_cache_index_fast(cache_dir: str) -> tuple:
+    """Build sorted (keys, paths) for bisect lookup using cache index file.
+    Falls back to full .npz scan if index is missing or empty."""
+    index = _load_cache_index(cache_dir)
+    
+    # Validate: check if index has entries and roughly matches .npz count
+    npz_count = sum(1 for f in os.listdir(cache_dir) if f.lower().endswith(".npz")) if os.path.isdir(cache_dir) else 0
+    
+    if not index or abs(len(index) - npz_count) > max(5, npz_count * 0.05):
+        # Index missing, empty, or significantly stale — rebuild
+        index = rebuild_cache_index(cache_dir)
+    
+    # Convert to sorted parallel lists for bisect lookup
+    items = [(epoch, os.path.join(cache_dir, stem + ".npz")) for stem, epoch in index.items()]
+    items.sort(key=lambda x: x[0])
+    return [k for k, _ in items], [p for _, p in items]
 
 def _safe_nanmean(x):
     """Safe nanmean: returns float mean ignoring NaNs, or np.nan if empty/all-NaN."""
@@ -768,63 +846,6 @@ def compute_weather_averages(lat: float, lon: float, start_utc: pd.Timestamp, en
 
     return wx
 
-    # Pad dates to ensure boundary hours are included
-    date_min = (start_utc.normalize() - pd.Timedelta(days=1)).date().isoformat()
-    date_max = (end_utc.normalize() + pd.Timedelta(days=1)).date().isoformat()
-
-    # Round coordinates a bit to improve cache hits without materially changing weather
-    lat_r = float(np.round(lat, WX_GPS_ROUND_DP))
-    lon_r = float(np.round(lon, WX_GPS_ROUND_DP))
-
-    data = fetch_open_meteo_hourly(lat_r, lon_r, date_min, date_max, cache_dir)
-    hourly = data.get("hourly") or {}
-    times = hourly.get("time") or []
-    if not times:
-        return {c: np.nan for c in WEATHER_COLS}
-
-    tt = pd.to_datetime(times, utc=True).tz_localize(None)  # force UTC then drop tz -> UTC-naive
-    # Ensure pandas Timestamps (naive UTC). Keep start/end as Timestamps (naive ok if consistent)
-    tt = tt.to_numpy()
-
-    T = np.asarray(hourly.get("temperature_2m") or [], float)
-    RH = np.asarray(hourly.get("relative_humidity_2m") or [], float)
-    W = np.asarray(hourly.get("wind_speed_10m") or [], float)
-    D = np.asarray(hourly.get("wind_direction_10m") or [], float)
-
-    # Select overlap (pad 1h)
-    s = start_utc.to_datetime64()
-    e = end_utc.to_datetime64()
-    pad1 = np.timedelta64(1, "h")
-    sel = (tt >= (s - pad1)) & (tt <= (e + pad1))
-    if not np.any(sel):
-        return {c: np.nan for c in WEATHER_COLS}
-
-    tt2 = tt[sel]
-    T2, RH2, W2, D2 = T[sel], RH[sel], W[sel], D[sel]
-
-    # Convert start/end into numpy datetime64 for comparisons
-    start64 = start_utc.to_datetime64()
-    end64 = end_utc.to_datetime64()
-
-    # For weighting, use pandas Timestamps
-    ttp = pd.to_datetime(tt2)
-    startp = pd.Timestamp(start_utc)
-    endp = pd.Timestamp(end_utc)
-
-    avg_t, _ = _time_weighted_mean(T2, ttp.to_numpy(), startp, endp)
-    avg_rh, _ = _time_weighted_mean(RH2, ttp.to_numpy(), startp, endp)
-    avg_w, _ = _time_weighted_mean(W2, ttp.to_numpy(), startp, endp)
-
-    weights = _segment_weights(ttp.to_numpy(), startp, endp)
-    avg_dir = _circular_mean_deg(D2, weights) if weights.sum() > 0 else np.nan
-
-    return {
-        "avg_temp_c": float(avg_t) if np.isfinite(avg_t) else np.nan,
-        "avg_humidity_pct": float(avg_rh) if np.isfinite(avg_rh) else np.nan,
-        "avg_wind_ms": float(avg_w) if np.isfinite(avg_w) else np.nan,
-        "avg_wind_dir_deg": float(avg_dir) if np.isfinite(avg_dir) else np.nan,
-    }
-
 # ---------- helpers ----------
 _EMOJI_RE = re.compile(
     "["  # broad-ish emoji/icon ranges
@@ -1025,12 +1046,8 @@ def grade_from_dist_elev_safe(dist_m: np.ndarray, elev_m: np.ndarray, alt_qualit
     return g
 
 def heading_from_latlon(lat_deg: np.ndarray, lon_deg: np.ndarray) -> np.ndarray:
-    """Per-second heading (degrees), NaN if insufficient GPS."""
-    lat = np.asarray(lat_deg, float)
-    lon = np.asarray(lon_deg, float)
-    out = np.full_like(lat, np.nan, dtype=float)
-    if lat.size < 2:
-        return out
+    """Per-second heading (degrees). Currently returns all NaN (placeholder)."""
+    return np.full(len(np.asarray(lat_deg, float)), np.nan, dtype=float)
 
 def time_bucket(dt: pd.Timestamp) -> str:
     h = dt.hour + dt.minute / 60.0
@@ -1175,10 +1192,6 @@ DEFAULT_ERA_TRANSITIONS = {
     "s4":        "2023-01-03",  # Stryd 4.0
     "s5":        "2025-12-17",  # Stryd 5.0
 }
-
-# v1_late is treated like pre_stryd for power simulation
-# because the pod was failing and power data is unreliable
-SIMULATED_POWER_ERAS = {"pre_stryd", "v1_late"}
 
 # v1_late is treated like pre_stryd for power simulation
 # because the pod was failing and power data is unreliable
@@ -1534,7 +1547,6 @@ def correct_hr_backproject(
         applied = True
         t_event = float(t[i1])
         corr_type = "early_step_down"
-        corr_type = "early_step_down"
 
     # ---- B) Low-HR dropout ----
     # Baseline for plausibility: use median HR after 12 min if possible, else overall moving median
@@ -1601,7 +1613,6 @@ def correct_hr_backproject(
                 applied = True
                 t_event = t_drop if t_event is None else t_event
                 # This branch is specifically a low-HR dropout -> correct upward
-                corr_type = "late_dropout" if corr_type is None else corr_type
                 corr_type = "late_dropout"
 
     # ---- Compute P/HR ratios for audit note (2-min windows around detected event) ----
@@ -2076,6 +2087,8 @@ def summarize_fit(fit_path: str, tz_out: str, weight_kg: float, gps_outlier_spee
                     loop_displacement_m=float(loop_displacement_m) if loop_displacement_m==loop_displacement_m else float('nan'),
                     weight_kg=float(weight_kg),
                 )
+                # v50: Update cache index entry
+                _update_cache_index_entry(persec_cache_dir, safe_name + '.npz', float(df['ts'].iloc[0]))
             CACHE_WRITE_OK += 1
         except Exception:
             CACHE_WRITE_FAIL += 1
@@ -2167,34 +2180,7 @@ def summarize_fit(fit_path: str, tz_out: str, weight_kg: float, gps_outlier_spee
         dist_km = float(gps_km)
     gps_ratio = (gps_km / dist_km) if (np.isfinite(gps_km) and np.isfinite(dist_km) and dist_km > 0) else np.nan
 
-    # --- v37: loop-aware grade detrend (fix altitude drift on loop-like runs) ---
-    # If a run starts and ends at (nearly) the same location, net elevation should be ~0.
-    # When the altitude stream drifts, the derived grade series can have a non-zero mean,
-    # which distorts simulated power and spreads RE. We remove only the *bias* (mean grade),
-    # preserving relative hills.
-    try:
-        dist_m_est = float(dist_km_tmp * 1000.0) if np.isfinite(dist_km_tmp) else (float(gps_km_tmp * 1000.0) if np.isfinite(gps_km_tmp) else float('nan'))
-        disp_m, loop_like = _loop_like_from_track(df, dist_m_est)
-        alt_q = str(df.get('alt_quality', pd.Series([''])).iloc[0]) if 'alt_quality' in df.columns and len(df) else ''
-        moving0 = df['moving'].values.astype(bool) if 'moving' in df.columns else np.ones(len(df), dtype=bool)
-        g = pd.to_numeric(df.get('grade'), errors='coerce').to_numpy(dtype=float)
-        mean_g = float(np.nanmean(g[moving0])) if (g.size and np.isfinite(g[moving0]).any()) else float('nan')
-        grade_detrended = False
-        if loop_like and alt_q != 'flat_fallback' and np.isfinite(mean_g) and abs(mean_g) > 0.0045:
-            g2 = g - mean_g
-            g2 = np.clip(g2, -0.12, 0.12)
-            df['grade'] = g2
-            grade_detrended = True
-            if 'notes' in df.columns:
-                pass
-            # store in df attrs for later note/cache
-            df.attrs['grade_detrended'] = True
-            df.attrs['grade_mean_before'] = mean_g
-            df.attrs['grade_mean_after'] = float(np.nanmean(g2[moving0])) if np.isfinite(g2[moving0]).any() else 0.0
-            df.attrs['loop_displacement_m'] = disp_m
-    except Exception:
-        pass
-    # --- end v37 grade detrend ---
+    # --- v37 grade detrend already applied in the pre-cache section above ---
     pace = (moving_s / 60.0) / dist_km if dist_km and dist_km > 0 else np.nan
 
     gps_km, gps_cov, gps_max_seg_m, gps_p99_speed_mps, gps_outlier_frac = compute_gps_metrics(df, gps_outlier_speed_mps)
@@ -3093,7 +3079,9 @@ def main():
         except Exception as e:
             print("ERROR: Append mode write failed:", repr(e))
             raise
-        return 0
+        # v50: Return 2 to signal "success but nothing new" — run_pipeline.py
+        # uses this to skip Steps 2-4 in UPDATE mode.
+        return 2
 
     if args.cache_only:
         # Only write caches; no master build.
@@ -3236,7 +3224,7 @@ def main():
         # - Archive for historical (clamped to today)
         # - Forecast only for the recent tail if the group window extends beyond today (e.g. "today" runs with +1 day padding)
         try:
-            today = pd.Timestamp.utcnow().date()
+            today = pd.Timestamp.now('UTC').date()
 
             # Archive window (cannot exceed today)
             date_max_archive = pd.to_datetime(_clamp_end_to_today(date_max)).date()

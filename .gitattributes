@@ -1,2 +1,5 @@
+# Normalise line endings (suppresses LF/CRLF warnings)
+* text=auto
+
 # Force CRLF line endings for Windows batch files
 *.bat text eol=crlf

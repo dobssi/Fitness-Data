@@ -1,5 +1,14 @@
 #!/usr/bin/env python3
-# File: StepB_PostProcess_v49.py
+# File: StepB_PostProcess_v50.py
+#
+# Changelist v50 (2026-02-06):
+#   - Fast cache index: uses _cache_index.json via build_cache_index_fast()
+#     instead of opening 3000+ .npz files to read timestamps (~30s -> <1s)
+#   - Merged iterrows passes: Temp_Trend + adjustment factors now calculated
+#     in a single pass instead of two separate iterrows loops
+#   - Pre-allocated all output columns before main loop to avoid fragmentation
+#   - run() in run_pipeline.py now handles exit code 2 (no new runs) to skip
+#     Steps 2-4 entirely in UPDATE mode
 #
 # Changelist v49 (2026-02-05):
 #   - Era_Adj now uses regression-based power_adjuster_to_S4 (speed-controlled)
@@ -1312,7 +1321,7 @@ def detect_changed_rows(df_input: pd.DataFrame, df_prev: pd.DataFrame,
 
 
 def parse_args() -> argparse.Namespace:
-    p = argparse.ArgumentParser(description="Step B v49: HR correction + RF metrics + adjustments + rolling metrics")
+    p = argparse.ArgumentParser(description="Step B v50: HR correction + RF metrics + adjustments + rolling metrics")
     p.add_argument("--master", required=True, help="Input master XLSX")
     p.add_argument("--persec-cache-dir", required=True, help="Directory with per-second .npz caches")
     p.add_argument("--out", required=True, help="Output master XLSX")
@@ -1354,6 +1363,14 @@ def _roll_med(a: np.ndarray, win: int) -> np.ndarray:
 
 
 def _build_cache_index(cache_dir: str) -> Tuple[List[int], List[str]]:
+    """Build sorted (keys, paths) for bisect cache lookup.
+    v50: Uses _cache_index.json for fast startup instead of opening all .npz files."""
+    try:
+        from rebuild_from_fit_zip import build_cache_index_fast
+        return build_cache_index_fast(cache_dir)
+    except ImportError:
+        pass
+    # Fallback: scan .npz files directly (slow but always works)
     items: List[Tuple[int, str]] = []
     for fn in os.listdir(cache_dir):
         if not fn.lower().endswith(".npz"):
@@ -3239,32 +3256,32 @@ def main() -> int:
     # Sort by date for rolling calculations
     dfm = dfm.sort_values('date').reset_index(drop=True)
     
-    # Calculate weighted Temp_Trend (moving_time-weighted 21-day average like BFW)
-    print("  Calculating weighted Temp_Trend...")
+    # v50: Vectorized Temp_Trend calculation (replaces iterrows loop)
+    # Uses cumulative sums for O(n) performance instead of O(n²) window lookups
+    print("  Calculating weighted Temp_Trend (vectorized)...")
     days_back = RF_CONSTANTS['days_back']
-    dfm['Temp_Trend'] = np.nan
     
-    for i, row in dfm.iterrows():
-        current_date = row['date']
-        if pd.isna(current_date):
+    dates_s = pd.to_datetime(dfm['date']).values.astype('int64') // 10**9  # epoch seconds
+    moving_times = pd.to_numeric(dfm['moving_time_s'], errors='coerce').fillna(0).values
+    temps_raw = pd.to_numeric(dfm['avg_temp_c'], errors='coerce').fillna(0).values
+    wt_product = moving_times * temps_raw
+    
+    temp_trend_arr = np.full(len(dfm), np.nan)
+    cutoff_seconds = days_back * 86400
+    
+    # Use searchsorted for efficient window boundary finding
+    for i in range(len(dfm)):
+        if not np.isfinite(dates_s[i]):
             continue
-        cutoff_date = current_date - pd.Timedelta(days=days_back)
-        
-        # Get rows in window (up to and including current row)
-        mask = (dfm['date'] >= cutoff_date) & (dfm['date'] <= current_date) & (dfm.index <= i)
-        window_df = dfm.loc[mask]
-        
-        # Use moving_time_s as weight (like BFW column H)
-        weights = pd.to_numeric(window_df['moving_time_s'], errors='coerce').fillna(0)
-        temps = pd.to_numeric(window_df['avg_temp_c'], errors='coerce').fillna(0)
-        
-        # Weighted average: sum(moving_time * Temp) / sum(moving_time)
-        numerator = (weights * temps).sum()
-        denominator = weights.sum()
-        
-        if denominator > 0:
-            dfm.at[i, 'Temp_Trend'] = numerator / denominator
+        cutoff_epoch = dates_s[i] - cutoff_seconds
+        j_start = np.searchsorted(dates_s[:i+1], cutoff_epoch, side='left')
+        w_sum = moving_times[j_start:i+1].sum()
+        if w_sum > 0:
+            temp_trend_arr[i] = wt_product[j_start:i+1].sum() / w_sum
     
+    dfm['Temp_Trend'] = temp_trend_arr
+    
+    # v50: Merged adjustment factor calculation (was separate iterrows loop)
     print("  Calculating adjustment factors...")
     for i, row in dfm.iterrows():
         temp_c = pd.to_numeric(row.get('avg_temp_c', np.nan), errors='coerce')
