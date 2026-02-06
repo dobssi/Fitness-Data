@@ -4,7 +4,8 @@ run_pipeline.py — Cross-platform pipeline orchestrator v50
 Replaces Run_Full_Pipeline.bat for both local and CI/CD execution.
 
 Modes:
-  FULLPIPE    — Full rebuild from FITs → Steps 1-4 → dashboard
+  FULLPIPE    — Full rebuild from FITs → Steps 1-4 → dashboard (uses summary cache)
+  FORCE_FULL  — Same as FULLPIPE but ignores all caches (reparse every FIT)
   UPDATE      — Append new FITs → Steps 2-4 (auto-skips if nothing new)
   FROM_MODEL  — Skip Step 1, run Steps 2-4 (changed RE model logic)
   FROM_SIM    — Skip Steps 1-2, run Steps 3-4 (changed sim power logic)
@@ -75,7 +76,11 @@ GENDER = "male"
 
 
 def run(cmd: list, desc: str, critical: bool = True) -> int:
-    """Run a subprocess with logging."""
+    """Run a subprocess with logging.
+    
+    Returns the process exit code. Exit code 2 is treated as a special
+    "success but nothing new" signal, not as a failure.
+    """
     print(f"\n{'=' * 60}")
     print(f"  {desc}")
     print(f"{'=' * 60}")
@@ -83,7 +88,9 @@ def run(cmd: list, desc: str, critical: bool = True) -> int:
     
     result = subprocess.run(cmd, cwd=os.getcwd())
     
-    if result.returncode != 0:
+    if result.returncode == 2:
+        print(f"\n[OK] {desc} (nothing new)")
+    elif result.returncode != 0:
         if critical:
             print(f"\n[FAIL] FAILED: {desc} (exit code {result.returncode})")
             return result.returncode
@@ -133,8 +140,8 @@ def run_sync(args):
 
 
 def main():
-    ALL_ACTIONS = ["FULLPIPE", "UPDATE", "FROM_MODEL", "FROM_SIM", "FROM_STEPB",
-                   "DASHBOARD", "CACHE"]
+    ALL_ACTIONS = ["FULLPIPE", "FORCE_FULL", "UPDATE", "FROM_MODEL", "FROM_SIM",
+                   "FROM_STEPB", "DASHBOARD", "CACHE"]
     parser = argparse.ArgumentParser(description=f"Pipeline v{PIPELINE_VER} orchestrator")
     parser.add_argument("action", nargs="?", default="FULLPIPE",
                         choices=ALL_ACTIONS,
@@ -183,18 +190,23 @@ def main():
     # =================================================================
     # Determine which steps to run based on action
     # =================================================================
-    #   FULLPIPE   → Steps 1, 2, 3, 4, dashboard
-    #   UPDATE     → Step 1 (append) → 2, 3, 4 if new runs; skip if not
-    #   FROM_MODEL → Steps 2, 3, 4, dashboard
-    #   FROM_SIM   → Steps 3, 4, dashboard
-    #   FROM_STEPB → Step 4, dashboard
-    #   DASHBOARD  → dashboard only
-    #   CACHE      → cache update only
+    #   FULLPIPE    → Steps 1, 2, 3, 4, dashboard (uses summary cache)
+    #   FORCE_FULL  → Steps 1, 2, 3, 4, dashboard (ignores all caches)
+    #   UPDATE      → Step 1 (append) → 2, 3, 4 if new runs; skip if not
+    #   FROM_MODEL  → Steps 2, 3, 4, dashboard
+    #   FROM_SIM    → Steps 3, 4, dashboard
+    #   FROM_STEPB  → Step 4, dashboard
+    #   DASHBOARD   → dashboard only
+    #   CACHE       → cache update only
     
-    run_step1 = action in ("FULLPIPE", "UPDATE")
-    run_step2 = action in ("FULLPIPE", "UPDATE", "FROM_MODEL")
-    run_step3 = action in ("FULLPIPE", "UPDATE", "FROM_MODEL", "FROM_SIM")
-    run_step4 = action in ("FULLPIPE", "UPDATE", "FROM_MODEL", "FROM_SIM", "FROM_STEPB")
+    # Treat FORCE_FULL as FULLPIPE but with cache bypass
+    effective_action = "FULLPIPE" if action == "FORCE_FULL" else action
+    force_cache = (action == "FORCE_FULL")
+    
+    run_step1 = effective_action in ("FULLPIPE", "UPDATE")
+    run_step2 = effective_action in ("FULLPIPE", "UPDATE", "FROM_MODEL")
+    run_step3 = effective_action in ("FULLPIPE", "UPDATE", "FROM_MODEL", "FROM_SIM")
+    run_step4 = effective_action in ("FULLPIPE", "UPDATE", "FROM_MODEL", "FROM_SIM", "FROM_STEPB")
     
     # =================================================================
     # CACHE MODE
@@ -258,6 +270,8 @@ def main():
             "--persec-cache-dir", cache_dir,
             "--out", out_master,
         ]
+        if force_cache:
+            rebuild_cmd.extend(["--cache-force", "--clear-weather-cache"])
         
         if action == "UPDATE" and os.path.exists(out_master):
             rebuild_cmd.extend(["--append-master-in", out_master])

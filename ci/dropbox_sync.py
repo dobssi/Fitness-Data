@@ -45,9 +45,10 @@ UPLOAD_URL = "https://content.dropboxapi.com/2/files/upload"
 DOWNLOAD_URL = "https://content.dropboxapi.com/2/files/download"
 TOKEN_URL = "https://api.dropboxapi.com/oauth2/token"
 
-# Dropbox upload limit per request: 150 MB
-# For larger files, use upload_session — but most pipeline files are <50 MB
-MAX_UPLOAD_SIZE = 150 * 1024 * 1024
+# Dropbox single-request upload limit: 150 MB
+# For larger files, use upload_session (chunked) — supports up to 350 GB
+MAX_SINGLE_UPLOAD = 150 * 1024 * 1024
+CHUNK_SIZE = 50 * 1024 * 1024  # 50 MB chunks for session uploads
 
 
 def get_token() -> str:
@@ -88,15 +89,15 @@ def get_token() -> str:
 
 
 def dropbox_upload(local_path: str, remote_path: str, token: str):
-    """Upload a single file to Dropbox."""
+    """Upload a single file to Dropbox. Uses chunked upload for files > 150 MB."""
     if not os.path.exists(local_path):
         print(f"  ⚠ Skip (not found): {local_path}")
         return False
     
     size = os.path.getsize(local_path)
-    if size > MAX_UPLOAD_SIZE:
-        print(f"  ⚠ Skip (too large: {size / 1024 / 1024:.0f} MB): {local_path}")
-        return False
+    
+    if size > MAX_SINGLE_UPLOAD:
+        return _dropbox_upload_chunked(local_path, remote_path, token, size)
     
     import json
     headers = {
@@ -119,6 +120,95 @@ def dropbox_upload(local_path: str, remote_path: str, token: str):
     else:
         print(f"  ✗ Upload failed ({resp.status_code}): {local_path}")
         print(f"    {resp.text[:200]}")
+        return False
+
+
+def _dropbox_upload_chunked(local_path: str, remote_path: str, token: str, size: int):
+    """Upload a large file using Dropbox upload sessions (chunked)."""
+    import json
+    
+    SESSION_START = "https://content.dropboxapi.com/2/files/upload_session/start"
+    SESSION_APPEND = "https://content.dropboxapi.com/2/files/upload_session/append_v2"
+    SESSION_FINISH = "https://content.dropboxapi.com/2/files/upload_session/finish"
+    
+    chunks = (size + CHUNK_SIZE - 1) // CHUNK_SIZE
+    print(f"  ↑ Chunked upload ({size / 1024 / 1024:.0f} MB, {chunks} chunks): {local_path}")
+    
+    try:
+        with open(local_path, "rb") as f:
+            # Start session
+            chunk = f.read(CHUNK_SIZE)
+            resp = requests.post(
+                SESSION_START,
+                headers={
+                    "Authorization": f"Bearer {token}",
+                    "Content-Type": "application/octet-stream",
+                    "Dropbox-API-Arg": json.dumps({"close": False}),
+                },
+                data=chunk,
+                timeout=120,
+            )
+            if resp.status_code != 200:
+                print(f"  ✗ Session start failed ({resp.status_code}): {resp.text[:200]}")
+                return False
+            
+            session_id = resp.json()["session_id"]
+            offset = len(chunk)
+            chunk_num = 1
+            
+            # Append remaining chunks
+            while True:
+                chunk = f.read(CHUNK_SIZE)
+                if not chunk:
+                    break
+                chunk_num += 1
+                print(f"    chunk {chunk_num}/{chunks}...")
+                
+                resp = requests.post(
+                    SESSION_APPEND,
+                    headers={
+                        "Authorization": f"Bearer {token}",
+                        "Content-Type": "application/octet-stream",
+                        "Dropbox-API-Arg": json.dumps({
+                            "cursor": {"session_id": session_id, "offset": offset},
+                            "close": False,
+                        }),
+                    },
+                    data=chunk,
+                    timeout=120,
+                )
+                if resp.status_code != 200:
+                    print(f"  ✗ Append failed at chunk {chunk_num} ({resp.status_code}): {resp.text[:200]}")
+                    return False
+                offset += len(chunk)
+            
+            # Finish session
+            resp = requests.post(
+                SESSION_FINISH,
+                headers={
+                    "Authorization": f"Bearer {token}",
+                    "Content-Type": "application/octet-stream",
+                    "Dropbox-API-Arg": json.dumps({
+                        "cursor": {"session_id": session_id, "offset": offset},
+                        "commit": {
+                            "path": remote_path,
+                            "mode": "overwrite",
+                            "autorename": False,
+                            "mute": True,
+                        },
+                    }),
+                },
+                data=b"",
+                timeout=120,
+            )
+            if resp.status_code == 200:
+                print(f"  ✓ Uploaded (chunked): {local_path} → {remote_path} ({size / 1024 / 1024:.0f} MB)")
+                return True
+            else:
+                print(f"  ✗ Session finish failed ({resp.status_code}): {resp.text[:200]}")
+                return False
+    except Exception as e:
+        print(f"  ✗ Chunked upload error: {repr(e)}")
         return False
 
 

@@ -225,6 +225,101 @@ def _should_write_cache(cache_path: str, fit_path: str) -> bool:
     except Exception:
         return True
 
+
+# --- v50: Summary cache for fast FULLPIPE rebuilds ---
+# Stores the summarize_fit() return dict as a compact JSON sidecar alongside .npz.
+# On subsequent FULLPIPE runs, if FIT hasn't changed, loads the JSON in ~1ms
+# instead of re-parsing the FIT and recomputing all metrics (~400ms per file).
+
+SUMMARY_CACHE_HITS = 0
+SUMMARY_CACHE_MISSES = 0
+_SUMMARY_CACHE_VER = 50  # Bump this when summarize_fit output changes
+
+def _summary_cache_path(persec_cache_dir: str, safe_name: str) -> str:
+    """Path to the summary JSON sidecar for a given run."""
+    return os.path.join(persec_cache_dir, safe_name + "_summary.json")
+
+
+def _load_summary_cache(persec_cache_dir: str, safe_name: str, fit_path: str) -> dict | None:
+    """Load cached summary dict if it exists and FIT hasn't changed.
+    
+    Returns the summary dict on cache hit, None on miss.
+    """
+    global SUMMARY_CACHE_HITS, SUMMARY_CACHE_MISSES
+    if CACHE_FORCE:
+        return None
+    
+    summary_path = _summary_cache_path(persec_cache_dir, safe_name)
+    if not os.path.exists(summary_path):
+        return None
+    
+    # Check if FIT is newer than summary cache
+    try:
+        fit_mtime = os.path.getmtime(fit_path)
+        cache_mtime = os.path.getmtime(summary_path)
+        if fit_mtime > cache_mtime + 1.0:
+            return None
+    except Exception:
+        return None
+    
+    try:
+        with open(summary_path, "r") as f:
+            data = _json.load(f)
+        
+        # Version check — invalidate if cache was written by older version
+        if data.get("_summary_ver") != _SUMMARY_CACHE_VER:
+            return None
+        data.pop("_summary_ver", None)
+        
+        # Restore types that JSON can't represent natively
+        if "date" in data and data["date"] is not None:
+            data["date"] = pd.Timestamp(data["date"]).to_pydatetime()
+        if "start_time_utc" in data and data["start_time_utc"] is not None:
+            data["start_time_utc"] = pd.Timestamp(data["start_time_utc"])
+        
+        # Convert JSON null → NaN for numeric fields
+        for k, v in data.items():
+            if v is None and k not in ("date", "start_time_utc", "notes", "file",
+                                        "alt_quality", "speed_source", "hr_corr_type",
+                                        "stryd_manufacturer", "stryd_product",
+                                        "stryd_serial_number", "stryd_ant_device_number",
+                                        "weather_source"):
+                data[k] = np.nan
+        
+        SUMMARY_CACHE_HITS += 1
+        return data
+    except Exception:
+        return None
+
+
+def _write_summary_cache(persec_cache_dir: str, safe_name: str, summary: dict):
+    """Write summary dict as JSON sidecar."""
+    summary_path = _summary_cache_path(persec_cache_dir, safe_name)
+    try:
+        # Make a JSON-safe copy
+        out = {"_summary_ver": _SUMMARY_CACHE_VER}
+        for k, v in summary.items():
+            if isinstance(v, (pd.Timestamp, datetime)):
+                out[k] = v.isoformat()
+            elif isinstance(v, (np.integer,)):
+                out[k] = int(v)
+            elif isinstance(v, (np.floating,)):
+                out[k] = None if (v != v) else float(v)  # NaN → null
+            elif isinstance(v, (np.bool_,)):
+                out[k] = bool(v)
+            elif isinstance(v, float) and v != v:  # Python float NaN
+                out[k] = None
+            elif isinstance(v, datetime):
+                out[k] = v.isoformat()
+            else:
+                out[k] = v
+        
+        with open(summary_path, "w") as f:
+            _json.dump(out, f, separators=(",", ":"))
+    except Exception:
+        # Non-critical: if we can't write summary cache, no big deal
+        pass
+
 # --- v50: Cache index file for fast lookup ---
 # Instead of opening 3000+ .npz files to read timestamps, we maintain a JSON index.
 import json as _json
@@ -1979,6 +2074,15 @@ def compute_gps_metrics(df: pd.DataFrame, outlier_speed_mps: float) -> tuple[flo
 
 
 def summarize_fit(fit_path: str, tz_out: str, weight_kg: float, gps_outlier_speed_mps: float, persec_cache_dir: str = "", cache_only: bool = False) -> dict:
+    # v50: Summary cache fast path — avoid FIT parsing entirely for unchanged files
+    if persec_cache_dir and not cache_only:
+        fit_basename = os.path.basename(fit_path)
+        fit_filename_no_ext = os.path.splitext(fit_basename)[0]
+        safe_name = fit_filename_no_ext.replace('&', '_').replace('?', '_').replace('=', '_')
+        cached = _load_summary_cache(persec_cache_dir, safe_name, fit_path)
+        if cached is not None:
+            return cached
+
     tz = ZoneInfo(tz_out)
     df, start_utc, ids = parse_fit_to_df_and_ids(fit_path, weight_kg)
     start_local = start_utc.to_pydatetime().astimezone(tz).replace(tzinfo=None)
@@ -2428,6 +2532,15 @@ def summarize_fit(fit_path: str, tz_out: str, weight_kg: float, gps_outlier_spee
     for _c in WEATHER_COLS:
         if _c not in out:
             out[_c] = np.nan
+
+    # v50: Write summary cache for fast FULLPIPE rebuilds
+    if persec_cache_dir and not cache_only:
+        fit_basename = os.path.basename(fit_path)
+        fit_filename_no_ext = os.path.splitext(fit_basename)[0]
+        safe_name = fit_filename_no_ext.replace('&', '_').replace('?', '_').replace('=', '_')
+        _write_summary_cache(persec_cache_dir, safe_name, out)
+        global SUMMARY_CACHE_MISSES
+        SUMMARY_CACHE_MISSES += 1
 
     return out
 
@@ -2919,6 +3032,7 @@ def main():
     ap.add_argument("--no-cache-rewrite-if-newer", dest="cache_rewrite_if_newer", action="store_false",
                     help="Disable rewrite-if-newer check")
     ap.add_argument("--cache-force", action="store_true", help="Always rewrite cache")
+    ap.add_argument("--clear-weather-cache", action="store_true", help="Delete weather SQLite cache before processing (forces re-fetch)")
     ap.add_argument("--append-master-in", default="", help="Existing master .xlsx to append only new runs (skip full rebuild).")
     ap.add_argument("--weather-cache-db", default="", help="Optional SQLite cache for Open-Meteo hourly data (recommended). If blank, uses <out_dir>/_weather_cache_openmeteo/openmeteo_cache.sqlite")
     ap.add_argument("--override-file", default="activity_overrides.xlsx", help="Activity overrides Excel file (indoor runs identified by temp_override column)")
@@ -3114,6 +3228,7 @@ def main():
     total = len(fit_paths)
     rows = []
     failures = []
+    _prev_summary_hits = SUMMARY_CACHE_HITS
     for i, fp in enumerate(fit_paths, start=1):
         try:
             rec = summarize_fit(fp, args.tz, args.weight, args.gps_outlier_speed, args.persec_cache_dir)
@@ -3121,7 +3236,13 @@ def main():
                 dt_str = pd.Timestamp(rec.get("date")).strftime("%Y-%m-%d %H:%M:%S")
             except Exception:
                 dt_str = str(rec.get("date"))
-            print(f"Processed ({i}/{total}): {dt_str}  |  {rec.get('file')}")
+            # v50: Reduce log noise — batch-report summary cache hits
+            if SUMMARY_CACHE_HITS > _prev_summary_hits:
+                _prev_summary_hits = SUMMARY_CACHE_HITS
+                if i % 200 == 0 or i == total:
+                    print(f"Cached  ({i}/{total}): {SUMMARY_CACHE_HITS} summary cache hits so far...")
+            else:
+                print(f"Processed ({i}/{total}): {dt_str}  |  {rec.get('file')}")
             rows.append(rec)
         except SkipFitFile as e:
             failures.append({"file": os.path.basename(fp), "reason": str(e)})
@@ -3139,6 +3260,14 @@ def main():
     # ---------- Weather (Open-Meteo, zero setup) ----------
     # Speed: group runs by rounded location and fetch one hourly block per location (cached on disk).
     wx_cache_dir = os.path.join(out_dir, "_weather_cache_openmeteo")
+
+    # v50: Clear weather cache if requested
+    if getattr(args, "clear_weather_cache", False):
+        import shutil
+        if os.path.isdir(wx_cache_dir):
+            shutil.rmtree(wx_cache_dir)
+            print(f"Cleared weather cache: {wx_cache_dir}")
+        os.makedirs(wx_cache_dir, exist_ok=True)
 
     wx_db_path = args.weather_cache_db.strip() if hasattr(args, "weather_cache_db") and args.weather_cache_db else os.path.join(wx_cache_dir, "openmeteo_cache.sqlite")
     try:
@@ -3820,6 +3949,8 @@ def main():
     # --- v37 fix2: cache-write health summary ---
     if args.persec_cache_dir:
         print(f"Per-second cache writes: ok={CACHE_WRITE_OK}, failed={CACHE_WRITE_FAIL}")
+        if SUMMARY_CACHE_HITS or SUMMARY_CACHE_MISSES:
+            print(f"Summary cache: hits={SUMMARY_CACHE_HITS}, misses={SUMMARY_CACHE_MISSES}")
         if CACHE_WRITE_FAIL and FIRST_CACHE_WRITE_ERROR:
             err_path = FIRST_CACHE_WRITE_ERROR_PATH or "(unknown)"
             print("First cache write failure path:", err_path)
