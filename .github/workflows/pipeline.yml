@@ -118,6 +118,11 @@ jobs:
             --ci \
             --skip-push
       
+      # ─── Generate dashboard ─────────────────────────────────
+      - name: Generate dashboard
+        run: python generate_dashboard.py
+        continue-on-error: true
+      
       # ─── Upload results to Dropbox ─────────────────────────
       - name: Upload results to Dropbox
         run: |
@@ -127,11 +132,14 @@ jobs:
                     Master_FULL_GPSQ_ID_post.xlsx \
                     athlete_data.csv \
                     re_model_s4_FULL.json \
-                    sync_state.json
+                    sync_state.json \
+                    index.html
       
-      # ─── Deploy dashboard ──────────────────────────────────
-      - name: Generate dashboard
-        run: python generate_dashboard.py
+      # ─── Deploy dashboard to GitHub Pages ──────────────────
+      - name: Prepare dashboard for Pages
+        run: |
+          mkdir -p docs
+          cp -f index.html docs/index.html 2>/dev/null || true
         continue-on-error: true
       
       - name: Deploy to GitHub Pages
