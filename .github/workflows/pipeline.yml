@@ -37,12 +37,12 @@ on:
         description: 'Distance km (e.g. 5, 10, 21.097)'
         type: string
         default: ''
-      run_number:
-        description: 'Which run today? (1, 2, 3... blank=only)'
+      run_date:
+        description: 'Run date YYYY-MM-DD (default: today)'
         type: string
         default: ''
-      notes:
-        description: 'Notes'
+      run_number:
+        description: 'Which run today? (1, 2, 3... blank=only)'
         type: string
         default: ''
       surface:
@@ -53,8 +53,8 @@ on:
         description: 'Surface adj (e.g. 0.97 trail, 1.05 snow)'
         type: string
         default: ''
-      run_date:
-        description: 'Run date YYYY-MM-DD (default: today)'
+      notes:
+        description: 'Notes'
         type: string
         default: ''
       race:
