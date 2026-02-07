@@ -3977,12 +3977,19 @@ def main() -> int:
             print(f"  Race predictions: 5K={format_time(pred_5k)}, 10K={format_time(pred_10k)}, "
                   f"HM={format_time(pred_hm)}, Mar={format_time(pred_mara)}")
             
-            # Store predictions in last row (for dashboard to pick up)
-            dfm.at[dfm.index[-1], 'CP'] = round(cp_current, 0)
-            dfm.at[dfm.index[-1], 'pred_5k_s'] = round(pred_5k, 0)
-            dfm.at[dfm.index[-1], 'pred_10k_s'] = round(pred_10k, 0)
-            dfm.at[dfm.index[-1], 'pred_hm_s'] = round(pred_hm, 0)
-            dfm.at[dfm.index[-1], 'pred_marathon_s'] = round(pred_mara, 0)
+            # v51: Populate predictions on ALL runs (not just last row)
+            # CP and predictions are simple functions of RFL_Trend with fixed constants
+            rfl_valid = dfm['RFL_Trend'].notna() & (dfm['RFL_Trend'] > 0)
+            dfm.loc[rfl_valid, 'CP'] = (dfm.loc[rfl_valid, 'RFL_Trend'] * PEAK_CP_WATTS).round(0)
+            
+            for dist_key, col_name in [('5k', 'pred_5k_s'), ('10k', 'pred_10k_s'), 
+                                        ('hm', 'pred_hm_s'), ('marathon', 'pred_marathon_s')]:
+                dfm.loc[rfl_valid, col_name] = dfm.loc[rfl_valid, 'RFL_Trend'].apply(
+                    lambda rfl: round(calc_race_prediction(rfl, dist_key, re_p90, PEAK_CP_WATTS, mass_kg), 0)
+                )
+            
+            n_pred = rfl_valid.sum()
+            print(f"  Populated predictions on {n_pred} runs (all with RFL_Trend)")
             
             # Predicted 5K age grade (calculate age from DOB if available)
             runner_gender = getattr(args, 'runner_gender', 'male')

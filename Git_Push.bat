@@ -53,6 +53,17 @@ if errorlevel 1 (
     exit /b 1
 )
 
+REM ── Pull remote changes first (handles GitHub Actions commits) ──
+echo Syncing with remote...
+git pull --rebase origin main
+if errorlevel 1 (
+    echo.
+    echo Pull failed. Resolve conflicts manually.
+    pause
+    exit /b 1
+)
+
+REM ── Push ──
 git push -u origin main
 if errorlevel 1 (
     echo.

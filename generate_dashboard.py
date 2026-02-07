@@ -914,13 +914,190 @@ def get_top_races(df, n=10):
 
 
 # ============================================================================
+# v51: RACE PREDICTION TREND DATA
+# ============================================================================
+def get_prediction_trend_data(df):
+    """Get predicted vs actual race times — prediction shown only at race dates.
+    Returns dict keyed by distance."""
+    result = {}
+    
+    distances = {
+        '5k': {'pred_col': 'pred_5k_s', 'official_km': 5.0},
+        '10k': {'pred_col': 'pred_10k_s', 'official_km': 10.0},
+        'hm': {'pred_col': 'pred_hm_s', 'official_km': 21.097},
+        'marathon': {'pred_col': 'pred_marathon_s', 'official_km': 42.195},
+    }
+    
+    for dist_key, info in distances.items():
+        pred_col = info['pred_col']
+        dist_km = info['official_km']
+        tolerance = dist_km * 0.05
+        empty = {'dates': [], 'dates_iso': [], 'predicted': [], 'actual': [], 'is_parkrun': [], 'names': [], 'temps': [], 'surfaces': []}
+        
+        if pred_col not in df.columns:
+            result[dist_key] = empty
+            continue
+        
+        # Find races at this distance
+        race_col = 'race_flag' if 'race_flag' in df.columns else 'Race'
+        races = df[df[race_col] == 1].copy()
+        
+        if 'official_distance_km' in races.columns:
+            dist_match = races[
+                ((races['official_distance_km'] - dist_km).abs() < tolerance) |
+                ((races['distance_km'] - dist_km).abs() < tolerance)
+            ]
+        else:
+            dist_match = races[(races['distance_km'] - dist_km).abs() < tolerance]
+        
+        time_col = 'elapsed_time_s' if 'elapsed_time_s' in dist_match.columns else 'moving_time_s'
+        dist_match = dist_match[dist_match[time_col].notna() & (dist_match[time_col] > 0)].copy()
+        
+        if len(dist_match) == 0:
+            result[dist_key] = empty
+            continue
+        
+        dates = dist_match['date'].dt.strftime('%d %b %y').tolist()
+        dates_iso = dist_match['date'].dt.strftime('%Y-%m-%d').tolist()
+        actual = [round(v, 0) for v in dist_match[time_col].tolist()]
+        
+        # Get predicted time, name, temp at each race date
+        predicted = []
+        race_names = []
+        race_temps = []
+        race_surfaces = []
+        for _, race_row in dist_match.iterrows():
+            pred_val = race_row.get(pred_col)
+            if pd.notna(pred_val) and pred_val > 0:
+                predicted.append(round(pred_val, 0))
+            else:
+                race_dt = race_row['date']
+                nearby = df[(df['date'] - race_dt).abs() <= pd.Timedelta(days=7)]
+                nearby_pred = nearby[pred_col].dropna()
+                if len(nearby_pred) > 0:
+                    predicted.append(round(nearby_pred.iloc[-1], 0))
+                else:
+                    predicted.append(None)
+            
+            name = race_row.get('activity_name', '')
+            race_names.append(str(name)[:50] if pd.notna(name) else '')
+            
+            temp = race_row.get('avg_temp_c')
+            race_temps.append(round(temp, 0) if pd.notna(temp) else None)
+            
+            surface = str(race_row.get('surface', '')).strip()
+            race_surfaces.append(surface if surface and surface != 'nan' else None)
+        
+        is_parkrun = []
+        for _, race_row in dist_match.iterrows():
+            is_pr = bool(race_row.get('parkrun', 0)) or bool(race_row.get('hf_parkrun', 0))
+            is_parkrun.append(1 if is_pr else 0)
+        
+        result[dist_key] = {
+            'dates': dates,
+            'dates_iso': dates_iso,
+            'predicted': predicted,
+            'actual': actual,
+            'is_parkrun': is_parkrun,
+            'names': race_names,
+            'temps': race_temps,
+            'surfaces': race_surfaces,
+        }
+    
+    return result
+
+
+# ============================================================================
+# v51: AGE GRADE TREND DATA
+# ============================================================================
+def get_age_grade_data(df):
+    """Get age grade trend data for chart.
+    Returns dict with dates, ag_pct, distance labels, colours, and rolling average."""
+    race_col = 'race_flag' if 'race_flag' in df.columns else 'Race'
+    races = df[(df[race_col] == 1) & (df['age_grade_pct'].notna())].copy() if 'age_grade_pct' in df.columns else pd.DataFrame()
+    
+    if len(races) == 0:
+        return {'dates': [], 'values': [], 'dist_labels': [], 'dist_codes': [], 'rolling_avg': []}
+    
+    # Categorise distances  
+    def categorise_dist(row):
+        d = row.get('official_distance_km')
+        if pd.isna(d) or d <= 0:
+            d = row.get('distance_km', 0)
+        if d < 4:
+            return '3k-'
+        elif d < 7:
+            return '5k'
+        elif d < 15:
+            return '10k'
+        elif d < 25:
+            return 'HM'
+        elif d < 35:
+            return '30k'
+        else:
+            return 'Marathon'
+    
+    races = races.sort_values('date').copy()
+    races['dist_cat'] = races.apply(categorise_dist, axis=1)
+    races['is_parkrun'] = ((races.get('parkrun', 0) == 1) | (races.get('hf_parkrun', 0) == 1)).astype(int)
+    
+    dates = races['date'].dt.strftime('%d %b %y').tolist()
+    values = [round(v, 1) for v in races['age_grade_pct'].tolist()]
+    dist_labels = races['dist_cat'].tolist()
+    is_parkrun = races['is_parkrun'].tolist()
+    
+    # Colour codes and sizes for each distance category
+    colour_map = {
+        '3k-': '#8b5cf6',      # purple
+        '5k': '#2563eb',       # blue
+        '10k': '#16a34a',      # green
+        'HM': '#ea580c',       # orange
+        '30k': '#dc2626',      # red
+        'Marathon': '#991b1b', # dark red
+    }
+    size_map = {
+        '3k-': 2.5,
+        '5k': 3,
+        '10k': 4,
+        'HM': 5,
+        '30k': 6,
+        'Marathon': 7,
+    }
+    dist_codes = []
+    for i, d in enumerate(dist_labels):
+        base = colour_map.get(d, '#6b7280')
+        if is_parkrun[i]:
+            # Lighter/muted version for parkruns
+            parkrun_map = {
+                '5k': '#93bbfd',    # muted blue
+                '3k-': '#c4b5fd',   # light purple
+            }
+            dist_codes.append(parkrun_map.get(d, base))
+        else:
+            dist_codes.append(base)
+    dist_sizes = [size_map.get(d, 3) for d in dist_labels]
+    
+    # Rolling median (20-race window, centered) — robust to outliers
+    rolling = races['age_grade_pct'].rolling(window=20, min_periods=5, center=True).median()
+    rolling_avg = [round(v, 1) if pd.notna(v) else None for v in rolling.tolist()]
+    
+    # Also return dates as ISO strings for proper time axis
+    dates_iso = races['date'].dt.strftime('%Y-%m-%d').tolist()
+    
+    return {'dates': dates, 'dates_iso': dates_iso, 'values': values, 'dist_labels': dist_labels, 
+            'dist_codes': dist_codes, 'dist_sizes': dist_sizes, 'is_parkrun': is_parkrun, 'rolling_avg': rolling_avg}
+
+
+# ============================================================================
 # v51: ALERT BANNER GENERATOR
 # ============================================================================
-def _generate_alert_banner(alert_data):
-    """Generate the HTML for the health check banner."""
+def _generate_alert_banner(alert_data, critical_power=None):
+    """Generate the HTML for the health check banner with CP."""
+    cp_html = f'<span style="float: right; font-size: 0.9em; color: #374151;"><strong>⚡ CP {critical_power}W</strong></span>' if critical_power else ''
+    
     if not alert_data:
-        return '''<div style="background: #f0fdf4; border: 1px solid #86efac; border-radius: 12px; padding: 10px 16px; margin-bottom: 12px; text-align: center;">
-            <span style="font-size: 1.1em;">🟢</span> <strong>All clear</strong> — no alerts active
+        return f'''<div style="background: #f0fdf4; border: 1px solid #86efac; border-radius: 12px; padding: 10px 16px; margin-bottom: 12px; text-align: center;">
+            <span style="font-size: 1.1em;">🟢</span> <strong>All clear</strong> — no alerts active{cp_html}
         </div>'''
     
     # Determine overall level
@@ -935,7 +1112,7 @@ def _generate_alert_banner(alert_data):
         for a in alert_data
     )
     return f'''<div style="background: {bg}; border: 1px solid {border}; border-radius: 12px; padding: 10px 16px; margin-bottom: 12px;">
-        <div style="text-align: center; margin-bottom: 4px;"><span style="font-size: 1.1em;">{icon}</span> <strong>{len(alert_data)} alert{"s" if len(alert_data) > 1 else ""} active</strong></div>
+        <div style="text-align: center; margin-bottom: 4px;"><span style="font-size: 1.1em;">{icon}</span> <strong>{len(alert_data)} alert{"s" if len(alert_data) > 1 else ""} active</strong>{cp_html}</div>
         {items}
     </div>'''
 
@@ -943,7 +1120,7 @@ def _generate_alert_banner(alert_data):
 # ============================================================================
 # HTML GENERATION
 # ============================================================================
-def generate_html(stats, rf_data, volume_data, ctl_atl_data, ctl_atl_lookup, rfl_trend_dates, rfl_trend_values, rfl_trendline, rfl_projection, rfl_ci_upper, rfl_ci_lower, alltime_rfl_dates, alltime_rfl_values, recent_runs, top_races, alert_data=None, weight_data=None):
+def generate_html(stats, rf_data, volume_data, ctl_atl_data, ctl_atl_lookup, rfl_trend_dates, rfl_trend_values, rfl_trendline, rfl_projection, rfl_ci_upper, rfl_ci_lower, alltime_rfl_dates, alltime_rfl_values, recent_runs, top_races, alert_data=None, weight_data=None, prediction_data=None, ag_data=None):
     """Generate the HTML dashboard."""
     
     # Extract data for each time range - RF (v51: now includes easy_rfl and race_flags)
@@ -1000,6 +1177,7 @@ def generate_html(stats, rf_data, volume_data, ctl_atl_data, ctl_atl_lookup, rfl
     <title>Paul Collyer Fitness Dashboard</title>
     <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🏃</text></svg>">
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3"></script>
     <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2"></script>
     <style>
         * {{
@@ -1208,7 +1386,7 @@ def generate_html(stats, rf_data, volume_data, ctl_atl_data, ctl_atl_lookup, rfl
     </div>
     
     <!-- v51: Health Check Banner -->
-    {_generate_alert_banner(alert_data)}
+    {_generate_alert_banner(alert_data, critical_power=stats.get('critical_power'))}
     
     <!-- Stats Cards -->
     <div class="stats-grid">
@@ -1254,11 +1432,6 @@ def generate_html(stats, rf_data, volume_data, ctl_atl_data, ctl_atl_lookup, rfl
             <div class="stat-value">{stats['age_grade'] if stats['age_grade'] else '-'}%</div>
             <div class="stat-label">Age Grade</div>
             <div class="stat-sub">5k estimate</div>
-        </div>
-        <div class="stat-card">
-            <div class="stat-value">{stats['critical_power'] if stats['critical_power'] else '-'}</div>
-            <div class="stat-label">Stryd CP</div>
-            <div class="stat-sub">watts</div>
         </div>
     </div>
     
@@ -1401,6 +1574,45 @@ def generate_html(stats, rf_data, volume_data, ctl_atl_data, ctl_atl_lookup, rfl
         <div class="chart-desc">Weekly average weight (kg) from daily measurements.</div>
         <div class="chart-wrapper" style="height: 180px;">
             <canvas id="weightChart"></canvas>
+        </div>
+    </div>
+    
+    <!-- v51: Race Prediction Trend Chart -->
+    <div class="chart-container">
+        <div class="chart-header">
+            <div class="chart-title">🎯 Race Predictions</div>
+            <div class="chart-toggle" id="predToggle">
+                <button class="active" data-dist="5k">5k</button>
+                <button data-dist="10k">10k</button>
+                <button data-dist="hm">Half</button>
+                <button data-dist="marathon">Marathon</button>
+            </div>
+        </div>
+        <div style="display: flex; justify-content: space-between; align-items: center;">
+            <div class="chart-desc">Blue = predicted. <span style="color:#ef4444">●</span> race <span style="color:#fca5a5">●</span> parkrun.</div>
+            <label style="font-size: 0.75em; color: #666; white-space: nowrap; cursor: pointer;">
+                <input type="checkbox" id="predParkrunToggle" checked style="margin-right: 3px;">parkruns
+            </label>
+        </div>
+        <div class="chart-wrapper" style="height: 220px;">
+            <canvas id="predChart"></canvas>
+        </div>
+    </div>
+    
+    <!-- v51: Age Grade Trend Chart -->
+    <div class="chart-container">
+        <div class="chart-header">
+            <div class="chart-title">📊 Age Grade</div>
+            <div class="chart-toggle" id="agToggle">
+                <button class="active" data-range="365">1yr</button>
+                <button data-range="730">2yr</button>
+                <button data-range="1825">5yr</button>
+                <button data-range="99999">All</button>
+            </div>
+        </div>
+        <div class="chart-desc">Dot size = distance. Dark = race, light = parkrun. Red line = trend.</div>
+        <div class="chart-wrapper" style="height: 220px;">
+            <canvas id="agChart"></canvas>
         </div>
     </div>
     
@@ -2068,6 +2280,283 @@ def generate_html(stats, rf_data, volume_data, ctl_atl_data, ctl_atl_lookup, rfl
             }});
         }}
         
+        // --- v51: Race Prediction Trend Chart ---
+        const predData = {json.dumps(prediction_data if prediction_data else {})};
+        let currentPredDist = '5k';
+        let showParkruns = true;
+        
+        function formatPredTime(seconds) {{
+            if (!seconds) return '-';
+            const h = Math.floor(seconds / 3600);
+            const m = Math.floor((seconds % 3600) / 60);
+            const s = Math.floor(seconds % 60);
+            if (h > 0) return h + ':' + String(m).padStart(2, '0') + ':' + String(s).padStart(2, '0');
+            return m + ':' + String(s).padStart(2, '0');
+        }}
+        
+        const predCtx = document.getElementById('predChart');
+        let predChart = null;
+        
+        function renderPredChart(distKey, includeParkruns) {{
+            const d = predData[distKey];
+            if (!d || !d.dates || d.dates.length === 0) return;
+            
+            // Filter by parkrun toggle
+            const indices = [];
+            for (let i = 0; i < d.dates.length; i++) {{
+                if (!includeParkruns && d.is_parkrun[i] === 1) continue;
+                indices.push(i);
+            }}
+            
+            const dates = indices.map(i => d.dates[i]);
+            const datesISO = indices.map(i => d.dates_iso[i]);
+            const predicted = indices.map(i => d.predicted[i]);
+            const actual = indices.map(i => d.actual[i]);
+            const names = indices.map(i => d.names[i]);
+            const temps = indices.map(i => d.temps[i]);
+            const surfaces = indices.map(i => d.surfaces[i]);
+            const isParkrun = indices.map(i => d.is_parkrun[i]);
+            
+            // Colour actual dots: parkruns lighter, non-parkrun races darker
+            const dotColors = isParkrun.map(p => p === 1 ? 'rgba(252, 165, 165, 0.8)' : 'rgba(239, 68, 68, 0.9)');
+            
+            // Build data points for time axis
+            const predPoints = datesISO.map((dt, i) => predicted[i] !== null ? ({{ x: dt, y: predicted[i] }}) : null).filter(p => p !== null);
+            const actualPoints = datesISO.map((dt, i) => ({{ x: dt, y: actual[i] }}));
+            
+            if (predChart) predChart.destroy();
+            
+            predChart = new Chart(predCtx.getContext('2d'), {{
+                type: 'line',
+                data: {{
+                    datasets: [{{
+                        label: 'Predicted',
+                        data: predPoints,
+                        borderColor: 'rgba(37, 99, 235, 0.7)',
+                        backgroundColor: 'rgba(37, 99, 235, 0.05)',
+                        borderWidth: 2,
+                        pointRadius: 0,
+                        fill: true,
+                        tension: 0.3,
+                    }}, {{
+                        label: 'Actual',
+                        data: actualPoints,
+                        borderColor: 'rgba(239, 68, 68, 0.2)',
+                        pointBackgroundColor: dotColors,
+                        borderWidth: 1,
+                        pointRadius: 3,
+                        fill: false,
+                        tension: 0,
+                        showLine: true,
+                    }}]
+                }},
+                options: {{
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {{
+                        legend: {{ display: false }},
+                        tooltip: {{
+                            callbacks: {{
+                                title: function(ctx) {{
+                                    // Find original index from ISO date
+                                    const isoDate = ctx[0].raw.x;
+                                    const i = datesISO.indexOf(isoDate);
+                                    if (i < 0) return isoDate;
+                                    return dates[i] + (names[i] ? ' — ' + names[i] : '');
+                                }},
+                                label: function(ctx) {{
+                                    return ctx.dataset.label + ': ' + formatPredTime(ctx.raw.y);
+                                }},
+                                afterBody: function(ctx) {{
+                                    const isoDate = ctx[0].raw.x;
+                                    const i = datesISO.indexOf(isoDate);
+                                    if (i < 0) return [];
+                                    const lines = [];
+                                    // Gap
+                                    if (predicted[i] && actual[i]) {{
+                                        const gap = actual[i] - predicted[i];
+                                        const sign = gap > 0 ? '+' : '';
+                                        lines.push('Gap: ' + sign + formatPredTime(Math.abs(gap)) + (gap > 0 ? ' slower' : ' faster'));
+                                    }}
+                                    // Temperature
+                                    if (temps[i] !== null) {{
+                                        const t = temps[i];
+                                        let icon = '';
+                                        if (t >= 25) icon = ' 🥵';
+                                        else if (t >= 20) icon = ' ☀️';
+                                        else if (t <= 0) icon = ' 🥶';
+                                        lines.push('Temp: ' + t + '°C' + icon);
+                                    }}
+                                    // Surface
+                                    if (surfaces[i]) {{
+                                        const surfaceIcons = {{ 'SNOW': '❄️', 'HEAVY_SNOW': '🌨️', 'TRAIL': '🌲', 'TRACK': '🏟️', 'INDOOR_TRACK': '🏟️' }};
+                                        const icon = surfaceIcons[surfaces[i]] || '';
+                                        lines.push(icon + ' ' + surfaces[i]);
+                                    }}
+                                    return lines;
+                                }}
+                            }}
+                        }}
+                    }},
+                    scales: {{
+                        x: {{
+                            type: 'time',
+                            time: {{ unit: 'year', displayFormats: {{ year: 'yyyy' }} }},
+                            ticks: {{ maxTicksLimit: 10, font: {{ size: 10 }} }}
+                        }},
+                        y: {{
+                            display: true,
+                            reverse: true,
+                            ticks: {{
+                                callback: function(v) {{ return formatPredTime(v); }},
+                                font: {{ size: 10 }},
+                                maxTicksLimit: 6
+                            }}
+                        }}
+                    }}
+                }}
+            }});
+        }}
+        
+        if (predCtx && predData && predData['5k'] && predData['5k'].dates.length > 0) {{
+            renderPredChart('5k', true);
+            
+            document.getElementById('predToggle').addEventListener('click', function(e) {{
+                if (e.target.tagName === 'BUTTON') {{
+                    this.querySelectorAll('button').forEach(b => b.classList.remove('active'));
+                    e.target.classList.add('active');
+                    currentPredDist = e.target.dataset.dist;
+                    renderPredChart(currentPredDist, showParkruns);
+                }}
+            }});
+            
+            document.getElementById('predParkrunToggle').addEventListener('change', function() {{
+                showParkruns = this.checked;
+                renderPredChart(currentPredDist, showParkruns);
+            }});
+        }}
+        
+        // --- v51: Age Grade Trend Chart ---
+        const agAllDates = {json.dumps(ag_data['dates'] if ag_data else [])};
+        const agAllDatesISO = {json.dumps(ag_data['dates_iso'] if ag_data else [])};
+        const agAllValues = {json.dumps(ag_data['values'] if ag_data else [])};
+        const agAllLabels = {json.dumps(ag_data['dist_labels'] if ag_data else [])};
+        const agAllColors = {json.dumps(ag_data['dist_codes'] if ag_data else [])};
+        const agAllSizes = {json.dumps(ag_data['dist_sizes'] if ag_data else [])};
+        const agAllParkrun = {json.dumps(ag_data['is_parkrun'] if ag_data else [])};
+        const agAllRolling = {json.dumps(ag_data['rolling_avg'] if ag_data else [])};
+        
+        const agCtx = document.getElementById('agChart');
+        let agChart = null;
+        
+        function getAgSlice(days) {{
+            if (days >= 99999) return {{ datesISO: agAllDatesISO, dates: agAllDates, values: agAllValues, labels: agAllLabels, colors: agAllColors, sizes: agAllSizes, parkrun: agAllParkrun, rolling: agAllRolling }};
+            const cutoff = new Date();
+            cutoff.setDate(cutoff.getDate() - days);
+            const indices = [];
+            for (let i = 0; i < agAllDatesISO.length; i++) {{
+                if (new Date(agAllDatesISO[i]) >= cutoff) indices.push(i);
+            }}
+            return {{
+                datesISO: indices.map(i => agAllDatesISO[i]),
+                dates: indices.map(i => agAllDates[i]),
+                values: indices.map(i => agAllValues[i]),
+                labels: indices.map(i => agAllLabels[i]),
+                colors: indices.map(i => agAllColors[i]),
+                sizes: indices.map(i => agAllSizes[i]),
+                parkrun: indices.map(i => agAllParkrun[i]),
+                rolling: indices.map(i => agAllRolling[i])
+            }};
+        }}
+        
+        function renderAgChart(days) {{
+            const d = getAgSlice(days);
+            if (d.datesISO.length === 0) return;
+            
+            if (agChart) agChart.destroy();
+            
+            // Build rolling average as line data (skip nulls)
+            const rollingData = d.datesISO.map((dt, i) => d.rolling[i] !== null ? ({{ x: dt, y: d.rolling[i] }}) : null).filter(p => p !== null);
+            
+            agChart = new Chart(agCtx.getContext('2d'), {{
+                type: 'scatter',
+                data: {{
+                    datasets: [{{
+                        label: 'Trend',
+                        data: rollingData,
+                        borderColor: 'rgba(220, 38, 38, 0.8)',
+                        borderWidth: 2.5,
+                        pointRadius: 0,
+                        pointHoverRadius: 0,
+                        pointHitRadius: 0,
+                        showLine: true,
+                        tension: 0.3,
+                        type: 'line',
+                        order: 1,
+                    }}, {{
+                        label: 'Age Grade %',
+                        data: d.datesISO.map((dt, i) => ({{ x: dt, y: d.values[i] }})),
+                        pointBackgroundColor: d.colors,
+                        pointRadius: d.sizes,
+                        order: 2,
+                    }}]
+                }},
+                options: {{
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {{
+                        legend: {{ display: false }},
+                        tooltip: {{
+                            filter: function(item) {{ return item.datasetIndex === 1; }},
+                            callbacks: {{
+                                title: function(ctx) {{ 
+                                    if (!ctx.length || ctx[0].datasetIndex !== 1) return '';
+                                    const i = ctx[0].dataIndex;
+                                    return (i >= 0 && i < d.dates.length) ? d.dates[i] : '';
+                                }},
+                                label: function(ctx) {{ 
+                                    if (ctx.datasetIndex !== 1) return null;
+                                    const i = ctx.dataIndex;
+                                    if (i < 0 || i >= d.values.length) return '';
+                                    const prefix = d.parkrun[i] ? '🅿️ parkrun ' : '';
+                                    return prefix + d.labels[i] + ': ' + d.values[i] + '%'; 
+                                }}
+                            }}
+                        }}
+                    }},
+                    scales: {{
+                        x: {{
+                            type: 'time',
+                            time: {{
+                                unit: days <= 730 ? 'month' : 'year',
+                                displayFormats: {{ month: 'MMM yy', year: 'yyyy' }}
+                            }},
+                            ticks: {{ maxTicksLimit: 8, font: {{ size: 10 }} }}
+                        }},
+                        y: {{
+                            display: true,
+                            ticks: {{
+                                callback: function(v) {{ return v + '%'; }},
+                                font: {{ size: 10 }}
+                            }}
+                        }}
+                    }}
+                }}
+            }});
+        }}
+        
+        if (agAllDates.length > 0) {{
+            renderAgChart(365);
+            
+            document.getElementById('agToggle').addEventListener('click', function(e) {{
+                if (e.target.tagName === 'BUTTON') {{
+                    this.querySelectorAll('button').forEach(b => b.classList.remove('active'));
+                    e.target.classList.add('active');
+                    renderAgChart(parseInt(e.target.dataset.range));
+                }}
+            }});
+        }}
+        
         // --- Recent Runs toggle ---
         const recentRunsData = {{
             all: {json.dumps(recent_runs['all'])},
@@ -2200,16 +2689,22 @@ def main():
     print("Processing top races...")
     top_races = get_top_races(df)
     
-    # v51: Alert data and weight chart
+    # v51: Alert data, weight chart, prediction trend, age grade
     print("Processing alert data...")
     alert_data = get_alert_data(df)
     
     print("Processing weight chart data...")
     weight_data = get_weight_chart_data(MASTER_FILE, months=200)
     
+    print("Processing prediction trend data...")
+    prediction_data = get_prediction_trend_data(df)
+    
+    print("Processing age grade data...")
+    ag_data = get_age_grade_data(df)
+    
     # Generate HTML
     print("Generating HTML...")
-    html = generate_html(stats, rf_data, volume_data, ctl_atl_data, ctl_atl_lookup, rfl_trend_dates, rfl_trend_values, rfl_trendline, rfl_projection, rfl_ci_upper, rfl_ci_lower, alltime_rfl_dates, alltime_rfl_values, recent_runs, top_races, alert_data=alert_data, weight_data=weight_data)
+    html = generate_html(stats, rf_data, volume_data, ctl_atl_data, ctl_atl_lookup, rfl_trend_dates, rfl_trend_values, rfl_trendline, rfl_projection, rfl_ci_upper, rfl_ci_lower, alltime_rfl_dates, alltime_rfl_values, recent_runs, top_races, alert_data=alert_data, weight_data=weight_data, prediction_data=prediction_data, ag_data=ag_data)
     
     # Write file
     with open(OUTPUT_FILE, 'w', encoding='utf-8') as f:
