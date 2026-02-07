@@ -70,6 +70,39 @@ TERRAIN_STRAVA_ELEV_MIN = 8.0       # Strava elev gate: m/km minimum to allow te
 DURATION_PENALTY_DAMPING = 0.33     # Fraction of R2 used when penalising (asymmetric)
 
 # =============================================================================
+# EASY RF EMA PARAMETERS (v51)
+# =============================================================================
+EASY_RF_HR_MIN = 120            # Minimum avg HR for easy run classification
+EASY_RF_HR_MAX = 150            # Maximum avg HR for easy run classification
+EASY_RF_DIST_MIN_KM = 4.0      # Minimum distance for easy run classification
+EASY_RF_EMA_SPAN = 15           # EWM span (in easy runs) for Easy RF EMA
+EASY_RF_Z_WINDOW = 30           # Trailing easy-run count for z-score baseline
+
+# =============================================================================
+# ALERT THRESHOLDS (v51)
+# =============================================================================
+# Alert 1: CTL rising, RFL falling
+ALERT1_RFL_DROP = 0.02          # RFL_Trend drop threshold over 4 weeks (2%)
+ALERT1_CTL_RISE = 3.0           # CTL rise threshold over 4 weeks
+ALERT1_WINDOW_DAYS = 28         # Lookback window for Alert 1
+
+# Alert 1b: Taper not working
+ALERT1B_RFL_GAP = 0.02          # Gap from 90-day peak to trigger (2%)
+ALERT1B_PEAK_WINDOW_DAYS = 90   # Window for finding RFL_Trend peak
+ALERT1B_RACE_WINDOW_DAYS = 7    # Days before race to check
+
+# Alert 2: Sustained deep-negative TSB
+ALERT2_TSB_THRESHOLD = -15      # TSB threshold for "deep negative"
+ALERT2_COUNT = 3                # N of last 5 runs that must breach
+ALERT2_WINDOW = 5               # Rolling window size
+
+# Alert 3b: Easy run outlier
+ALERT3B_Z_THRESHOLD = -2.0      # Z-score threshold for single-run outlier
+
+# Alert 5: Easy RF / RFL_Trend divergence (gap-based)
+ALERT5_GAP_THRESHOLD = -0.03    # Gap (Easy_RFL - RFL_Trend) threshold (-3%)
+
+# =============================================================================
 # TEMPERATURE ADJUSTMENT PARAMETERS
 # =============================================================================
 # Note: Temperature adjustment constants live in RF_CONSTANTS within StepB.

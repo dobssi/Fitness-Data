@@ -269,12 +269,15 @@ def get_summary_stats(df):
         'rfl_14d_delta': _calc_rfl_delta(df, 14),
         'latest_hr': int(latest[hr_col]) if latest is not None and pd.notna(latest.get(hr_col)) else None,
         'latest_dist': round(latest[dist_col], 2) if latest is not None and pd.notna(latest.get(dist_col)) else None,
+        # v51: Easy RF gap
+        'easy_rfl_gap': round(latest.get('Easy_RFL_Gap', 0) * 100, 1) if latest is not None and pd.notna(latest.get('Easy_RFL_Gap')) else None,
     }
     return stats
 
 def get_rfl_trend_data(df, days=90):
     """Get RFL trend data for chart. Returns exactly 'days' worth of data.
-    Shows RFL as percentage (0-100%) instead of RF in W/bpm."""
+    Shows RFL as percentage (0-100%) instead of RF in W/bpm.
+    v51: Also returns Easy_RF_EMA normalised to RFL scale and race flags."""
     # Use end of today for inclusive boundary
     today = datetime.now().replace(hour=23, minute=59, second=59, microsecond=999999)
     cutoff = today - timedelta(days=days)
@@ -286,17 +289,24 @@ def get_rfl_trend_data(df, days=90):
     trend_col = 'RFL_Trend'
     
     if rfl_col not in recent.columns and trend_col not in recent.columns:
-        return [], [], []
+        return [], [], [], [], []
     
     cols_to_keep = ['date']
     if rfl_col in recent.columns:
         cols_to_keep.append(rfl_col)
     if trend_col in recent.columns:
         cols_to_keep.append(trend_col)
+    # v51: Include Easy_RF_EMA and race_flag
+    has_easy = 'Easy_RF_EMA' in recent.columns
+    if has_easy:
+        cols_to_keep.append('Easy_RF_EMA')
+    has_race = 'race_flag' in recent.columns
+    if has_race:
+        cols_to_keep.append('race_flag')
     
     recent = recent[cols_to_keep].copy()
     
-    # Drop rows where both are NaN
+    # Drop rows where RFL is NaN
     if rfl_col in recent.columns:
         recent = recent.dropna(subset=[rfl_col])
     elif trend_col in recent.columns:
@@ -316,7 +326,20 @@ def get_rfl_trend_data(df, days=90):
     else:
         rfl_trend = [None] * len(dates)
     
-    return dates, rfl_values, rfl_trend
+    # v51: Normalise Easy_RF_EMA to RFL scale (divide by peak RF_Trend)
+    easy_rfl = [None] * len(dates)
+    if has_easy:
+        peak_rf = df['RF_Trend'].max() if 'RF_Trend' in df.columns else None
+        if peak_rf and peak_rf > 0:
+            easy_rfl = [round(v / peak_rf * 100, 1) if pd.notna(v) else None 
+                       for v in recent['Easy_RF_EMA'].tolist()]
+    
+    # v51: Race flags (1 = race, 0 = training)
+    race_flags = [0] * len(dates)
+    if has_race:
+        race_flags = [int(v) if pd.notna(v) and v == 1 else 0 for v in recent['race_flag'].tolist()]
+    
+    return dates, rfl_values, rfl_trend, easy_rfl, race_flags
 
 def get_weekly_volume(df, weeks=12):
     """Get weekly volume data for chart. Returns exactly 'weeks' worth of data, rolling from today."""
@@ -673,6 +696,8 @@ def get_recent_runs(df, n=10):
                 'tss': tss_val,
                 'rfl': rfl_val,
                 'race': is_race,
+                # v51: trend mover
+                'delta': round(row['RFL_Trend_Delta'] * 100, 2) if pd.notna(row.get('RFL_Trend_Delta')) else None,
             })
         
         return runs
@@ -686,6 +711,109 @@ def get_recent_runs(df, n=10):
     race_runs = extract_runs(races_df)
     
     return {'all': all_runs, 'races': race_runs}
+
+
+def get_alert_data(df):
+    """v51: Get current alert status for dashboard banner."""
+    alert_cols = ['Alert_1', 'Alert_1b', 'Alert_2', 'Alert_3b', 'Alert_5']
+    alerts = []
+    
+    if len(df) == 0:
+        return alerts
+    
+    latest = df.iloc[-1]
+    
+    alert_defs = {
+        'Alert_1': {'name': 'Training more, scoring worse', 'level': 'concern', 'icon': '⚠️'},
+        'Alert_1b': {'name': 'Taper not working', 'level': 'concern', 'icon': '⚠️'},
+        'Alert_2': {'name': 'Deep fatigue', 'level': 'watch', 'icon': '👀'},
+        'Alert_3b': {'name': 'Easy run outlier', 'level': 'watch', 'icon': '👀'},
+        'Alert_5': {'name': 'Easy RF divergence', 'level': 'concern', 'icon': '⚠️'},
+    }
+    
+    for col in alert_cols:
+        if col in df.columns and latest.get(col, False):
+            defn = alert_defs.get(col, {})
+            detail = ''
+            if col == 'Alert_5' and pd.notna(latest.get('Easy_RFL_Gap')):
+                detail = f" (gap {latest['Easy_RFL_Gap']*100:.1f}%)"
+            elif col == 'Alert_2' and pd.notna(latest.get('TSB')):
+                detail = f" (TSB {latest['TSB']:.0f})"
+            alerts.append({
+                'name': defn.get('name', col),
+                'level': defn.get('level', 'info'),
+                'icon': defn.get('icon', 'ℹ️'),
+                'detail': detail,
+            })
+    
+    return alerts
+
+
+def get_weight_chart_data(master_file, months=12):
+    """v51: Get weekly average weight data for chart.
+    
+    Uses weight_kg from Master if available, falls back to athlete_data.csv.
+    Returns dates and values for a weekly weight chart.
+    """
+    wt_df = None
+    
+    # Try Master first
+    try:
+        df = pd.read_excel(master_file, sheet_name='Master', usecols=['date', 'weight_kg'])
+        df['date'] = pd.to_datetime(df['date'])
+        df = df.dropna(subset=['weight_kg'])
+        if len(df) > 0:
+            wt_df = df[['date', 'weight_kg']]
+    except Exception:
+        pass
+    
+    # Fall back to athlete_data.csv
+    if wt_df is None or len(wt_df) == 0:
+        athlete_file = os.path.join(os.path.dirname(master_file), 'athlete_data.csv')
+        if not os.path.exists(athlete_file):
+            athlete_file = 'athlete_data.csv'
+        if os.path.exists(athlete_file):
+            try:
+                import io
+                with open(athlete_file, 'r') as f:
+                    raw_lines = f.readlines()
+                clean_lines = []
+                for line in raw_lines:
+                    stripped = line.lstrip()
+                    if stripped.startswith('#'):
+                        last_hash = stripped.rfind('#')
+                        remainder = stripped[last_hash + 1:].strip()
+                        if remainder and ',' in remainder:
+                            clean_lines.append(remainder + '\n')
+                    else:
+                        clean_lines.append(line)
+                ad = pd.read_csv(io.StringIO(''.join(clean_lines)))
+                ad['date'] = pd.to_datetime(ad['date'], dayfirst=True, format='mixed')
+                if 'weight_kg' in ad.columns:
+                    wt_df = ad[['date', 'weight_kg']].dropna(subset=['weight_kg'])
+            except Exception as e:
+                print(f"  Warning: Could not load weight from athlete_data.csv: {e}")
+    
+    if wt_df is None or len(wt_df) == 0:
+        return [], []
+    
+    try:
+        today = datetime.now()
+        cutoff = today - timedelta(days=months * 30)
+        wt_df = wt_df[wt_df['date'] > cutoff].copy()
+        
+        # Weekly averages
+        wt_df['week'] = wt_df['date'].dt.to_period('W').apply(lambda p: p.start_time)
+        weekly = wt_df.groupby('week')['weight_kg'].mean().reset_index()
+        weekly = weekly.sort_values('week')
+        
+        dates = weekly['week'].dt.strftime('%d %b %y').tolist()
+        values = [round(v, 1) for v in weekly['weight_kg'].tolist()]
+        
+        return dates, values
+    except Exception as e:
+        print(f"  Warning: Could not process weight data: {e}")
+        return [], []
 
 
 def get_top_races(df, n=10):
@@ -786,18 +914,45 @@ def get_top_races(df, n=10):
 
 
 # ============================================================================
+# v51: ALERT BANNER GENERATOR
+# ============================================================================
+def _generate_alert_banner(alert_data):
+    """Generate the HTML for the health check banner."""
+    if not alert_data:
+        return '''<div style="background: #f0fdf4; border: 1px solid #86efac; border-radius: 12px; padding: 10px 16px; margin-bottom: 12px; text-align: center;">
+            <span style="font-size: 1.1em;">🟢</span> <strong>All clear</strong> — no alerts active
+        </div>'''
+    
+    # Determine overall level
+    levels = [a['level'] for a in alert_data]
+    if 'concern' in levels:
+        bg = '#fef2f2'; border = '#fca5a5'; icon = '🔴'
+    else:
+        bg = '#fffbeb'; border = '#fcd34d'; icon = '🟡'
+    
+    items = ''.join(
+        f'<div style="margin: 4px 0; font-size: 0.85em;">{a["icon"]} <strong>{a["name"]}</strong>{a.get("detail","")}</div>'
+        for a in alert_data
+    )
+    return f'''<div style="background: {bg}; border: 1px solid {border}; border-radius: 12px; padding: 10px 16px; margin-bottom: 12px;">
+        <div style="text-align: center; margin-bottom: 4px;"><span style="font-size: 1.1em;">{icon}</span> <strong>{len(alert_data)} alert{"s" if len(alert_data) > 1 else ""} active</strong></div>
+        {items}
+    </div>'''
+
+
+# ============================================================================
 # HTML GENERATION
 # ============================================================================
-def generate_html(stats, rf_data, volume_data, ctl_atl_data, ctl_atl_lookup, rfl_trend_dates, rfl_trend_values, rfl_trendline, rfl_projection, rfl_ci_upper, rfl_ci_lower, alltime_rfl_dates, alltime_rfl_values, recent_runs, top_races):
+def generate_html(stats, rf_data, volume_data, ctl_atl_data, ctl_atl_lookup, rfl_trend_dates, rfl_trend_values, rfl_trendline, rfl_projection, rfl_ci_upper, rfl_ci_lower, alltime_rfl_dates, alltime_rfl_values, recent_runs, top_races, alert_data=None, weight_data=None):
     """Generate the HTML dashboard."""
     
-    # Extract data for each time range - RF
-    rf_dates_90, rf_values_90, rf_trend_90 = rf_data['90']
-    rf_dates_180, rf_values_180, rf_trend_180 = rf_data['180']
-    rf_dates_365, rf_values_365, rf_trend_365 = rf_data['365']
-    rf_dates_730, rf_values_730, rf_trend_730 = rf_data['730']
-    rf_dates_1095, rf_values_1095, rf_trend_1095 = rf_data['1095']
-    rf_dates_1825, rf_values_1825, rf_trend_1825 = rf_data['1825']
+    # Extract data for each time range - RF (v51: now includes easy_rfl and race_flags)
+    rf_dates_90, rf_values_90, rf_trend_90, rf_easy_90, rf_races_90 = rf_data['90']
+    rf_dates_180, rf_values_180, rf_trend_180, rf_easy_180, rf_races_180 = rf_data['180']
+    rf_dates_365, rf_values_365, rf_trend_365, rf_easy_365, rf_races_365 = rf_data['365']
+    rf_dates_730, rf_values_730, rf_trend_730, rf_easy_730, rf_races_730 = rf_data['730']
+    rf_dates_1095, rf_values_1095, rf_trend_1095, rf_easy_1095, rf_races_1095 = rf_data['1095']
+    rf_dates_1825, rf_values_1825, rf_trend_1825, rf_easy_1825, rf_races_1825 = rf_data['1825']
     
     # Volume data - weeks
     week_labels_12, week_distances_12, week_runs_12 = volume_data['W']['12']
@@ -1052,6 +1207,9 @@ def generate_html(stats, rf_data, volume_data, ctl_atl_data, ctl_atl_lookup, rfl
         {datetime.now().strftime('%A %d %B %Y, %H:%M')}
     </div>
     
+    <!-- v51: Health Check Banner -->
+    {_generate_alert_banner(alert_data)}
+    
     <!-- Stats Cards -->
     <div class="stats-grid">
         <div class="stat-card">
@@ -1086,6 +1244,11 @@ def generate_html(stats, rf_data, volume_data, ctl_atl_data, ctl_atl_lookup, rfl
             <div class="stat-value">{f"{'+' if stats['rfl_14d_delta'] > 0 else ''}{stats['rfl_14d_delta']}%" if stats['rfl_14d_delta'] is not None else '-'}</div>
             <div class="stat-label">RFL 14d</div>
             <div class="stat-sub">change</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-value">{f"{'+' if stats['easy_rfl_gap'] > 0 else ''}{stats['easy_rfl_gap']}%" if stats['easy_rfl_gap'] is not None else '-'}</div>
+            <div class="stat-label">Easy RF Gap</div>
+            <div class="stat-sub">vs trend</div>
         </div>
         <div class="stat-card">
             <div class="stat-value">{stats['age_grade'] if stats['age_grade'] else '-'}%</div>
@@ -1158,7 +1321,7 @@ def generate_html(stats, rf_data, volume_data, ctl_atl_data, ctl_atl_lookup, rfl
                 <button data-range="1825">5yr</button>
             </div>
         </div>
-        <div class="chart-desc">Current fitness as % of personal best. Individual runs (dots) and combined trend (line).</div>
+        <div class="chart-desc">Blue dots = training, red dots = races, green dashed = easy-run signal.</div>
         <div class="chart-wrapper">
             <canvas id="rfChart"></canvas>
         </div>
@@ -1211,14 +1374,33 @@ def generate_html(stats, rf_data, volume_data, ctl_atl_data, ctl_atl_lookup, rfl
                 <button data-granularity="Y">Y</button>
             </div>
             <div class="chart-toggle" id="volumeRangeToggle">
-                <button class="active" data-range="12">12</button>
-                <button data-range="26">26</button>
-                <button data-range="52">52</button>
+                <button class="active" data-range="12">12w</button>
+                <button data-range="26">6m</button>
+                <button data-range="52">1yr</button>
             </div>
         </div>
         <div class="chart-desc">Distance over time. W=weeks, M=months, Y=years. Consistency matters more than big weeks.</div>
         <div class="chart-wrapper">
             <canvas id="volumeChart"></canvas>
+        </div>
+    </div>
+    
+    <!-- v51: Weight Chart -->
+    <div class="chart-container">
+        <div class="chart-header">
+            <div class="chart-title">⚖️ Weight</div>
+            <div class="chart-toggle" id="weightToggle">
+                <button class="active" data-months="6">6m</button>
+                <button data-months="12">1yr</button>
+                <button data-months="24">2yr</button>
+                <button data-months="36">3yr</button>
+                <button data-months="60">5yr</button>
+                <button data-months="999">All</button>
+            </div>
+        </div>
+        <div class="chart-desc">Weekly average weight (kg) from daily measurements.</div>
+        <div class="chart-wrapper" style="height: 180px;">
+            <canvas id="weightChart"></canvas>
         </div>
     </div>
     
@@ -1408,15 +1590,20 @@ def generate_html(stats, rf_data, volume_data, ctl_atl_data, ctl_atl_lookup, rfl
             }}
         }});
 
-        // RF Trend Chart - with toggle
+        // RF Trend Chart - with toggle (v51: includes Easy RF EMA + race dots)
         const rfData = {{
-            '90': {{ dates: {json.dumps(rf_dates_90)}, values: {json.dumps(rf_values_90)}, trend: {json.dumps(rf_trend_90)} }},
-            '180': {{ dates: {json.dumps(rf_dates_180)}, values: {json.dumps(rf_values_180)}, trend: {json.dumps(rf_trend_180)} }},
-            '365': {{ dates: {json.dumps(rf_dates_365)}, values: {json.dumps(rf_values_365)}, trend: {json.dumps(rf_trend_365)} }},
-            '730': {{ dates: {json.dumps(rf_dates_730)}, values: {json.dumps(rf_values_730)}, trend: {json.dumps(rf_trend_730)} }},
-            '1095': {{ dates: {json.dumps(rf_dates_1095)}, values: {json.dumps(rf_values_1095)}, trend: {json.dumps(rf_trend_1095)} }},
-            '1825': {{ dates: {json.dumps(rf_dates_1825)}, values: {json.dumps(rf_values_1825)}, trend: {json.dumps(rf_trend_1825)} }}
+            '90': {{ dates: {json.dumps(rf_dates_90)}, values: {json.dumps(rf_values_90)}, trend: {json.dumps(rf_trend_90)}, easy: {json.dumps(rf_easy_90)}, races: {json.dumps(rf_races_90)} }},
+            '180': {{ dates: {json.dumps(rf_dates_180)}, values: {json.dumps(rf_values_180)}, trend: {json.dumps(rf_trend_180)}, easy: {json.dumps(rf_easy_180)}, races: {json.dumps(rf_races_180)} }},
+            '365': {{ dates: {json.dumps(rf_dates_365)}, values: {json.dumps(rf_values_365)}, trend: {json.dumps(rf_trend_365)}, easy: {json.dumps(rf_easy_365)}, races: {json.dumps(rf_races_365)} }},
+            '730': {{ dates: {json.dumps(rf_dates_730)}, values: {json.dumps(rf_values_730)}, trend: {json.dumps(rf_trend_730)}, easy: {json.dumps(rf_easy_730)}, races: {json.dumps(rf_races_730)} }},
+            '1095': {{ dates: {json.dumps(rf_dates_1095)}, values: {json.dumps(rf_values_1095)}, trend: {json.dumps(rf_trend_1095)}, easy: {json.dumps(rf_easy_1095)}, races: {json.dumps(rf_races_1095)} }},
+            '1825': {{ dates: {json.dumps(rf_dates_1825)}, values: {json.dumps(rf_values_1825)}, trend: {json.dumps(rf_trend_1825)}, easy: {json.dumps(rf_easy_1825)}, races: {json.dumps(rf_races_1825)} }}
         }};
+        
+        // v51: Generate per-point colours (red for races, blue for training)
+        function racePointColors(races, baseColor, raceColor) {{
+            return races.map(r => r === 1 ? raceColor : baseColor);
+        }}
         
         const rfCtx = document.getElementById('rfChart').getContext('2d');
         let rfChart = new Chart(rfCtx, {{
@@ -1430,7 +1617,9 @@ def generate_html(stats, rf_data, volume_data, ctl_atl_data, ctl_atl_lookup, rfl
                     backgroundColor: 'rgba(37, 99, 235, 0.1)',
                     borderWidth: 1,
                     pointRadius: 3,
-                    pointBackgroundColor: 'rgba(37, 99, 235, 0.5)',
+                    pointBackgroundColor: racePointColors(rfData['90'].races, 'rgba(37, 99, 235, 0.5)', 'rgba(239, 68, 68, 0.9)'),
+                    pointBorderColor: racePointColors(rfData['90'].races, 'rgba(37, 99, 235, 0.3)', 'rgba(239, 68, 68, 0.7)'),
+                    pointBorderWidth: 1,
                     fill: false,
                     tension: 0,
                 }}, {{
@@ -1438,6 +1627,15 @@ def generate_html(stats, rf_data, volume_data, ctl_atl_data, ctl_atl_lookup, rfl
                     data: rfData['90'].trend,
                     borderColor: 'rgba(37, 99, 235, 1)',
                     borderWidth: 2,
+                    pointRadius: 0,
+                    fill: false,
+                    tension: 0.3,
+                }}, {{
+                    label: 'Easy RF',
+                    data: rfData['90'].easy,
+                    borderColor: 'rgba(34, 197, 94, 0.8)',
+                    borderWidth: 1.5,
+                    borderDash: [4, 3],
                     pointRadius: 0,
                     fill: false,
                     tension: 0.3,
@@ -1477,6 +1675,7 @@ def generate_html(stats, rf_data, volume_data, ctl_atl_data, ctl_atl_lookup, rfl
                 rfChart.data.labels = rfData[range].dates;
                 rfChart.data.datasets[0].data = rfData[range].values;
                 rfChart.data.datasets[1].data = rfData[range].trend;
+                rfChart.data.datasets[2].data = rfData[range].easy;
                 
                 // Adjust point size and opacity based on data density
                 const pointSettings = {{
@@ -1488,9 +1687,11 @@ def generate_html(stats, rf_data, volume_data, ctl_atl_data, ctl_atl_lookup, rfl
                     '1825': {{ radius: 0, borderColor: 'rgba(37, 99, 235, 0.1)', pointColor: 'rgba(37, 99, 235, 0.15)' }}
                 }};
                 const settings = pointSettings[range];
+                const races = rfData[range].races;
                 rfChart.data.datasets[0].pointRadius = settings.radius;
+                rfChart.data.datasets[0].pointBackgroundColor = racePointColors(races, settings.pointColor, 'rgba(239, 68, 68, 0.9)');
+                rfChart.data.datasets[0].pointBorderColor = racePointColors(races, settings.borderColor, 'rgba(239, 68, 68, 0.7)');
                 rfChart.data.datasets[0].borderColor = settings.borderColor;
-                rfChart.data.datasets[0].pointBackgroundColor = settings.pointColor;
                 
                 rfChart.update();
             }}
@@ -1808,6 +2009,65 @@ def generate_html(stats, rf_data, volume_data, ctl_atl_data, ctl_atl_lookup, rfl
             }}
         }});
         
+        // --- v51: Weight Chart ---
+        const weightAllDates = {json.dumps(weight_data[0] if weight_data else [])};
+        const weightAllValues = {json.dumps(weight_data[1] if weight_data else [])};
+        
+        function getWeightSlice(months) {{
+            if (months >= 999) return {{ dates: weightAllDates, values: weightAllValues }};
+            const n = Math.round(months * 4.33);  // ~weeks per month
+            return {{
+                dates: weightAllDates.slice(-n),
+                values: weightAllValues.slice(-n)
+            }};
+        }}
+        
+        const weightCtx = document.getElementById('weightChart');
+        let weightChart = null;
+        if (weightCtx && weightAllDates.length > 0) {{
+            const w6 = getWeightSlice(6);
+            weightChart = new Chart(weightCtx.getContext('2d'), {{
+                type: 'line',
+                data: {{
+                    labels: w6.dates,
+                    datasets: [{{
+                        label: 'Weight (kg)',
+                        data: w6.values,
+                        borderColor: 'rgba(168, 85, 247, 0.9)',
+                        backgroundColor: 'rgba(168, 85, 247, 0.1)',
+                        borderWidth: 1.5,
+                        pointRadius: 1,
+                        fill: true,
+                        tension: 0.3,
+                    }}]
+                }},
+                options: {{
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {{ legend: {{ display: false }} }},
+                    scales: {{
+                        x: {{ display: true, ticks: {{ maxTicksLimit: 5, maxRotation: 0, font: {{ size: 9 }} }} }},
+                        y: {{ 
+                            display: true, 
+                            ticks: {{ font: {{ size: 10 }}, callback: function(v) {{ return v + 'kg'; }} }}
+                        }}
+                    }}
+                }}
+            }});
+            
+            document.getElementById('weightToggle').addEventListener('click', function(e) {{
+                if (e.target.tagName === 'BUTTON') {{
+                    this.querySelectorAll('button').forEach(b => b.classList.remove('active'));
+                    e.target.classList.add('active');
+                    const months = parseInt(e.target.dataset.months);
+                    const wd = getWeightSlice(months);
+                    weightChart.data.labels = wd.dates;
+                    weightChart.data.datasets[0].data = wd.values;
+                    weightChart.update();
+                }}
+            }});
+        }}
+        
         // --- Recent Runs toggle ---
         const recentRunsData = {{
             all: {json.dumps(recent_runs['all'])},
@@ -1823,18 +2083,27 @@ def generate_html(stats, rf_data, volume_data, ctl_atl_data, ctl_atl_lookup, rfl
                 return;
             }}
             
-            tbody.innerHTML = runs.map(run => `
+            tbody.innerHTML = runs.map(run => {{
+                // v51: Trend mover arrow
+                let deltaHtml = '';
+                if (run.delta !== null && run.delta !== undefined) {{
+                    if (run.delta >= 1.0) deltaHtml = '<span style="color:#16a34a;font-weight:bold;" title="RFL +' + run.delta.toFixed(1) + '%"> ▲▲</span>';
+                    else if (run.delta >= 0.3) deltaHtml = '<span style="color:#16a34a;" title="RFL +' + run.delta.toFixed(1) + '%"> ▲</span>';
+                    else if (run.delta <= -1.0) deltaHtml = '<span style="color:#dc2626;font-weight:bold;" title="RFL ' + run.delta.toFixed(1) + '%"> ▼▼</span>';
+                    else if (run.delta <= -0.3) deltaHtml = '<span style="color:#dc2626;" title="RFL ' + run.delta.toFixed(1) + '%"> ▼</span>';
+                }}
+                return `
                 <tr>
                     <td>${{run.date}}</td>
-                    <td>${{run.name}} ${{run.race ? '<span class="race-badge">RACE</span>' : ''}}</td>
+                    <td>${{run.name}} ${{run.race ? '<span class="race-badge">RACE</span>' : ''}}${{deltaHtml}}</td>
                     <td>${{run.dist ? run.dist + ' km' : '-'}}</td>
                     <td>${{run.pace}}</td>
                     <td>${{run.npower || '-'}}</td>
                     <td>${{run.hr || '-'}}</td>
                     <td>${{run.tss || '-'}}</td>
                     <td>${{run.rfl || '-'}}</td>
-                </tr>
-            `).join('');
+                </tr>`;
+            }}).join('');
         }}
         
         // Initialize with all runs
@@ -1931,9 +2200,16 @@ def main():
     print("Processing top races...")
     top_races = get_top_races(df)
     
+    # v51: Alert data and weight chart
+    print("Processing alert data...")
+    alert_data = get_alert_data(df)
+    
+    print("Processing weight chart data...")
+    weight_data = get_weight_chart_data(MASTER_FILE, months=200)
+    
     # Generate HTML
     print("Generating HTML...")
-    html = generate_html(stats, rf_data, volume_data, ctl_atl_data, ctl_atl_lookup, rfl_trend_dates, rfl_trend_values, rfl_trendline, rfl_projection, rfl_ci_upper, rfl_ci_lower, alltime_rfl_dates, alltime_rfl_values, recent_runs, top_races)
+    html = generate_html(stats, rf_data, volume_data, ctl_atl_data, ctl_atl_lookup, rfl_trend_dates, rfl_trend_values, rfl_trendline, rfl_projection, rfl_ci_upper, rfl_ci_lower, alltime_rfl_dates, alltime_rfl_values, recent_runs, top_races, alert_data=alert_data, weight_data=weight_data)
     
     # Write file
     with open(OUTPUT_FILE, 'w', encoding='utf-8') as f:

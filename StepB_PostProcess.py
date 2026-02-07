@@ -1,5 +1,15 @@
 #!/usr/bin/env python3
-# File: StepB_PostProcess_v50.py
+# File: StepB_PostProcess_v51.py
+#
+# Changelist v51 (2026-02-07):
+#   - Easy RF EMA: exponentially weighted mean (span=15) of easy-run RF_adj
+#     (avg_hr 120-150, dist >= 4km, non-race). Forward-filled to all runs.
+#   - Easy_RF_z: z-score of each easy run vs trailing 30-run baseline
+#   - RFL_Trend_Delta: run-to-run change in RFL_Trend (trend mover flagging)
+#   - Easy_RFL_Gap: normalised Easy_RF_EMA minus RFL_Trend (divergence metric)
+#   - Alert system (console output): Alert 1 (CTL up/RFL down), Alert 1b
+#     (taper quality), Alert 2 (deep TSB), Alert 3b (easy outlier),
+#     Alert 5 (easy RF divergence). All thresholds in config.py.
 #
 # Changelist v50 (2026-02-06):
 #   - Fast cache index: uses _cache_index.json via build_cache_index_fast()
@@ -284,7 +294,14 @@ try:
                         CTL_TIME_CONSTANT, ATL_TIME_CONSTANT, RF_TREND_WINDOW,
                         RF_WINDOW_DURATION_S,
                         TERRAIN_LINEAR_SLOPE, TERRAIN_LINEAR_CAP, TERRAIN_STRAVA_ELEV_MIN,
-                        DURATION_PENALTY_DAMPING)
+                        DURATION_PENALTY_DAMPING,
+                        # v51: Easy RF & Alert parameters
+                        EASY_RF_HR_MIN, EASY_RF_HR_MAX, EASY_RF_DIST_MIN_KM,
+                        EASY_RF_EMA_SPAN, EASY_RF_Z_WINDOW,
+                        ALERT1_RFL_DROP, ALERT1_CTL_RISE, ALERT1_WINDOW_DAYS,
+                        ALERT1B_RFL_GAP, ALERT1B_PEAK_WINDOW_DAYS, ALERT1B_RACE_WINDOW_DAYS,
+                        ALERT2_TSB_THRESHOLD, ALERT2_COUNT, ALERT2_WINDOW,
+                        ALERT3B_Z_THRESHOLD, ALERT5_GAP_THRESHOLD)
 except ImportError:
     PEAK_CP_WATTS = 375  # Fallback — must match config.py
     POWER_SCORE_RIEGEL_K = 0.08
@@ -301,6 +318,23 @@ except ImportError:
     TERRAIN_LINEAR_CAP = 0.05
     TERRAIN_STRAVA_ELEV_MIN = 8.0
     DURATION_PENALTY_DAMPING = 0.33
+    # v51 fallbacks
+    EASY_RF_HR_MIN = 120
+    EASY_RF_HR_MAX = 150
+    EASY_RF_DIST_MIN_KM = 4.0
+    EASY_RF_EMA_SPAN = 15
+    EASY_RF_Z_WINDOW = 30
+    ALERT1_RFL_DROP = 0.02
+    ALERT1_CTL_RISE = 3.0
+    ALERT1_WINDOW_DAYS = 28
+    ALERT1B_RFL_GAP = 0.02
+    ALERT1B_PEAK_WINDOW_DAYS = 90
+    ALERT1B_RACE_WINDOW_DAYS = 7
+    ALERT2_TSB_THRESHOLD = -15
+    ALERT2_COUNT = 3
+    ALERT2_WINDOW = 5
+    ALERT3B_Z_THRESHOLD = -2.0
+    ALERT5_GAP_THRESHOLD = -0.03
 
 RF_CONSTANTS = {
     # Rolling periods
@@ -992,6 +1026,271 @@ def calc_rolling_metrics(df: pd.DataFrame) -> pd.DataFrame:
         print(f"  Power Score floor applied: {floor_count} runs")
     
     return df
+
+
+def calc_easy_rf_metrics(df: pd.DataFrame) -> pd.DataFrame:
+    """v51: Calculate Easy RF EMA, z-score, RFL_Trend_Delta, and Easy_RFL_Gap.
+    
+    Easy RF EMA is an exponentially weighted mean of RF_adj for easy runs only
+    (avg_hr 120-150, distance >= 4km, non-race, RF_adj valid). This tracks 
+    underlying aerobic fitness without contamination from races or hard efforts.
+    
+    New columns:
+      Easy_RF_EMA       - 15-run EWM of easy-run RF_adj, forward-filled to all runs
+      Easy_RF_z         - Z-score of easy RF vs trailing 30-run easy-run baseline
+      RFL_Trend_Delta   - Change in RFL_Trend from previous run
+      Easy_RFL_Gap      - Gap between Easy_RF_EMA (normalised) and RFL_Trend
+    """
+    print("\n=== v51: Calculating Easy RF metrics ===")
+    
+    # --- Easy run mask ---
+    easy_mask = (
+        (df['avg_hr'] >= EASY_RF_HR_MIN) & (df['avg_hr'] <= EASY_RF_HR_MAX) &
+        (df['distance_km'] >= EASY_RF_DIST_MIN_KM) &
+        (df['race_flag'] != 1) &
+        (df['RF_adj'].notna())
+    )
+    n_easy = easy_mask.sum()
+    n_total = len(df)
+    print(f"  Easy runs: {n_easy} of {n_total} ({100*n_easy/n_total:.0f}%)")
+    
+    # --- Easy RF EMA (span=15 easy runs, then forward-fill) ---
+    df['Easy_RF_EMA'] = np.nan
+    if n_easy > 0:
+        easy_rf = df.loc[easy_mask, 'RF_adj'].copy()
+        ema = easy_rf.ewm(span=EASY_RF_EMA_SPAN, adjust=True).mean()
+        df.loc[easy_mask, 'Easy_RF_EMA'] = ema
+        df['Easy_RF_EMA'] = df['Easy_RF_EMA'].ffill()
+        print(f"  Easy RF EMA: {ema.iloc[-1]:.4f} (latest)")
+    
+    # --- Easy RF z-score (vs trailing 30-run easy-run baseline) ---
+    df['Easy_RF_z'] = np.nan
+    if n_easy >= EASY_RF_Z_WINDOW:
+        easy_rf_vals = df.loc[easy_mask, 'RF_adj'].copy()
+        rolling_mean = easy_rf_vals.rolling(window=EASY_RF_Z_WINDOW, min_periods=10).mean()
+        rolling_std = easy_rf_vals.rolling(window=EASY_RF_Z_WINDOW, min_periods=10).std()
+        z_scores = (easy_rf_vals - rolling_mean) / rolling_std.replace(0, np.nan)
+        df.loc[easy_mask, 'Easy_RF_z'] = z_scores
+    
+    # --- RFL_Trend_Delta (run-to-run change) ---
+    df['RFL_Trend_Delta'] = np.nan
+    if 'RFL_Trend' in df.columns:
+        rfl_trend = df['RFL_Trend'].copy()
+        df['RFL_Trend_Delta'] = rfl_trend - rfl_trend.shift(1)
+        # Report distribution
+        valid_delta = df['RFL_Trend_Delta'].dropna()
+        if len(valid_delta) > 50:
+            p5 = valid_delta.quantile(0.05)
+            p95 = valid_delta.quantile(0.95)
+            big_boost = (valid_delta > 0.01).sum()
+            big_drag = (valid_delta < -0.01).sum()
+            print(f"  RFL_Trend_Delta: P5={p5*100:.2f}%, P95={p95*100:.2f}%, "
+                  f"big boosts={big_boost}, big drags={big_drag}")
+    
+    # --- Easy_RFL_Gap (normalised Easy RF EMA minus RFL_Trend) ---
+    df['Easy_RFL_Gap'] = np.nan
+    if 'RFL_Trend' in df.columns and 'Easy_RF_EMA' in df.columns:
+        peak_rf_trend = df['RF_Trend'].max() if 'RF_Trend' in df.columns else np.nan
+        if pd.notna(peak_rf_trend) and peak_rf_trend > 0:
+            easy_rfl = df['Easy_RF_EMA'] / peak_rf_trend
+            df['Easy_RFL_Gap'] = easy_rfl - df['RFL_Trend']
+            latest_gap = df['Easy_RFL_Gap'].dropna()
+            if len(latest_gap) > 0:
+                print(f"  Easy_RFL_Gap: {latest_gap.iloc[-1]*100:.1f}% (latest)")
+    
+    return df
+
+
+def calc_alert_columns(df: pd.DataFrame) -> pd.DataFrame:
+    """v51: Calculate historical alert columns for every run in the Master.
+    
+    Each alert column is True when the alert condition is active, False otherwise.
+    Alerts persist (stay True) on every run while the condition holds.
+    
+    New columns:
+      Alert_1      - CTL rising, RFL falling (4-week divergence)
+      Alert_1b     - Taper not working (RFL below 90-day peak near race)
+      Alert_2      - Sustained deep-negative TSB (3 of last 5 runs < -15)
+      Alert_3b     - Easy run outlier (z < -2.0 on this easy run)
+      Alert_5      - Easy RF / RFL_Trend gap < -3%
+    """
+    print("\n=== v51: Calculating alert columns ===")
+    
+    # Initialise all alert columns as False
+    for col in ['Alert_1', 'Alert_1b', 'Alert_2', 'Alert_3b', 'Alert_5']:
+        df[col] = False
+    
+    dates = df['date'].values  # numpy datetime64
+    n = len(df)
+    
+    # --- Alert 1: CTL rising while RFL falling (4-week window) ---
+    if 'CTL' in df.columns and 'RFL_Trend' in df.columns:
+        rfl = df['RFL_Trend'].values
+        ctl = df['CTL'].values
+        a1_count = 0
+        for i in range(1, n):
+            # Find run ~28 days ago
+            cutoff = dates[i] - np.timedelta64(ALERT1_WINDOW_DAYS, 'D')
+            # Find the closest run at or before the cutoff
+            earlier = np.where((dates[:i] <= cutoff))[0]
+            if len(earlier) == 0:
+                continue
+            j = earlier[-1]
+            if np.isfinite(rfl[i]) and np.isfinite(rfl[j]) and np.isfinite(ctl[i]) and np.isfinite(ctl[j]):
+                rfl_drop = rfl[j] - rfl[i]  # positive = dropped
+                ctl_rise = ctl[i] - ctl[j]   # positive = rose
+                if rfl_drop > ALERT1_RFL_DROP and ctl_rise > ALERT1_CTL_RISE:
+                    df.iat[i, df.columns.get_loc('Alert_1')] = True
+                    a1_count += 1
+        print(f"  Alert 1 (CTL up/RFL down): {a1_count} runs flagged")
+    
+    # --- Alert 1b: Taper not working (near race, RFL below 90d peak) ---
+    if 'RFL_Trend' in df.columns and 'race_flag' in df.columns:
+        rfl = df['RFL_Trend'].values
+        race_flags = df['race_flag'].values
+        dist_km = df['distance_km'].values
+        a1b_count = 0
+        for i in range(1, n):
+            # Check if this is a race >= 20km
+            if race_flags[i] != 1 or dist_km[i] < 20:
+                continue
+            # Find 90-day peak RFL_Trend before this race
+            cutoff_90d = dates[i] - np.timedelta64(ALERT1B_PEAK_WINDOW_DAYS, 'D')
+            window = np.where((dates[:i+1] >= cutoff_90d))[0]
+            if len(window) < 3:
+                continue
+            rfl_window = rfl[window]
+            peak = np.nanmax(rfl_window)
+            if np.isfinite(peak) and np.isfinite(rfl[i]):
+                gap = peak - rfl[i]
+                if gap > ALERT1B_RFL_GAP:
+                    df.iat[i, df.columns.get_loc('Alert_1b')] = True
+                    a1b_count += 1
+        print(f"  Alert 1b (taper): {a1b_count} runs flagged")
+    
+    # --- Alert 2: Sustained deep-negative TSB (3 of last 5 < -15) ---
+    if 'TSB' in df.columns:
+        tsb = df['TSB'].values
+        deep = tsb < ALERT2_TSB_THRESHOLD
+        a2_count = 0
+        for i in range(ALERT2_WINDOW - 1, n):
+            window_deep = deep[max(0, i - ALERT2_WINDOW + 1):i + 1]
+            if np.sum(window_deep) >= ALERT2_COUNT:
+                df.iat[i, df.columns.get_loc('Alert_2')] = True
+                a2_count += 1
+        print(f"  Alert 2 (deep TSB): {a2_count} runs flagged")
+    
+    # --- Alert 3b: Easy run outlier (z < -2.0) ---
+    if 'Easy_RF_z' in df.columns:
+        z_vals = df['Easy_RF_z'].values
+        a3b_count = 0
+        for i in range(n):
+            if np.isfinite(z_vals[i]) and z_vals[i] < ALERT3B_Z_THRESHOLD:
+                df.iat[i, df.columns.get_loc('Alert_3b')] = True
+                a3b_count += 1
+        print(f"  Alert 3b (easy outlier): {a3b_count} runs flagged")
+    
+    # --- Alert 5: Easy RF / RFL_Trend gap < -3% ---
+    if 'Easy_RFL_Gap' in df.columns:
+        gap = df['Easy_RFL_Gap'].values
+        a5_count = 0
+        for i in range(n):
+            if np.isfinite(gap[i]) and gap[i] < ALERT5_GAP_THRESHOLD:
+                df.iat[i, df.columns.get_loc('Alert_5')] = True
+                a5_count += 1
+        print(f"  Alert 5 (easy RF gap): {a5_count} runs flagged")
+    
+    # Summary
+    any_alert = df[['Alert_1', 'Alert_1b', 'Alert_2', 'Alert_3b', 'Alert_5']].any(axis=1)
+    total_flagged = any_alert.sum()
+    print(f"  Total runs with any alert: {total_flagged} ({100*total_flagged/n:.1f}%)")
+    
+    return df
+
+
+def get_current_alerts(df: pd.DataFrame) -> list:
+    """v51: Check which alerts are active on the most recent run(s).
+    
+    Returns a list of alert dicts for console output and dashboard.
+    """
+    alerts = []
+    if len(df) < 20:
+        return alerts
+    
+    latest = df.iloc[-1]
+    latest_date = latest['date']
+    
+    if latest.get('Alert_1', False):
+        # Get details
+        lookback = df[df['date'] >= latest_date - pd.Timedelta(days=ALERT1_WINDOW_DAYS)]
+        rfl_drop = lookback.iloc[0]['RFL_Trend'] - latest['RFL_Trend'] if len(lookback) > 0 else 0
+        ctl_rise = latest['CTL'] - lookback.iloc[0]['CTL'] if len(lookback) > 0 else 0
+        alerts.append({
+            'alert': 'Alert 1: Training more, scoring worse',
+            'level': 'concern',
+            'icon': '!!',
+            'message': (f"RFL dropped {rfl_drop*100:.1f}% over {ALERT1_WINDOW_DAYS}d "
+                        f"while CTL rose {ctl_rise:.0f}."),
+        })
+    
+    if latest.get('Alert_1b', False):
+        alerts.append({
+            'alert': 'Alert 1b: Taper not working',
+            'level': 'concern',
+            'icon': '!!',
+            'message': f"RFL below 90-day peak at race distance.",
+        })
+    
+    if latest.get('Alert_2', False):
+        last5 = df.tail(ALERT2_WINDOW)
+        deep_count = (last5['TSB'] < ALERT2_TSB_THRESHOLD).sum()
+        worst = last5['TSB'].min()
+        alerts.append({
+            'alert': 'Alert 2: Deep fatigue',
+            'level': 'watch',
+            'icon': '(!)',
+            'message': (f"TSB < {ALERT2_TSB_THRESHOLD} on {deep_count}/{ALERT2_WINDOW} "
+                        f"recent runs (worst: {worst:.0f})."),
+        })
+    
+    if latest.get('Alert_3b', False):
+        z = latest.get('Easy_RF_z', np.nan)
+        if np.isfinite(z):
+            alerts.append({
+                'alert': 'Alert 3b: Easy run outlier',
+                'level': 'watch',
+                'icon': '(!)',
+                'message': f"Last easy run z={z:.1f} vs baseline.",
+            })
+    
+    if latest.get('Alert_5', False):
+        gap = latest.get('Easy_RFL_Gap', np.nan)
+        rfl_t = latest.get('RFL_Trend', np.nan)
+        alerts.append({
+            'alert': 'Alert 5: Easy RF divergence',
+            'level': 'concern',
+            'icon': '!!',
+            'message': (f"Easy RF {abs(gap)*100:.1f}% below RFL Trend ({rfl_t*100:.1f}%). "
+                        f"Early fatigue signal."),
+        })
+    
+    return alerts
+
+
+def print_alerts(alerts: list) -> None:
+    """Print alert summary to console."""
+    if not alerts:
+        print("\n=== v51 Health Check: All clear ===")
+        return
+    
+    level_order = {'concern': 0, 'watch': 1, 'info': 2}
+    alerts.sort(key=lambda a: level_order.get(a['level'], 9))
+    
+    print(f"\n=== v51 Health Check: {len(alerts)} alert(s) ===")
+    for a in alerts:
+        print(f"  {a['icon']} {a['alert']}")
+        print(f"      {a['message']}")
+    print()
 
 
 def _read_athlete_csv(path: str) -> pd.DataFrame:
@@ -3610,6 +3909,36 @@ def main() -> int:
     athlete_data_path = args.athlete_data if hasattr(args, 'athlete_data') else "athlete_data.csv"
     dfm, daily_df = calc_ctl_atl(dfm, athlete_data_path)
     
+    # v51: Join weight_kg from athlete_data.csv
+    if os.path.exists(athlete_data_path):
+        try:
+            ad_df = _read_athlete_csv(athlete_data_path)
+            if 'weight_kg' in ad_df.columns:
+                ad_df['date'] = pd.to_datetime(ad_df['date'], dayfirst=True, format='mixed')
+                wt = ad_df[['date', 'weight_kg']].dropna(subset=['weight_kg']).copy()
+                wt['date_only'] = wt['date'].dt.normalize()
+                wt = wt.drop_duplicates(subset='date_only', keep='last')
+                dfm['date_only'] = dfm['date'].dt.normalize()
+                dfm = dfm.merge(wt[['date_only', 'weight_kg']], on='date_only', how='left')
+                dfm.drop(columns=['date_only'], inplace=True)
+                # Forward-fill weight for runs on days without weight data
+                dfm['weight_kg'] = dfm['weight_kg'].ffill()
+                n_wt = dfm['weight_kg'].notna().sum()
+                latest_wt = dfm['weight_kg'].dropna().iloc[-1] if n_wt > 0 else np.nan
+                print(f"  Joined weight_kg: {n_wt} runs, latest={latest_wt:.1f}kg")
+        except Exception as e:
+            print(f"  WARNING: Could not join weight_kg: {e}")
+    
+    # v51: Calculate Easy RF metrics (needs RFL_Trend and RF_adj)
+    dfm = calc_easy_rf_metrics(dfm)
+    
+    # v51: Calculate historical alert columns (needs CTL, TSB, RFL_Trend, Easy_RF_EMA, Easy_RFL_Gap)
+    dfm = calc_alert_columns(dfm)
+    
+    # v51: Report current alert state
+    alerts = get_current_alerts(dfm)
+    print_alerts(alerts)
+    
     # Generate summary sheets
     print("\n=== Generating Summary Sheets ===")
     weekly_df = generate_weekly_summary(dfm)
@@ -3755,6 +4084,19 @@ def main() -> int:
     for c in ("pred_5k_age_grade", "age_grade_pct"):
         if c in dfm.columns:
             dfm[c] = pd.to_numeric(dfm[c], errors="coerce").round(2)
+    # v51: Round Easy RF metrics
+    for c in ("Easy_RF_EMA",):
+        if c in dfm.columns:
+            dfm[c] = pd.to_numeric(dfm[c], errors="coerce").round(4)
+    for c in ("Easy_RF_z", "Easy_RFL_Gap"):
+        if c in dfm.columns:
+            dfm[c] = pd.to_numeric(dfm[c], errors="coerce").round(3)
+    for c in ("RFL_Trend_Delta",):
+        if c in dfm.columns:
+            dfm[c] = pd.to_numeric(dfm[c], errors="coerce").round(4)
+    for c in ("weight_kg",):
+        if c in dfm.columns:
+            dfm[c] = pd.to_numeric(dfm[c], errors="coerce").round(1)
 
     # --- v38.1: remove legacy/ambiguous HR correction flag column ---
     if "hr_corr_applied" in dfm.columns:
@@ -3815,6 +4157,10 @@ def main() -> int:
         # v44.3: Power Score and Combined RFL
         "Power_Score", "Power_Score_Decayed", "RFL_from_Power", "RFL_Combined", "RF_Combined",
         "TSS", "CTL", "ATL", "TSB",
+        "weight_kg",
+        # v51: Easy RF metrics and alerts
+        "Easy_RF_EMA", "Easy_RF_z", "RFL_Trend_Delta", "Easy_RFL_Gap",
+        "Alert_1", "Alert_1b", "Alert_2", "Alert_3b", "Alert_5",
         "parkrun", "surface",
         # v43 Age grade and race predictions
         "CP", "pred_5k_s", "pred_10k_s", "pred_hm_s", "pred_marathon_s",
@@ -3854,6 +4200,15 @@ def main() -> int:
         latest_atl = dfm['ATL'].iloc[-1] if len(dfm) > 0 else np.nan
         latest_tsb = dfm['TSB'].iloc[-1] if len(dfm) > 0 else np.nan
         print(f"Latest CTL={latest_ctl:.1f}, ATL={latest_atl:.1f}, TSB={latest_tsb:.1f}" if np.isfinite(latest_ctl) else "CTL/ATL: N/A")
+    # v51: Easy RF summary
+    if 'Easy_RF_EMA' in dfm.columns:
+        latest_easy = dfm['Easy_RF_EMA'].iloc[-1] if len(dfm) > 0 else np.nan
+        latest_gap = dfm['Easy_RFL_Gap'].iloc[-1] if 'Easy_RFL_Gap' in dfm.columns and len(dfm) > 0 else np.nan
+        if np.isfinite(latest_easy):
+            parts = [f"Easy_RF_EMA={latest_easy:.4f}"]
+            if np.isfinite(latest_gap):
+                parts.append(f"Gap={latest_gap*100:.1f}%")
+            print(f"Latest {', '.join(parts)}")
     
     return 0
 

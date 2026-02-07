@@ -296,7 +296,7 @@ def _write_summary_cache(persec_cache_dir: str, safe_name: str, summary: dict):
         # Make a JSON-safe copy
         out = {"_summary_ver": _SUMMARY_CACHE_VER}
         for k, v in summary.items():
-            if isinstance(v, (pd.Timestamp, datetime)):
+            if isinstance(v, (pd.Timestamp, dt.datetime)):
                 out[k] = v.isoformat()
             elif isinstance(v, (np.integer,)):
                 out[k] = int(v)
@@ -306,16 +306,20 @@ def _write_summary_cache(persec_cache_dir: str, safe_name: str, summary: dict):
                 out[k] = bool(v)
             elif isinstance(v, float) and v != v:  # Python float NaN
                 out[k] = None
-            elif isinstance(v, datetime):
+            elif isinstance(v, dt.datetime):
                 out[k] = v.isoformat()
             else:
                 out[k] = v
         
         with open(summary_path, "w") as f:
             _json.dump(out, f, separators=(",", ":"))
-    except Exception:
-        # Non-critical: if we can't write summary cache, no big deal
-        pass
+    except Exception as e:
+        # Report first failure so we can debug
+        global SUMMARY_CACHE_MISSES
+        if SUMMARY_CACHE_MISSES <= 1:
+            print(f"  Warning: Failed to write summary cache {summary_path}: {e}")
+            import traceback
+            traceback.print_exc()
 
 # --- v50: Cache index file for fast lookup ---
 # Instead of opening 3000+ .npz files to read timestamps, we maintain a JSON index.
