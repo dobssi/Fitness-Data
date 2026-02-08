@@ -2960,6 +2960,37 @@ def refresh_activity_names(dfm: pd.DataFrame, strava_path: str, tz_local: str) -
     if updated > 0:
         print(f"  Refreshed {updated} activity names from Strava")
     
+    # Apply pending_activities.csv as override (user-provided names take priority)
+    pending_csv = Path(strava_path).parent / "pending_activities.csv"
+    if pending_csv.exists():
+        try:
+            pend = pd.read_csv(pending_csv, encoding='utf-8')
+        except UnicodeDecodeError:
+            pend = pd.read_csv(pending_csv, encoding='cp1252')
+        
+        if 'activity_name' in pend.columns and 'date' in pend.columns:
+            pend_by_date = {}
+            for _, pr in pend.iterrows():
+                ds = str(pr.get('date', '')).strip()[:10]
+                name = pr.get('activity_name', '')
+                if ds and pd.notna(name) and str(name).strip():
+                    pend_by_date[ds] = str(name).strip()
+            
+            pend_applied = 0
+            if 'date' in dfm.columns:
+                for i, row in dfm.iterrows():
+                    d = pd.Timestamp(row.get('date'))
+                    if not pd.isna(d):
+                        ds = d.strftime('%Y-%m-%d')
+                        if ds in pend_by_date:
+                            old_name = str(row.get('activity_name', ''))
+                            new_name = pend_by_date[ds]
+                            if new_name != old_name:
+                                dfm.at[i, 'activity_name'] = new_name
+                                pend_applied += 1
+            if pend_applied > 0:
+                print(f"  Applied {pend_applied} pending activity name override(s)")
+    
     return updated
 
 

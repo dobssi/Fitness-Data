@@ -2841,32 +2841,33 @@ def match_strava(master: pd.DataFrame, act: pd.DataFrame, tz_local: str, pending
                 day_runs[ds].sort(key=lambda x: x[0])
 
         for idx, row in out.iterrows():
-            if pd.isna(row.get("activity_name")) or row.get("activity_name") == "":
-                fit_file = row.get("file", "")
-                pend_row = None
+            # Apply pending names — these override Strava names when provided
+            fit_file = row.get("file", "")
+            current_name = row.get("activity_name", "")
+            pend_row = None
 
-                # Try exact filename match first
-                if fit_file in pending_by_file:
-                    pend_row = pending_by_file[fit_file]
-                else:
-                    # Try date-based match
-                    d = pd.Timestamp(row.get("date"))
-                    if not pd.isna(d):
-                        ds = d.strftime("%Y-%m-%d")
-                        if ds in pending_by_date:
-                            for seq, prow in pending_by_date[ds]:
-                                if seq is None:
-                                    # Matches all runs that day
+            # Try exact filename match first
+            if fit_file in pending_by_file:
+                pend_row = pending_by_file[fit_file]
+            else:
+                # Try date-based match
+                d = pd.Timestamp(row.get("date"))
+                if not pd.isna(d):
+                    ds = d.strftime("%Y-%m-%d")
+                    if ds in pending_by_date:
+                        for seq, prow in pending_by_date[ds]:
+                            if seq is None:
+                                # Matches all runs that day
+                                pend_row = prow
+                                break
+                            else:
+                                # Match Nth run
+                                runs = day_runs.get(ds, [])
+                                if 0 < seq <= len(runs) and runs[seq - 1][1] == fit_file:
                                     pend_row = prow
                                     break
-                                else:
-                                    # Match Nth run
-                                    runs = day_runs.get(ds, [])
-                                    if 0 < seq <= len(runs) and runs[seq - 1][1] == fit_file:
-                                        pend_row = prow
-                                        break
 
-                if pend_row is not None:
+            if pend_row is not None:
                     # v49: Handle duplicate index entries (loc returns DataFrame instead of Series)
                     if isinstance(pend_row, pd.DataFrame):
                         pend_row = pend_row.iloc[0]
