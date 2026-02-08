@@ -89,9 +89,9 @@ def read_existing_athlete_data(path: str) -> pd.DataFrame:
     
     df = pd.read_csv(io.StringIO("".join(clean_lines)))
     
-    # Ensure date column exists and is string (BFW exports DD/MM/YYYY)
+    # Ensure date column exists and is string (BFW exports DD/MM/YYYY, sync writes YYYY-MM-DD)
     if "date" in df.columns:
-        df["date"] = pd.to_datetime(df["date"], dayfirst=True, errors="coerce").dt.strftime("%Y-%m-%d")
+        df["date"] = pd.to_datetime(df["date"], dayfirst=True, format='mixed', errors="coerce").dt.strftime("%Y-%m-%d")
     
     return df
 
@@ -311,11 +311,14 @@ def merge_data(existing_df: pd.DataFrame,
     for date_str in all_dates:
         row = {"date": date_str}
         
-        # Weight: pre-2023 from existing, 2023+ from intervals.icu
+        # Weight: pre-2023 from existing, 2023+ ONLY from intervals.icu
+        # v51.6: Don't fall back to existing CSV for 2023+ dates — avoids
+        # persisting corrupted values from date-format parsing bugs.
+        # postprocess_weight will fill gaps via forward-fill + smoothing.
         if date_str >= INTERVALS_WEIGHT_START and date_str in weight_intervals:
             row["weight_kg"] = weight_intervals[date_str]
             weight_updates += 1
-        elif date_str in existing_weight:
+        elif date_str < INTERVALS_WEIGHT_START and date_str in existing_weight:
             row["weight_kg"] = existing_weight[date_str]
             weight_preserved += 1
         else:

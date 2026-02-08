@@ -3968,14 +3968,6 @@ def main() -> int:
                 dfm['date_only'] = dfm['date'].dt.normalize()
                 dfm = dfm.merge(wt[['date_only', 'weight_kg']], on='date_only', how='left')
                 dfm.drop(columns=['date_only'], inplace=True)
-                # DEBUG: show athlete_data values for 1st-of-month dates
-                _dec1 = wt[wt['date_only'] == pd.Timestamp('2025-12-01')]
-                _jan12 = wt[wt['date_only'] == pd.Timestamp('2025-01-12')]
-                print(f"  DEBUG athlete_data Dec 1: {_dec1['weight_kg'].tolist()}")
-                print(f"  DEBUG athlete_data Jan 12: {_jan12['weight_kg'].tolist()}")
-                _m = dfm[dfm['date'].between('2025-11-28', '2025-12-05')]
-                for _, _r in _m.iterrows():
-                    print(f"  DEBUG Master {str(_r['date'])[:10]} weight={_r['weight_kg']}")
                 # Forward-fill weight for runs on days without weight data
                 dfm['weight_kg'] = dfm['weight_kg'].ffill()
                 n_wt = dfm['weight_kg'].notna().sum()
