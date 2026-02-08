@@ -352,8 +352,7 @@ def main():
             existing_in_zip = {os.path.basename(n).lower() for n in zf.namelist()}
         added = 0
         with zipfile.ZipFile(args.zip, 'a', zipfile.ZIP_DEFLATED) as zf:
-            for dl in downloaded:
-                fname = dl["filename"]
+            for fname, _act in downloaded:
                 if fname.lower() not in existing_in_zip:
                     fit_path = os.path.join(args.fit_dir, fname)
                     if os.path.exists(fit_path):
