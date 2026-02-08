@@ -353,11 +353,15 @@ def main():
         added = 0
         with zipfile.ZipFile(args.zip, 'a', zipfile.ZIP_DEFLATED) as zf:
             for fname, _act in downloaded:
-                if fname.lower() not in existing_in_zip:
-                    fit_path = os.path.join(args.fit_dir, fname)
+                # downloaded stores stem without .FIT; actual file has .FIT
+                fname_fit = fname if fname.upper().endswith('.FIT') else fname + '.FIT'
+                if fname_fit.lower() not in existing_in_zip:
+                    fit_path = os.path.join(args.fit_dir, fname_fit)
                     if os.path.exists(fit_path):
-                        zf.write(fit_path, fname)
+                        zf.write(fit_path, fname_fit)
                         added += 1
+                    else:
+                        print(f"  [WARN] {fit_path} not found on disk")
         print(f"  Added {added} to zip ({args.zip})")
     
     # Update pending_activities.csv
