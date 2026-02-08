@@ -89,9 +89,19 @@ def read_existing_athlete_data(path: str) -> pd.DataFrame:
     
     df = pd.read_csv(io.StringIO("".join(clean_lines)))
     
-    # Ensure date column exists and is string (BFW exports DD/MM/YYYY, sync writes YYYY-MM-DD)
+    # Ensure date column exists and convert to YYYY-MM-DD strings.
+    # CSV may contain YYYY-MM-DD (from previous sync) or DD/MM/YYYY (from BFW/user edit).
+    # Parse YYYY-MM-DD first (unambiguous), then DD/MM/YYYY for remaining.
     if "date" in df.columns:
-        df["date"] = pd.to_datetime(df["date"], dayfirst=True, format='mixed', errors="coerce").dt.strftime("%Y-%m-%d")
+        iso = pd.to_datetime(df["date"], format="%Y-%m-%d", errors="coerce")
+        dmy = pd.to_datetime(df["date"], format="%d/%m/%Y", errors="coerce")
+        parsed = iso.fillna(dmy)
+        n_iso = iso.notna().sum()
+        n_dmy = (iso.isna() & dmy.notna()).sum()
+        n_fail = parsed.isna().sum()
+        if n_dmy > 0 or n_fail > 0:
+            print(f"  Date parsing: {n_iso} ISO, {n_dmy} DD/MM, {n_fail} failed")
+        df["date"] = parsed.dt.strftime("%Y-%m-%d")
     
     return df
 
