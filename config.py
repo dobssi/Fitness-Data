@@ -23,7 +23,7 @@ STRYD_MASS_HISTORY = [
 # =============================================================================
 # PEAK PERFORMANCE CONSTANTS
 # =============================================================================
-PEAK_CP_WATTS = 375             # Peak Critical Power at 100% RFL
+PEAK_CP_WATTS = 372             # Peak Critical Power at 100% RFL (v51: tuned down from 375 based on race results)
 # Note: Peak RF_Trend is calculated dynamically from data in StepB (df['RF_Trend'].max())
 
 # =============================================================================
@@ -73,7 +73,8 @@ DURATION_PENALTY_DAMPING = 0.33     # Fraction of R2 used when penalising (asymm
 # EASY RF EMA PARAMETERS (v51)
 # =============================================================================
 EASY_RF_HR_MIN = 120            # Minimum avg HR for easy run classification
-EASY_RF_HR_MAX = 150            # Maximum avg HR for easy run classification
+EASY_RF_NP_CP_MAX = 0.85       # nPower < 85% of CP for easy run classification (replaces HR ceiling)
+EASY_RF_VI_MAX = 1.10          # nPower/avg_power cap to exclude interval sessions
 EASY_RF_DIST_MIN_KM = 4.0      # Minimum distance for easy run classification
 EASY_RF_EMA_SPAN = 15           # EWM span (in easy runs) for Easy RF EMA
 EASY_RF_Z_WINDOW = 30           # Trailing easy-run count for z-score baseline

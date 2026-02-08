@@ -296,14 +296,14 @@ try:
                         TERRAIN_LINEAR_SLOPE, TERRAIN_LINEAR_CAP, TERRAIN_STRAVA_ELEV_MIN,
                         DURATION_PENALTY_DAMPING,
                         # v51: Easy RF & Alert parameters
-                        EASY_RF_HR_MIN, EASY_RF_HR_MAX, EASY_RF_DIST_MIN_KM,
+                        EASY_RF_HR_MIN, EASY_RF_NP_CP_MAX, EASY_RF_VI_MAX, EASY_RF_DIST_MIN_KM,
                         EASY_RF_EMA_SPAN, EASY_RF_Z_WINDOW,
                         ALERT1_RFL_DROP, ALERT1_CTL_RISE, ALERT1_WINDOW_DAYS,
                         ALERT1B_RFL_GAP, ALERT1B_PEAK_WINDOW_DAYS, ALERT1B_RACE_WINDOW_DAYS,
                         ALERT2_TSB_THRESHOLD, ALERT2_COUNT, ALERT2_WINDOW,
                         ALERT3B_Z_THRESHOLD, ALERT5_GAP_THRESHOLD)
 except ImportError:
-    PEAK_CP_WATTS = 375  # Fallback — must match config.py
+    PEAK_CP_WATTS = 372  # Fallback — must match config.py
     POWER_SCORE_RIEGEL_K = 0.08
     POWER_SCORE_REFERENCE_DIST_KM = 5.0
     POWER_SCORE_RF_DIVISOR = 180
@@ -320,7 +320,8 @@ except ImportError:
     DURATION_PENALTY_DAMPING = 0.33
     # v51 fallbacks
     EASY_RF_HR_MIN = 120
-    EASY_RF_HR_MAX = 150
+    EASY_RF_NP_CP_MAX = 0.85
+    EASY_RF_VI_MAX = 1.10
     EASY_RF_DIST_MIN_KM = 4.0
     EASY_RF_EMA_SPAN = 15
     EASY_RF_Z_WINDOW = 30
@@ -718,7 +719,7 @@ def calc_intensity_adj(avg_power: float, rfl_trend: float, undulation_score: flo
         return 1.0
     
     # Calculate current CP from peak CP and RFL_Trend
-    peak_cp = RF_CONSTANTS.get('peak_cp_watts', 375)
+    peak_cp = RF_CONSTANTS.get('peak_cp_watts', 372)
     current_cp = peak_cp * rfl_trend
     
     if current_cp <= 0:
@@ -1043,9 +1044,17 @@ def calc_easy_rf_metrics(df: pd.DataFrame) -> pd.DataFrame:
     """
     print("\n=== v51: Calculating Easy RF metrics ===")
     
-    # --- Easy run mask ---
+    # --- Easy run mask (v51: power-based ceiling replaces HR ceiling) ---
+    # nPower < 85% CP captures genuine easy efforts even with elevated HR (post-illness, heat)
+    # VI cap (nPower/avg_power < 1.10) excludes interval sessions with low average power
+    # CP may not be populated yet, so derive from RFL_Trend * PEAK_CP_WATTS
+    from config import PEAK_CP_WATTS as _peak_cp
+    cp_series = df['RFL_Trend'] * _peak_cp
     easy_mask = (
-        (df['avg_hr'] >= EASY_RF_HR_MIN) & (df['avg_hr'] <= EASY_RF_HR_MAX) &
+        (df['npower_w'].notna()) & (df['avg_power_w'] > 0) & (cp_series > 0) &
+        (df['npower_w'] < cp_series * EASY_RF_NP_CP_MAX) &
+        ((df['npower_w'] / df['avg_power_w']) < EASY_RF_VI_MAX) &
+        (df['avg_hr'] >= EASY_RF_HR_MIN) &
         (df['distance_km'] >= EASY_RF_DIST_MIN_KM) &
         (df['race_flag'] != 1) &
         (df['RF_adj'].notna())
