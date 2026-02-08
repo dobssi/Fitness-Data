@@ -3962,6 +3962,9 @@ def main() -> int:
                 wt = ad_df[['date', 'weight_kg']].dropna(subset=['weight_kg']).copy()
                 wt['date_only'] = wt['date'].dt.normalize()
                 wt = wt.drop_duplicates(subset='date_only', keep='last')
+                # v51.6: Drop existing weight_kg to avoid merge column collision (_x/_y)
+                if 'weight_kg' in dfm.columns:
+                    dfm.drop(columns=['weight_kg'], inplace=True)
                 dfm['date_only'] = dfm['date'].dt.normalize()
                 dfm = dfm.merge(wt[['date_only', 'weight_kg']], on='date_only', how='left')
                 dfm.drop(columns=['date_only'], inplace=True)

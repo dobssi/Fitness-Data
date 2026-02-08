@@ -750,10 +750,10 @@ def get_alert_data(df):
 
 
 def get_weight_chart_data(master_file, months=12):
-    """v51: Get weekly average weight data for chart.
+    """v51.6: Get weekly average weight data for chart.
     
-    Uses weight_kg from Master if available, falls back to athlete_data.csv.
-    Returns dates and values for a weekly weight chart.
+    Master weight_kg is already smoothed (±3 day centred average from athlete_data).
+    Dashboard simply computes weekly averages.
     """
     wt_df = None
     
@@ -802,7 +802,7 @@ def get_weight_chart_data(master_file, months=12):
         cutoff = today - timedelta(days=months * 30)
         wt_df = wt_df[wt_df['date'] > cutoff].copy()
         
-        # Weekly averages
+        # Simple weekly averages (data is already smoothed upstream)
         wt_df['week'] = wt_df['date'].dt.to_period('W').apply(lambda p: p.start_time)
         weekly = wt_df.groupby('week')['weight_kg'].mean().reset_index()
         weekly = weekly.sort_values('week')
