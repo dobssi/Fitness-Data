@@ -641,6 +641,87 @@ def main() -> int:
 
     dfm.to_excel(args.out, index=False, engine="openpyxl")
 
+    # --- v51.6: Fallback pass — simulate power for Stryd-era runs with missing power ---
+    # Catches runs where Stryd wasn't connected (e.g. forgot pod) in repl/air/s4/s5 eras.
+    # These have all-NaN power in the npz cache but may carry stale sim values from older pipelines.
+    fallback_updated = 0
+    fallback_eras = set(dfm['calibration_era_id'].dropna().unique()) - SIMULATED_POWER_ERAS
+    for i, row in dfm.iterrows():
+        era = str(row.get("calibration_era_id", ""))
+        if era not in fallback_eras:
+            continue
+        # Only target runs that either have no power or have stale sim (sim_ok=False)
+        has_real_power = pd.to_numeric(row.get("avg_power_w", np.nan), errors="coerce")
+        src = str(row.get("power_source", ""))
+        sim_ok = bool(row.get("sim_ok", False))
+        if src == "stryd" and np.isfinite(has_real_power):
+            continue  # Real Stryd power present — skip
+        if src == "sim_v1" and sim_ok:
+            continue  # Already freshly simulated — skip
+
+        # Check npz cache for this run
+        dt_local = row.get("date", None)
+        if dt_local is None or (isinstance(dt_local, float) and not np.isfinite(dt_local)):
+            continue
+        tloc = pd.Timestamp(dt_local)
+        if getattr(tloc, "tzinfo", None) is None:
+            tloc = tloc.tz_localize(args.tz, ambiguous="NaT", nonexistent="shift_forward")
+        tutc = tloc.tz_convert("UTC")
+        epoch = float(tutc.timestamp())
+        cache_fp = _find_cache(keys, paths, epoch, tol_s=int(args.match_tol_s))
+        if cache_fp is None:
+            continue
+
+        z = np.load(cache_fp, allow_pickle=True)
+        pw_raw = _ensure_1d(z.get("power_w", np.array([])))
+        # Only simulate if npz has NO valid power (Stryd wasn't connected)
+        if len(pw_raw) > 0 and np.nansum(np.isfinite(pw_raw) & (pw_raw > 0)) > 60:
+            continue  # Has real per-second power — shouldn't be simulated
+
+        t = _ensure_1d(z["t"])
+        v = _ensure_1d(z["speed_mps"])
+        g = _ensure_1d(z.get("grade", np.zeros_like(v)))
+        hr = _ensure_1d(z.get("hr_bpm", np.full_like(v, np.nan)))
+        n = int(min(len(t), len(v), len(g), len(hr)))
+        if n <= 0:
+            continue
+        t, v, g, hr = t[:n], v[:n], g[:n], hr[:n]
+
+        temp_c = pd.to_numeric(row.get("avg_temp_c", np.nan), errors="coerce")
+        rh_pct = pd.to_numeric(row.get("avg_humidity_pct", np.nan), errors="coerce")
+        if not np.isfinite(temp_c): temp_c = 10.0
+        if not np.isfinite(rh_pct): rh_pct = 70.0
+        rho = air_density_kg_m3(float(temp_c), 1013.25, float(rh_pct) / 100.0)
+        rho_arr = np.full_like(v, rho, dtype=float)
+        wa = np.zeros_like(v, dtype=float)
+        v_s = _roll_med(v, 15)
+        g_s = np.clip(_roll_med(g, 15), -0.12, 0.12)
+
+        p_sim, _re_hat = simulate_power_series(model, v_s, g_s, wa, rho_arr, mass_kg=float(args.mass_kg), smooth_win=15)
+        p_sim = _ensure_1d(p_sim)[:len(v)]
+        moving_cov = (np.isfinite(v) & (v >= 0.3) & (v <= 6.5) & np.isfinite(p_sim) & (p_sim > 0)).astype(bool)
+        cov = float(np.mean(moving_cov)) if moving_cov.size else 0.0
+        if cov < 0.80:
+            continue
+        p_mov = p_sim[moving_cov]
+
+        dfm.at[i, "power_source"] = "sim_v1"
+        dfm.at[i, "sim_model_id"] = mid
+        dfm.at[i, "sim_ok"] = True
+        dfm.at[i, "sim_coverage"] = cov
+        avg_p = float(np.nanmean(p_mov))
+        dfm.at[i, "avg_power_w"] = avg_p
+        dfm.at[i, "power_mean_w"] = avg_p
+        dfm.at[i, "power_median_w"] = float(np.nanmedian(p_mov))
+        npw = _calc_np(p_mov, win=30)
+        dfm.at[i, "npower_w"] = float(npw) if np.isfinite(npw) else np.nan
+        fallback_updated += 1
+        fn = str(row.get("file", ""))[:40]
+        print(f"  [fallback] {fn}  era={era}  avg_power={avg_p:.0f}W  cov={cov:.3f}")
+
+    if fallback_updated:
+        print(f"Fallback sim: {fallback_updated} Stryd-era runs with missing power")
+
     print(f"Wrote: {args.out}")
     print(f"Updated pre-Stryd runs: {updated}")
     print(f"Skipped (missing cache): {skipped_missing_cache}")

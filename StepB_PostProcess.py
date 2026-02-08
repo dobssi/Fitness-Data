@@ -3600,7 +3600,7 @@ def main() -> int:
     print("  Calculating weighted Temp_Trend (vectorized)...")
     days_back = RF_CONSTANTS['days_back']
     
-    dates_s = pd.to_datetime(dfm['date']).values.astype('int64') // 10**9  # epoch seconds
+    dates_s = pd.to_datetime(dfm['date']).values.astype('datetime64[s]').astype('int64')  # epoch seconds (pandas 3.0 safe)
     moving_times = pd.to_numeric(dfm['moving_time_s'], errors='coerce').fillna(0).values
     temps_raw = pd.to_numeric(dfm['avg_temp_c'], errors='coerce').fillna(0).values
     wt_product = moving_times * temps_raw
@@ -3698,6 +3698,10 @@ def main() -> int:
         # v49: Use regression-based power_adjuster_to_S4 as Era_Adj (speed-controlled)
         power_adj_to_s4 = pd.to_numeric(row.get('power_adjuster_to_S4', np.nan), errors='coerce')
         era_adj = calc_era_adj(era_id, era_adjusters, power_adj_to_s4=power_adj_to_s4)
+        # v51.6: Sim power is already S4-calibrated — don't apply Stryd-era correction
+        # for runs outside the primary sim eras (those have their own calibration path)
+        if str(row.get('power_source', '')) == 'sim_v1' and era_id not in ('pre_stryd', 'v1_late'):
+            era_adj = 1.0
         # Own_Adj is just surface_adj
         surface_adj = pd.to_numeric(row.get('surface_adj', 1.0), errors='coerce')
         own_adj = surface_adj if surface_adj and np.isfinite(surface_adj) else 1.0
@@ -4199,7 +4203,7 @@ def main() -> int:
         # File
         "file",
         # v43 NEW columns (at end to preserve BFW column references)
-        "Temp_Adj", "Terrain_Adj", "Elevation_Adj", "Era_Adj", "Total_Adj", "Intensity_Adj", "Duration_Adj",
+        "Temp_Adj", "Temp_Trend", "Terrain_Adj", "Elevation_Adj", "Era_Adj", "Total_Adj", "Intensity_Adj", "Duration_Adj",
         "RF_adj", "Factor", "RF_Trend", "RFL", "RFL_Trend",
         # v44.3: Power Score and Combined RFL
         "Power_Score", "Power_Score_Decayed", "RFL_from_Power", "RFL_Combined", "RF_Combined",
