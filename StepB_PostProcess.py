@@ -3958,7 +3958,7 @@ def main() -> int:
         try:
             ad_df = _read_athlete_csv(athlete_data_path)
             if 'weight_kg' in ad_df.columns:
-                ad_df['date'] = pd.to_datetime(ad_df['date'], dayfirst=True, format='mixed')
+                ad_df['date'] = pd.to_datetime(ad_df['date'], format='%Y-%m-%d', errors='coerce')
                 wt = ad_df[['date', 'weight_kg']].dropna(subset=['weight_kg']).copy()
                 wt['date_only'] = wt['date'].dt.normalize()
                 wt = wt.drop_duplicates(subset='date_only', keep='last')

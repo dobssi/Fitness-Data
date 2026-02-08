@@ -236,7 +236,23 @@ def postprocess_weight(df: pd.DataFrame) -> pd.DataFrame:
         df = pd.concat([df, pd.DataFrame(new_rows)], ignore_index=True)
     
     # Apply smoothed weight to all rows that fall in the daily range
-    df["weight_kg"] = df["date"].map(smooth_lookup).combine_first(df["weight_kg"])
+    _sample_key = list(smooth_lookup.keys())[0] if smooth_lookup else None
+    _sample_date = df["date"].iloc[0] if len(df) > 0 else None
+    print(f"    smooth_lookup key type: {type(_sample_key)}, df date type: {type(_sample_date)}")
+    print(f"    smooth_lookup has 2025-12-01: {'2025-12-01' in smooth_lookup}")
+    if "2025-12-01" in smooth_lookup:
+        print(f"    smooth_lookup[2025-12-01] = {smooth_lookup['2025-12-01']}")
+    _dec1_rows = df[df["date"] == "2025-12-01"]
+    if len(_dec1_rows):
+        print(f"    df Dec 1 before smooth: weight_kg={_dec1_rows['weight_kg'].values}")
+    _mapped = df["date"].map(smooth_lookup)
+    _n_mapped = _mapped.notna().sum()
+    _n_total = len(df)
+    print(f"    map result: {_n_mapped}/{_n_total} mapped successfully")
+    df["weight_kg"] = _mapped.combine_first(df["weight_kg"])
+    _dec1_after = df[df["date"] == "2025-12-01"]
+    if len(_dec1_after):
+        print(f"    df Dec 1 after smooth: weight_kg={_dec1_after['weight_kg'].values}")
     df = df.sort_values("date").reset_index(drop=True)
     
     # Stats

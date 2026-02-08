@@ -95,7 +95,7 @@ def load_and_process_data():
                 else:
                     clean_lines.append(line)
             ad_df = pd.read_csv(io.StringIO(''.join(clean_lines)))
-            ad_df['date'] = pd.to_datetime(ad_df['date'], dayfirst=True, format='mixed')
+            ad_df['date'] = pd.to_datetime(ad_df['date'], format='%Y-%m-%d', errors='coerce')
             ad_df = ad_df.sort_values('date')
             today = pd.Timestamp.now().normalize()
             
@@ -788,7 +788,7 @@ def get_weight_chart_data(master_file, months=12):
                     else:
                         clean_lines.append(line)
                 ad = pd.read_csv(io.StringIO(''.join(clean_lines)))
-                ad['date'] = pd.to_datetime(ad['date'], dayfirst=True, format='mixed')
+                ad['date'] = pd.to_datetime(ad['date'], format='%Y-%m-%d', errors='coerce')
                 if 'weight_kg' in ad.columns:
                     wt_df = ad[['date', 'weight_kg']].dropna(subset=['weight_kg'])
             except Exception as e:
