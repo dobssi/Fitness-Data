@@ -81,7 +81,7 @@ def read_existing_athlete_data(path: str) -> pd.DataFrame:
             last_hash = stripped.rfind("#")
             remainder = stripped[last_hash + 1:].strip()
             # Only treat as data if it looks like a CSV header (contains commas)
-            if remainder and "," in remainder and not remainder.startswith("#"):
+            if remainder and remainder.startswith("date,"):
                 clean_lines.append(remainder + "\n")
             # Otherwise skip the comment line entirely
         else:
@@ -185,16 +185,12 @@ def fetch_non_running_tss(client: IntervalsClient, oldest: str = "2013-01-01") -
 
 
 def postprocess_weight(df: pd.DataFrame) -> pd.DataFrame:
-    """
-    Post-process weight column to produce daily smoothed values.
+    """Post-process weight column to produce daily smoothed values.
     
-    Steps:
-    1. Create daily date range from first weight to today + WEIGHT_PREFILL_DAYS
-    2. Forward-fill gaps (carry last measurement forward)
-    3. Apply 7-day centred moving average (±3 days around each date)
-    
-    The smoothed weight is written back to weight_kg. The raw measurements
-    are preserved in weight_kg_raw for reference.
+    Pre-2026 data (from BFW) is already smoothed — preserved as-is.
+    2026+ data (from intervals.icu raw) gets 7-day centred moving average.
+    Gaps between measurements are forward-filled.
+    New daily rows are added for dates not already in the DataFrame.
     """
     if "weight_kg" not in df.columns:
         return df
@@ -214,30 +210,36 @@ def postprocess_weight(df: pd.DataFrame) -> pd.DataFrame:
     raw_weights = dict(zip(weight_rows["date"], weight_rows["weight_kg"].astype(float)))
     daily_df["weight_raw"] = daily_df["date"].map(raw_weights)
     
-    # Forward-fill: carry last measurement forward
+    # Forward-fill gaps
     daily_df["weight_filled"] = daily_df["weight_raw"].ffill()
     
-    # 7-day centred moving average (min_periods=1 so edges still get values)
-    daily_df["weight_smooth"] = (
-        daily_df["weight_filled"]
-        .rolling(window=WEIGHT_SMOOTH_WINDOW, center=True, min_periods=1)
-        .mean()
-        .round(1)
-    )
+    # Only smooth 2026+ (intervals.icu raw data); pre-2026 BFW is already smoothed
+    daily_df["weight_out"] = daily_df["weight_filled"]
+    mask_2026 = daily_df["date"] >= INTERVALS_WEIGHT_START
+    if mask_2026.any():
+        smoothed = (
+            daily_df.loc[mask_2026, "weight_filled"]
+            .rolling(window=WEIGHT_SMOOTH_WINDOW, center=True, min_periods=1)
+            .mean()
+            .round(1)
+        )
+        daily_df.loc[mask_2026, "weight_out"] = smoothed
     
-    # Build lookup: date -> smoothed weight
-    smooth_lookup = dict(zip(daily_df["date"], daily_df["weight_smooth"]))
+    # Round pre-2026 to 1dp too (BFW values may already be rounded)
+    daily_df["weight_out"] = daily_df["weight_out"].round(1)
     
-    # Merge back: update existing rows + add new daily rows
+    # Build lookup: date -> output weight
+    weight_lookup = dict(zip(daily_df["date"], daily_df["weight_out"]))
+    
+    # Add new daily rows for dates not already in DataFrame
     existing_dates = set(df["date"].dropna())
     new_rows = []
-    
     for _, row in daily_df.iterrows():
         d = row["date"]
-        if d not in existing_dates and pd.notna(row["weight_smooth"]):
+        if d not in existing_dates and pd.notna(row["weight_out"]):
             new_rows.append({
                 "date": d,
-                "weight_kg": row["weight_smooth"],
+                "weight_kg": row["weight_out"],
                 "garmin_tr": np.nan,
                 "non_running_tss": np.nan,
             })
@@ -245,37 +247,19 @@ def postprocess_weight(df: pd.DataFrame) -> pd.DataFrame:
     if new_rows:
         df = pd.concat([df, pd.DataFrame(new_rows)], ignore_index=True)
     
-    # Apply smoothed weight to all rows that fall in the daily range
-    _sample_key = list(smooth_lookup.keys())[0] if smooth_lookup else None
-    _sample_date = df["date"].iloc[0] if len(df) > 0 else None
-    print(f"    smooth_lookup key type: {type(_sample_key)}, df date type: {type(_sample_date)}")
-    print(f"    smooth_lookup has 2025-12-01: {'2025-12-01' in smooth_lookup}")
-    if "2025-12-01" in smooth_lookup:
-        print(f"    smooth_lookup[2025-12-01] = {smooth_lookup['2025-12-01']}")
-    _dec1_rows = df[df["date"] == "2025-12-01"]
-    if len(_dec1_rows):
-        print(f"    df Dec 1 before smooth: weight_kg={_dec1_rows['weight_kg'].values}")
-    _mapped = df["date"].map(smooth_lookup)
-    _n_mapped = _mapped.notna().sum()
-    _n_total = len(df)
-    print(f"    map result: {_n_mapped}/{_n_total} mapped successfully")
-    df["weight_kg"] = _mapped.combine_first(df["weight_kg"])
-    _dec1_after = df[df["date"] == "2025-12-01"]
-    if len(_dec1_after):
-        print(f"    df Dec 1 after smooth: weight_kg={_dec1_after['weight_kg'].values}")
+    # Apply output weight to all rows
+    df["weight_kg"] = df["date"].map(weight_lookup).combine_first(df["weight_kg"])
     df = df.sort_values("date").reset_index(drop=True)
     
     # Stats
     n_raw = len(raw_weights)
-    n_filled = int(daily_df["weight_filled"].notna().sum())
-    latest_smooth = daily_df[daily_df["weight_smooth"].notna()].iloc[-1]
+    n_total = int(df["weight_kg"].notna().sum())
     print(f"  Weight post-processing:")
     print(f"    Raw measurements: {n_raw}")
-    print(f"    Daily filled range: {daily_df['date'].iloc[0]} -> {daily_df['date'].iloc[-1]} ({n_filled} days)")
-    print(f"    Smoothing: {WEIGHT_SMOOTH_WINDOW}-day centred average")
-    print(f"    Latest smoothed: {latest_smooth['weight_smooth']:.1f} kg ({latest_smooth['date']})")
+    print(f"    Rows with weight: {n_total} (incl. fill days)")
     
     return df
+
 
 
 def merge_data(existing_df: pd.DataFrame, 

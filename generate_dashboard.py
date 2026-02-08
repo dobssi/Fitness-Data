@@ -89,7 +89,7 @@ def load_and_process_data():
                     last_hash = stripped.rfind('#')
                     remainder = stripped[last_hash + 1:].strip()
                     # Only treat as data if it looks like a CSV header (contains commas)
-                    if remainder and ',' in remainder and not remainder.startswith('#'):
+                    if remainder and remainder.startswith('date,'):
                         clean_lines.append(remainder + '\n')
                     # Otherwise skip the comment line entirely
                 else:
