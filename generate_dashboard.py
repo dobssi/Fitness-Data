@@ -750,61 +750,38 @@ def get_alert_data(df):
 
 
 def get_weight_chart_data(master_file, months=12):
-    """v51.6: Get weekly average weight data for chart.
+    """v51.6: Get distance-weighted weekly average weight data for chart.
     
-    Master weight_kg is already smoothed (±3 day centred average from athlete_data).
-    Dashboard simply computes weekly averages.
+    Matches BFW approach: each run carries its smoothed daily weight from
+    athlete_data, and the weekly average is weighted by run distance.
     """
-    wt_df = None
-    
-    # Try Master first
     try:
-        df = pd.read_excel(master_file, sheet_name='Master', usecols=['date', 'weight_kg'])
+        df = pd.read_excel(master_file, sheet_name='Master',
+                           usecols=['date', 'weight_kg', 'distance_km'])
         df['date'] = pd.to_datetime(df['date'])
         df = df.dropna(subset=['weight_kg'])
-        if len(df) > 0:
-            wt_df = df[['date', 'weight_kg']]
-    except Exception:
-        pass
+        # Need distance for weighting; default to 1 if missing
+        df['distance_km'] = df['distance_km'].fillna(1.0).clip(lower=0.1)
+    except Exception as e:
+        print(f"  Warning: Could not load weight from Master: {e}")
+        return [], []
     
-    # Fall back to athlete_data.csv
-    if wt_df is None or len(wt_df) == 0:
-        athlete_file = os.path.join(os.path.dirname(master_file), 'athlete_data.csv')
-        if not os.path.exists(athlete_file):
-            athlete_file = 'athlete_data.csv'
-        if os.path.exists(athlete_file):
-            try:
-                import io
-                with open(athlete_file, 'r') as f:
-                    raw_lines = f.readlines()
-                clean_lines = []
-                for line in raw_lines:
-                    stripped = line.lstrip()
-                    if stripped.startswith('#'):
-                        last_hash = stripped.rfind('#')
-                        remainder = stripped[last_hash + 1:].strip()
-                        if remainder and ',' in remainder:
-                            clean_lines.append(remainder + '\n')
-                    else:
-                        clean_lines.append(line)
-                ad = pd.read_csv(io.StringIO(''.join(clean_lines)))
-                ad['date'] = pd.to_datetime(ad['date'], format='%Y-%m-%d', errors='coerce')
-                if 'weight_kg' in ad.columns:
-                    wt_df = ad[['date', 'weight_kg']].dropna(subset=['weight_kg'])
-            except Exception as e:
-                print(f"  Warning: Could not load weight from athlete_data.csv: {e}")
-    
-    if wt_df is None or len(wt_df) == 0:
+    if len(df) == 0:
         return [], []
     
     try:
         today = datetime.now()
         cutoff = today - timedelta(days=months * 30)
-        wt_df = wt_df[wt_df['date'] > cutoff].copy()
+        df = df[df['date'] > cutoff].copy()
         
-        # Simple weekly averages (data is already smoothed upstream)
-        wt_df['week'] = wt_df['date'].dt.to_period('W').apply(lambda p: p.start_time)
-        weekly = wt_df.groupby('week')['weight_kg'].mean().reset_index()
+        # Distance-weighted weekly averages (matches BFW)
+        df['week'] = df['date'].dt.to_period('W').apply(lambda p: p.start_time)
+        df['wt_x_dist'] = df['weight_kg'] * df['distance_km']
+        weekly = df.groupby('week').agg(
+            wt_sum=('wt_x_dist', 'sum'),
+            dist_sum=('distance_km', 'sum')
+        ).reset_index()
+        weekly['weight_kg'] = weekly['wt_sum'] / weekly['dist_sum']
         weekly = weekly.sort_values('week')
         
         dates = weekly['week'].dt.strftime('%d %b %y').tolist()

@@ -46,7 +46,7 @@ except ImportError:
 # CONFIGURATION
 # =============================================================================
 DEFAULT_ATHLETE_DATA = "athlete_data.csv"
-INTERVALS_WEIGHT_START = "2023-06-01"   # intervals.icu weight data starts here
+INTERVALS_WEIGHT_START = "2026-01-01"   # BFW data is authoritative pre-2026
 RUNNING_TYPES = {"Run", "VirtualRun"}   # Excluded from non-running TSS
 
 # Non-running TSS formula: (calories - BMR_PER_HOUR * duration_hours) / TSS_DIVISOR
