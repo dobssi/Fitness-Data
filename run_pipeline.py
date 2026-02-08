@@ -120,12 +120,20 @@ def run_sync(args):
     """Run intervals.icu sync steps (Phase 1 + Phase 2)."""
     sync_steps = []
     
-    # Phase 2: Fetch new FIT files
+    # Phase 2: Fetch new FIT files + add to zip
+    fit_zip = FIT_ZIP_MAP.get(args.size, "TotalHistory.zip")
     if os.path.exists("fetch_fit_files.py"):
         fetch_cmd = [PY, "-u", "fetch_fit_files.py",
                      "--fit-dir", "TotalHistory",
-                     "--zip", FIT_ZIP_MAP.get(args.size, "TotalHistory.zip")]
+                     "--zip", fit_zip]
         sync_steps.append((fetch_cmd, "Fetch new FIT files from intervals.icu"))
+
+    # Add any new FIT files to the zip so rebuild can find them
+    if os.path.exists("zip_add_fits.py"):
+        zip_cmd = [PY, "-u", "zip_add_fits.py",
+                   "--fit-dir", "TotalHistory",
+                   "--zip", fit_zip]
+        sync_steps.append((zip_cmd, "Add new FIT files to zip"))
     
     # Phase 1: Sync athlete data (weight + TSS)
     if os.path.exists("sync_athlete_data.py"):

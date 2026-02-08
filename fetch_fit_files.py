@@ -344,6 +344,23 @@ def main():
     if args.list_only:
         return 0
     
+    # Append new FIT files to the zip so rebuild_from_fit_zip can find them
+    if downloaded and os.path.exists(args.zip):
+        print(f"\nAppending {len(downloaded)} new FIT file(s) to {args.zip}...")
+        existing_in_zip = set()
+        with zipfile.ZipFile(args.zip, 'r') as zf:
+            existing_in_zip = {os.path.basename(n).lower() for n in zf.namelist()}
+        added = 0
+        with zipfile.ZipFile(args.zip, 'a', zipfile.ZIP_DEFLATED) as zf:
+            for dl in downloaded:
+                fname = dl["filename"]
+                if fname.lower() not in existing_in_zip:
+                    fit_path = os.path.join(args.fit_dir, fname)
+                    if os.path.exists(fit_path):
+                        zf.write(fit_path, fname)
+                        added += 1
+        print(f"  Added {added} to zip ({args.zip})")
+    
     # Update pending_activities.csv
     if not args.no_pending and downloaded:
         generate_pending_activities(downloaded, args.pending_csv)
