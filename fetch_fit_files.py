@@ -228,32 +228,47 @@ def generate_pending_activities(downloaded: list, pending_csv_path: str):
     Append downloaded activities to pending_activities.csv.
     
     Uses intervals.icu activity names so they appear in the Master file.
+    Skips entries where a date-based key already exists (from dispatch metadata).
     """
     if not downloaded:
         return
     
     print(f"\nUpdating {pending_csv_path}...")
     
-    # Read existing
+    # Read existing entries — both filename keys and date-based keys
     existing_files = set()
+    existing_dates = set()  # date-based keys from dispatch metadata
     if os.path.exists(pending_csv_path):
         import csv
+        import re
+        date_pat = re.compile(r'^(\d{4}-\d{2}-\d{2})\s*(?:#\d+)?$')
         with open(pending_csv_path, "r", encoding="utf-8") as f:
             reader = csv.reader(f)
             next(reader, None)  # skip header
             for row in reader:
                 if row:
-                    existing_files.add(row[0])
+                    key = row[0].strip()
+                    existing_files.add(key)
+                    m = date_pat.match(key)
+                    if m:
+                        existing_dates.add(m.group(1))
     else:
         with open(pending_csv_path, "w", encoding="utf-8") as f:
             f.write("file,activity_name,shoe\n")
     
-    # Append new entries
+    # Append new entries (skip if filename exists OR date already has dispatch metadata)
     added = 0
+    skipped_dispatch = 0
     with open(pending_csv_path, "a", encoding="utf-8") as f:
         for filename, act in downloaded:
             fit_name = f"{filename}.FIT"
             if fit_name in existing_files:
+                continue
+            
+            # Extract date from filename (YYYY-MM-DD_HH-MM-SS.FIT)
+            fit_date = filename[:10] if len(filename) >= 10 else ""
+            if fit_date in existing_dates:
+                skipped_dispatch += 1
                 continue
             
             name = act.get("name", "").replace(",", " ").replace('"', "")
@@ -263,6 +278,8 @@ def generate_pending_activities(downloaded: list, pending_csv_path: str):
             f.write(f'{fit_name},"{name}",\n')
             added += 1
     
+    if skipped_dispatch > 0:
+        print(f"  Skipped {skipped_dispatch} (dispatch metadata already set)")
     print(f"  Added {added} entries to pending_activities.csv")
 
 
@@ -380,6 +397,14 @@ def main():
         state["total_fit_files"] = len(get_existing_fit_files(args.fit_dir))
         save_sync_state(args.state_file, state)
         print(f"\nSync state updated: {args.state_file}")
+    
+    # Signal to Daily_Update.bat that new runs were downloaded
+    if downloaded:
+        try:
+            with open('_new_runs_added.tmp', 'w') as f:
+                f.write(str(len(downloaded)))
+        except Exception:
+            pass
     
     print(f"\n[OK] Done. {len(downloaded)} new FIT files downloaded.")
     return 0

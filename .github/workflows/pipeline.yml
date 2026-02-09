@@ -135,6 +135,8 @@ jobs:
                     Master_Rebuilt.xlsx \
                     re_model_s4_FULL.json \
                     sync_state.json \
+                    fit_sync_state.json \
+                    pending_activities.csv \
                     TotalHistory.zip \
                     _weather_cache_openmeteo/openmeteo_cache.sqlite
         continue-on-error: true
@@ -204,7 +206,8 @@ jobs:
               github.event.inputs.notes != '' }}
         run: |
           python ci/dropbox_sync.py upload \
-            --items activity_overrides.xlsx
+            --items activity_overrides.xlsx \
+                    pending_activities.csv
         continue-on-error: true
       
       # ─── Run pipeline ──────────────────────────────────────
@@ -233,7 +236,10 @@ jobs:
                     sync_state.json \
                     activity_overrides.xlsx \
                     index.html \
-                    _weather_cache_openmeteo/openmeteo_cache.sqlite
+                    _weather_cache_openmeteo/openmeteo_cache.sqlite \
+                    TotalHistory.zip \
+                    fit_sync_state.json \
+                    pending_activities.csv
       
       # ─── Deploy dashboard to GitHub Pages ──────────────────
       - name: Prepare dashboard for Pages

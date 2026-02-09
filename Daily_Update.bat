@@ -49,6 +49,12 @@ if errorlevel 1 (
   goto :sync_data
 )
 
+REM Check if fetch signalled new downloads
+if exist _new_runs_added.tmp (
+  set "NEW_RUNS=1"
+  del _new_runs_added.tmp
+)
+
 REM ---- Step 2: Add new FIT files to TotalHistory.zip ----
 echo.
 echo === Step 2/5: Update TotalHistory.zip ===
