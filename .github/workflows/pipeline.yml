@@ -141,19 +141,9 @@ jobs:
                     _weather_cache_openmeteo/openmeteo_cache.sqlite
         continue-on-error: true
       
-      # ─── Sync from intervals.icu ────────────────────────────
-      - name: Sync from intervals.icu
-        if: ${{ github.event.inputs.sync != 'false' }}
-        run: |
-          python fetch_fit_files.py \
-            --fit-dir TotalHistory \
-            --zip TotalHistory.zip \
-            --state-file sync_state.json
-          
-          python sync_athlete_data.py \
-            --athlete-data athlete_data.csv
-      
       # ─── Apply run metadata from dispatch inputs ────────────
+      # Must run BEFORE sync so fetch_fit_files.py sees the dispatch
+      # name in pending_activities.csv and skips auto-naming
       - name: Apply run metadata
         if: >-
           ${{ github.event.inputs.run_name != '' ||
@@ -209,6 +199,18 @@ jobs:
             --items activity_overrides.xlsx \
                     pending_activities.csv
         continue-on-error: true
+
+      # ─── Sync from intervals.icu ────────────────────────────
+      - name: Sync from intervals.icu
+        if: ${{ github.event.inputs.sync != 'false' }}
+        run: |
+          python fetch_fit_files.py \
+            --fit-dir TotalHistory \
+            --zip TotalHistory.zip \
+            --state-file sync_state.json
+          
+          python sync_athlete_data.py \
+            --athlete-data athlete_data.csv
       
       # ─── Run pipeline ──────────────────────────────────────
       - name: Run pipeline
