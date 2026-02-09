@@ -2841,31 +2841,35 @@ def match_strava(master: pd.DataFrame, act: pd.DataFrame, tz_local: str, pending
                 day_runs[ds].sort(key=lambda x: x[0])
 
         for idx, row in out.iterrows():
-            # Apply pending names — these override Strava names when provided
+            # Apply pending names with priority tiers:
+            #   Date-based keys (from dispatch metadata) → override everything
+            #   Filename keys (from fetch_fit_files.py) → only fill blanks (Strava wins)
             fit_file = row.get("file", "")
             current_name = row.get("activity_name", "")
             pend_row = None
+            is_dispatch = False  # date-based = user intent = high priority
 
-            # Try exact filename match first
-            if fit_file in pending_by_file:
-                pend_row = pending_by_file[fit_file]
-            else:
-                # Try date-based match
-                d = pd.Timestamp(row.get("date"))
-                if not pd.isna(d):
-                    ds = d.strftime("%Y-%m-%d")
-                    if ds in pending_by_date:
-                        for seq, prow in pending_by_date[ds]:
-                            if seq is None:
-                                # Matches all runs that day
+            # Try date-based match first (dispatch metadata = high priority)
+            d = pd.Timestamp(row.get("date"))
+            if not pd.isna(d):
+                ds = d.strftime("%Y-%m-%d")
+                if ds in pending_by_date:
+                    for seq, prow in pending_by_date[ds]:
+                        if seq is None:
+                            pend_row = prow
+                            is_dispatch = True
+                            break
+                        else:
+                            runs = day_runs.get(ds, [])
+                            if 0 < seq <= len(runs) and runs[seq - 1][1] == fit_file:
                                 pend_row = prow
+                                is_dispatch = True
                                 break
-                            else:
-                                # Match Nth run
-                                runs = day_runs.get(ds, [])
-                                if 0 < seq <= len(runs) and runs[seq - 1][1] == fit_file:
-                                    pend_row = prow
-                                    break
+
+            # Try filename match (auto-generated = low priority, only fills blanks)
+            if pend_row is None and fit_file in pending_by_file:
+                pend_row = pending_by_file[fit_file]
+                is_dispatch = False
 
             if pend_row is not None:
                     # v49: Handle duplicate index entries (loc returns DataFrame instead of Series)
@@ -2873,8 +2877,10 @@ def match_strava(master: pd.DataFrame, act: pd.DataFrame, tz_local: str, pending
                         pend_row = pend_row.iloc[0]
                     pend_name = pend_row.get("activity_name")
                     if pd.notna(pend_name) and pend_name != "":
-                        out.at[idx, "activity_name"] = pend_name
-                        pending_used += 1
+                        # Dispatch metadata always overrides; auto-generated only fills blanks
+                        if is_dispatch or pd.isna(current_name) or current_name == "":
+                            out.at[idx, "activity_name"] = pend_name
+                            pending_used += 1
                     pend_shoe = pend_row.get("shoe")
                     if pd.notna(pend_shoe) and pend_shoe != "" and (pd.isna(row.get("shoe")) or row.get("shoe") == ""):
                         out.at[idx, "shoe"] = pend_shoe

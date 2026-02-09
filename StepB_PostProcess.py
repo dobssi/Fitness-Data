@@ -3000,14 +3000,20 @@ def refresh_activity_names(dfm: pd.DataFrame, strava_path: str, tz_local: str) -
                         continue
                     ds = d.strftime('%Y-%m-%d')
                     fit_file = str(row.get('file', '')).strip()
+                    old_name = str(row.get('activity_name', ''))
                     
-                    # Try exact file match first, then date match
-                    new_name = pend_by_file.get(fit_file) or pend_by_date.get(ds)
-                    if new_name:
-                        old_name = str(row.get('activity_name', ''))
-                        if new_name != old_name:
-                            dfm.at[i, 'activity_name'] = new_name
-                            pend_applied += 1
+                    # Date-based keys (dispatch metadata) override everything
+                    date_name = pend_by_date.get(ds)
+                    if date_name and date_name != old_name:
+                        dfm.at[i, 'activity_name'] = date_name
+                        pend_applied += 1
+                        continue
+                    
+                    # Filename keys (auto-generated) only fill blanks
+                    file_name = pend_by_file.get(fit_file)
+                    if file_name and (not old_name or old_name == 'nan'):
+                        dfm.at[i, 'activity_name'] = file_name
+                        pend_applied += 1
             if pend_applied > 0:
                 print(f"  Applied {pend_applied} pending activity name override(s)")
     
