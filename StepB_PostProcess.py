@@ -2968,26 +2968,46 @@ def refresh_activity_names(dfm: pd.DataFrame, strava_path: str, tz_local: str) -
         except UnicodeDecodeError:
             pend = pd.read_csv(pending_csv, encoding='cp1252')
         
-        if 'activity_name' in pend.columns and 'date' in pend.columns:
+        # Determine key column — 'file' (filename or date-based key) or 'date'
+        import re as _re
+        _date_pat = _re.compile(r'^(\d{4}-\d{2}-\d{2})')
+        
+        key_col = 'file' if 'file' in pend.columns else ('date' if 'date' in pend.columns else None)
+        
+        if key_col and 'activity_name' in pend.columns:
+            # Build lookup: date_str -> name (from both filename and date-based keys)
             pend_by_date = {}
+            pend_by_file = {}
             for _, pr in pend.iterrows():
-                ds = str(pr.get('date', '')).strip()[:10]
+                key = str(pr.get(key_col, '')).strip()
                 name = pr.get('activity_name', '')
-                if ds and pd.notna(name) and str(name).strip():
-                    pend_by_date[ds] = str(name).strip()
+                if not key or not pd.notna(name) or not str(name).strip():
+                    continue
+                name = str(name).strip()
+                
+                # Check if key is a date or date-based pattern
+                m = _date_pat.match(key)
+                if m:
+                    pend_by_date[m.group(1)] = name
+                # Also store by exact key for filename matching
+                pend_by_file[key] = name
             
             pend_applied = 0
             if 'date' in dfm.columns:
                 for i, row in dfm.iterrows():
                     d = pd.Timestamp(row.get('date'))
-                    if not pd.isna(d):
-                        ds = d.strftime('%Y-%m-%d')
-                        if ds in pend_by_date:
-                            old_name = str(row.get('activity_name', ''))
-                            new_name = pend_by_date[ds]
-                            if new_name != old_name:
-                                dfm.at[i, 'activity_name'] = new_name
-                                pend_applied += 1
+                    if pd.isna(d):
+                        continue
+                    ds = d.strftime('%Y-%m-%d')
+                    fit_file = str(row.get('file', '')).strip()
+                    
+                    # Try exact file match first, then date match
+                    new_name = pend_by_file.get(fit_file) or pend_by_date.get(ds)
+                    if new_name:
+                        old_name = str(row.get('activity_name', ''))
+                        if new_name != old_name:
+                            dfm.at[i, 'activity_name'] = new_name
+                            pend_applied += 1
             if pend_applied > 0:
                 print(f"  Applied {pend_applied} pending activity name override(s)")
     
