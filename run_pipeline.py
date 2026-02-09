@@ -292,8 +292,10 @@ def main():
         # Exit code 2 = success but no new runs (quick mode)
         if rc == 2 and action == "UPDATE":
             no_new_runs = True
-            run_step2 = run_step3 = run_step4 = False
-            print(f"\n  [OK] No new runs detected — skipping Steps 2-4")
+            run_step2 = run_step3 = False  # Skip model + sim (expensive, nothing changed)
+            # Still run StepB (fast) to pick up Strava name changes + pending overrides
+            run_step4 = True
+            print(f"\n  [OK] No new runs detected — skipping Steps 2-3, running StepB for name refresh")
             rc = 0
         
         if rc != 0:
