@@ -295,6 +295,9 @@ def main():
             run_step2 = run_step3 = False  # Skip model + sim (expensive, nothing changed)
             # Still run StepB (fast) to pick up Strava name changes + pending overrides
             run_step4 = True
+            # Step 1 wrote Strava-matched out_master; Steps 2-3 won't run so out_sim is stale.
+            # Point StepB at out_master instead of out_sim.
+            out_sim = out_master
             print(f"\n  [OK] No new runs detected — skipping Steps 2-3, running StepB for name refresh")
             rc = 0
         
