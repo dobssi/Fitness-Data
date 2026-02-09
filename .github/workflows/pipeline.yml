@@ -111,7 +111,7 @@ jobs:
       - name: Install Python dependencies
         run: |
           pip install --upgrade pip
-          pip install pandas numpy openpyxl fitparse requests scipy pyyaml
+          pip install -r requirements.txt
       
       # ─── Cache (GitHub Actions layer for speed) ─────────────
       - name: Restore persec cache
