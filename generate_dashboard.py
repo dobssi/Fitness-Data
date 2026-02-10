@@ -1026,7 +1026,7 @@ def get_age_grade_data(df):
     # Colour codes and sizes for each distance category
     colour_map = {
         '3k-': '#8b5cf6',      # purple
-        '5k': '#2563eb',       # blue
+        '5k': '#818cf8',       # blue
         '10k': '#16a34a',      # green
         'HM': '#ea580c',       # orange
         '30k': '#dc2626',      # red
@@ -1066,38 +1066,352 @@ def get_age_grade_data(df):
 
 
 # ============================================================================
+# v51.7: ZONE & RACE CONFIGURATION
+# ============================================================================
+PEAK_CP_WATTS_DASH = 372
+ATHLETE_MASS_KG_DASH = 76.0
+LTHR_DASH = 178
+MAX_HR_DASH = 192
+
+RACE_POWER_FACTORS_DASH = {
+    'Sub-5K': 1.07, '5K': 1.05, '10K': 1.00, 'HM': 0.95, 'Mara': 0.90,
+}
+RACE_DISTANCES_KM_DASH = {
+    'Sub-5K': 3.0, '5K': 5.0, '10K': 10.0, 'HM': 21.097, 'Mara': 42.195,
+}
+PLANNED_RACES_DASH = [
+    {'name': '5K London', 'date': '2026-02-27', 'distance_key': '5K'},
+    {'name': 'HM Stockholm', 'date': '2026-04-25', 'distance_key': 'HM'},
+]
+
+
+def get_zone_data(df):
+    """Extract run data with per-second time-in-zone from NPZ cache."""
+    import glob, os
+    
+    recent = df.tail(100).copy()
+    npower_col = 'npower_w' if 'npower_w' in recent.columns else 'nPower'
+    hr_col = 'avg_hr' if 'avg_hr' in recent.columns else 'Avg_HR'
+    moving_col = 'moving_time_s' if 'moving_time_s' in recent.columns else 'Moving_s'
+    dist_col = 'distance_km' if 'distance_km' in recent.columns else 'Distance_m'
+    
+    current_rfl = float(df.iloc[-1].get('RFL_Trend', 0.90)) if len(df) > 0 else 0.90
+    if pd.isna(current_rfl):
+        current_rfl = 0.90
+    current_cp = round(PEAK_CP_WATTS_DASH * current_rfl)
+    
+    re_col = 'RE_avg'
+    if re_col in df.columns:
+        recent_re = df.tail(100)[re_col].dropna()
+        re_p90 = round(float(recent_re.quantile(0.90)), 4) if len(recent_re) > 0 else 0.92
+    else:
+        re_p90 = 0.92
+    
+    # Zone boundaries
+    RF_THR = current_cp / LTHR_DASH
+    # HR zones (6): boundaries ascending
+    hr_bounds = [0, 140, 155, 169, 178, 185, 9999]
+    hr_znames = ['Z1', 'Z2', 'Z3', 'Z4', 'Z5', 'Z6']
+    # Power zones (6): RF-derived
+    pw_bounds = [0, round(RF_THR*140), round(RF_THR*155), round(RF_THR*169), current_cp, round(current_cp*1.05), 9999]
+    pw_znames = ['Z1', 'Z2', 'Z3', 'Z4', 'Z5', 'Z6']
+    # Race power zones: contiguous midpoint bands
+    m_pw = current_cp * 0.90
+    h_pw = current_cp * 0.95
+    t_pw = current_cp * 1.00
+    f_pw = current_cp * 1.05
+    race_pw_bounds = [0, round(m_pw*0.93), round((m_pw+h_pw)/2), round((h_pw+t_pw)/2), round((t_pw+f_pw)/2), round(f_pw*1.05), 9999]
+    race_pw_names = ['Other', 'Mara', 'HM', '10K', '5K', 'Sub-5K']
+    # Race HR zones: contiguous
+    race_hr_bounds = [0, 163, 170, 175, 180, 184, 9999]
+    race_hr_names = ['Other', 'Mara', 'HM', '10K', '5K', 'Sub-5K']
+    
+    def _time_in_zones(values, bounds, names, rolling_s=30):
+        """Compute minutes in each zone using rolling average."""
+        import numpy as np
+        vals = np.array(values, dtype=float)
+        valid = ~np.isnan(vals) & (vals > 0)
+        if valid.sum() < 10:
+            return {n: 0.0 for n in names}
+        # Rolling average
+        kernel = min(rolling_s, valid.sum())
+        if kernel > 1:
+            rolled = pd.Series(vals).rolling(kernel, min_periods=1).mean().values
+        else:
+            rolled = vals
+        result = {n: 0.0 for n in names}
+        for v in rolled:
+            if np.isnan(v) or v <= 0:
+                continue
+            for i in range(len(bounds)-2, -1, -1):
+                if v >= bounds[i]:
+                    result[names[i]] += 1.0
+                    break
+        # Convert seconds to minutes
+        return {n: round(v / 60.0, 1) for n, v in result.items()}
+    
+    # Find NPZ cache directory
+    npz_dir = None
+    for candidate in ['persec_cache_FULL', '../persec_cache_FULL', 'persec_cache']:
+        if os.path.isdir(candidate):
+            npz_dir = candidate
+            break
+    
+    # Build index of available NPZ files by date prefix
+    npz_index = {}
+    if npz_dir:
+        for fp in glob.glob(os.path.join(npz_dir, '*.npz')):
+            base = os.path.basename(fp).replace('.npz', '')
+            npz_index[base] = fp
+    
+    runs = []
+    npz_hits = 0
+    for _, row in recent.iterrows():
+        npower = row.get(npower_col)
+        hr = row.get(hr_col)
+        moving_s = row.get(moving_col)
+        dist = row.get(dist_col, 0)
+        name = row.get('activity_name', '')
+        is_race = bool(row.get('race_flag', 0) == 1)
+        if pd.isna(npower) or pd.isna(hr) or pd.isna(moving_s):
+            continue
+        duration_min = moving_s / 60.0
+        if duration_min < 5:
+            continue
+        
+        run_date = row['date']
+        run_id = run_date.strftime('%Y-%m-%d_%H-%M-%S')
+        
+        run_entry = {
+            'date': run_date.strftime('%Y-%m-%d'),
+            'name': str(name)[:60] if pd.notna(name) else '',
+            'avg_hr': round(float(hr), 1),
+            'npower': round(float(npower)),
+            'duration_min': round(duration_min, 1),
+            'distance_km': round(float(dist), 1) if pd.notna(dist) else 0,
+            'race': is_race,
+        }
+        
+        # Try to load NPZ for per-second time-in-zone
+        npz_path = npz_index.get(run_id)
+        if npz_path:
+            try:
+                npz_data = np.load(npz_path, allow_pickle=True)
+                pw_arr = npz_data['power_w']
+                hr_arr = npz_data['hr_bpm']
+                run_entry['hz'] = _time_in_zones(hr_arr, hr_bounds, hr_znames)
+                run_entry['pz'] = _time_in_zones(pw_arr, pw_bounds, pw_znames)
+                run_entry['rpz'] = _time_in_zones(pw_arr, race_pw_bounds, race_pw_names)
+                run_entry['rhz'] = _time_in_zones(hr_arr, race_hr_bounds, race_hr_names)
+                npz_hits += 1
+            except Exception as e:
+                pass  # Fall back to no zone data
+        
+        runs.append(run_entry)
+    
+    print(f"  Zone data: {len(runs)} runs, {npz_hits} with NPZ, CP={current_cp}W (RFL={current_rfl:.4f}), RE_p90={re_p90}")
+    return {'runs': runs, 'current_cp': current_cp, 'current_rfl': round(current_rfl, 4), 're_p90': re_p90}
+
+
+# ============================================================================
+# v51.7: ZONE HTML GENERATOR
+# ============================================================================
+def _generate_zone_html(zone_data):
+    """Generate the Training Zones, Race Readiness, and Weekly Zone Volume HTML."""
+    if zone_data is None:
+        return '<!-- zones: no data -->'
+    
+    cp = zone_data['current_cp']
+    re_p90 = zone_data['re_p90']
+    
+    # Combined zone table rows (single table, 5 columns)
+    combined_rows = ''
+    zone_names = ['Z1', 'Z2', 'Z3', 'Z4', 'Z5', 'Z6']
+    zone_labels = ['Recovery', 'Endurance', 'Tempo', 'Threshold', 'VO2max', 'Anaerobic']
+    zone_colors = ['#3b82f6', '#22c55e', '#eab308', '#f97316', '#ef4444', '#d946ef']
+    # Power zones: RF-derived for Z1-Z4, race-factor for Z5-Z6
+    rf_thr = cp / LTHR_DASH
+    pw_z12 = round(rf_thr * 140)
+    pw_z23 = round(rf_thr * 155)
+    pw_z34 = round(rf_thr * 169)
+    pw_5k = round(PEAK_CP_WATTS_DASH * zone_data['current_rfl'] * 1.05)  # 5K power
+    hr_ranges =   ['<140',      '140–155',      '155–169',      '169–178',      '178–185',    '≥185']
+    pw_strs =     [f'<{pw_z12}', f'{pw_z12}–{pw_z23}', f'{pw_z23}–{pw_z34}', f'{pw_z34}–{cp}', f'{cp}–{pw_5k}', f'≥{pw_5k}']
+    pct_strs =    [f'<{round(pw_z12/cp*100)}', f'{round(pw_z12/cp*100)}–{round(pw_z23/cp*100)}', f'{round(pw_z23/cp*100)}–{round(pw_z34/cp*100)}', f'{round(pw_z34/cp*100)}–100', '100–105', '≥105']
+    effort_hints = ['', 'easy–Mara', 'Mara–HM', 'HM–10K', '10K–5K', '>5K']
+    combined_rows = ''
+    for i in range(6):
+        combined_rows += f'<tr><td><span class="zd" style="background:{zone_colors[i]}"></span><strong>{zone_names[i]}</strong></td><td style="color:var(--text-dim);font-family:DM Sans">{zone_labels[i]}</td><td>{hr_ranges[i]}</td><td>{pw_strs[i]}W</td><td class="pct-col" style="color:var(--text-dim)">{pct_strs[i]}%</td></tr>'
+    
+    # Race readiness cards
+    race_cards = ''
+    from datetime import date as dt_date
+    for race in PLANNED_RACES_DASH:
+        key = race['distance_key']
+        factor = RACE_POWER_FACTORS_DASH.get(key, 1.0)
+        dist_km = RACE_DISTANCES_KM_DASH.get(key, 5.0)
+        pw = round(cp * factor)
+        dist_m = dist_km * 1000
+        speed = (pw / ATHLETE_MASS_KG_DASH) * re_p90
+        t = round(dist_m / speed) if speed > 0 else 0
+        band = round(pw * 0.03)
+        mins = t // 60
+        secs = t % 60
+        hrs = mins // 60
+        t_str = f"{hrs}:{mins%60:02d}:{secs:02d}" if hrs > 0 else f"{mins}:{secs:02d}"
+        pace = t / dist_km if dist_km > 0 and t > 0 else 0
+        p_min = int(pace // 60)
+        p_sec = int(pace % 60)
+        pace_str = f"{p_min}:{p_sec:02d}/km" if pace > 0 else '-'
+        race_dt = datetime.strptime(race['date'], '%Y-%m-%d').date()
+        days_to = (race_dt - dt_date.today()).days
+        days_str = f"{days_to}d" if days_to > 0 else "TODAY"
+        
+        race_cards += f'''<div class="rc">
+            <div class="rh"><span class="rn">{race['name']}</span><span class="rd">{race['date']} · {days_str}</span></div>
+            <div class="rs">
+                <div><div class="rv" style="color:var(--accent)">{pw}W</div><div class="rl">Target</div><div class="rx">±{band}W</div></div>
+                <div><div class="rv">{t_str}</div><div class="rl">Predicted</div><div class="rx">{pace_str}</div></div>
+                <div><div class="rv" id="spec14_{key}">—</div><div class="rl">14-day</div><div class="rx">at effort</div></div>
+                <div><div class="rv" id="spec28_{key}">—</div><div class="rl">28-day</div><div class="rx">at effort</div></div>
+            </div>
+        </div>'''
+    
+    # Zone run data as JSON for JS
+    import json as _json
+    zone_runs_json = _json.dumps(zone_data['runs'])
+    
+    return f'''
+    <div class="card">
+        <h2>Training Zones <span class="badge">CP {cp}W · LTHR {LTHR_DASH} · Max ~{MAX_HR_DASH}</span></h2>
+        <table class="zt"><thead><tr><th>Zone</th><th></th><th>HR</th><th>Power</th><th class="pct-col">%CP</th></tr></thead><tbody>{combined_rows}</tbody></table>
+    </div>
+
+    <div class="card">
+        <h2>🎯 Race Readiness <span class="badge">±3% of target</span></h2>
+        {race_cards}
+    </div>
+
+    <div class="card">
+        <h2>📊 Weekly Zone Volume</h2>
+        <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px">
+            <div class="chart-toggle" id="wk-mode">
+                <button class="active" onclick="setWM('hr',this)">HR Zone</button>
+                <button onclick="setWM('power',this)">Power Zone</button>
+                <button onclick="setWM('race',this)">Race (W)</button>
+                <button onclick="setWM('racehr',this)">Race (HR)</button>
+            </div>
+            <div class="chart-toggle" id="wk-period">
+                <button class="active" onclick="setWP(8,this)">8w</button>
+                <button onclick="setWP(12,this)">12w</button>
+                <button onclick="setWP(16,this)">16w</button>
+            </div>
+        </div>
+        <div id="wk-bars"></div>
+        <div id="wk-leg" class="legend"></div>
+    </div>
+
+    <div class="card">
+        <h2>📊 Per-Run Distribution <span class="badge">last 30</span></h2>
+        <div style="margin-bottom:10px">
+            <div class="chart-toggle" id="pr-mode">
+                <button class="active" onclick="setPR('hr',this)">HR Zone</button>
+                <button onclick="setPR('power',this)">Power Zone</button>
+                <button onclick="setPR('race',this)">Race (W)</button>
+                <button onclick="setPR('racehr',this)">Race (HR)</button>
+            </div>
+        </div>
+        <div class="chart-wrapper"><canvas id="prChart"></canvas></div>
+        <div id="pr-leg" class="legend"></div>
+        <div class="note">Zone split from 30s rolling average of per-second power/HR data where available.</div>
+    </div>
+
+    <script>
+    const ZONE_RUNS=''' + zone_runs_json + f''';
+    const ZONE_CP={cp};const ZONE_PEAK_CP={PEAK_CP_WATTS_DASH};const ZONE_MASS={ATHLETE_MASS_KG_DASH};const ZONE_RE={re_p90};
+    const HR_Z=[
+      {{id:'Z1',name:'Recovery',lo:0,hi:140,c:'#3b82f6'}},
+      {{id:'Z2',name:'Endurance',lo:140,hi:155,c:'#22c55e'}},
+      {{id:'Z3',name:'Tempo',lo:155,hi:169,c:'#eab308'}},
+      {{id:'Z4',name:'Threshold',lo:169,hi:178,c:'#f97316'}},
+      {{id:'Z5',name:'VO2max',lo:178,hi:185,c:'#ef4444'}},
+      {{id:'Z6',name:'Anaerobic',lo:185,hi:9999,c:'#d946ef'}}
+    ];
+    const RF_THR=ZONE_CP/178;
+    const PW_5K=Math.round(ZONE_CP*1.05);
+    const PW_Z=[
+      {{id:'Z1',name:'Recovery',lo:0,hi:Math.round(RF_THR*140),c:'#3b82f6'}},
+      {{id:'Z2',name:'Endurance',lo:Math.round(RF_THR*140),hi:Math.round(RF_THR*155),c:'#22c55e'}},
+      {{id:'Z3',name:'Tempo',lo:Math.round(RF_THR*155),hi:Math.round(RF_THR*169),c:'#eab308'}},
+      {{id:'Z4',name:'Threshold',lo:Math.round(RF_THR*169),hi:ZONE_CP,c:'#f97316'}},
+      {{id:'Z5',name:'VO2max',lo:ZONE_CP,hi:PW_5K,c:'#ef4444'}},
+      {{id:'Z6',name:'Anaerobic',lo:PW_5K,hi:9999,c:'#d946ef'}}
+    ];
+    const RACE_CFG={{}};
+    ['Sub-5K','5K','10K','HM','Mara'].forEach(k=>{{
+      const f={{'Sub-5K':1.07,'5K':1.05,'10K':1.00,'HM':0.95,'Mara':0.90}}[k],pw=Math.round(ZONE_CP*f);
+      const dists={{'Sub-5K':3,'5K':5,'10K':10,'HM':21.097,'Mara':42.195}};
+      const cols={{'Sub-5K':'#4ade80','5K':'#f472b6','10K':'#fb923c','HM':'#a78bfa','Mara':'#38bdf8'}};
+      RACE_CFG[k]={{pw,dist:dists[k],color:cols[k]}};
+    }});
+    function makeRacePwZones(){{const pw=RACE_CFG,m=pw['Mara'].pw,h=pw['HM'].pw,t=pw['10K'].pw,f=pw['5K'].pw;const mh=Math.round((m+h)/2),ht=Math.round((h+t)/2),tf=Math.round((t+f)/2),above=Math.round(f*1.05);return[{{id:'Sub-5K',name:'Sub-5K',lo:above,hi:9999,c:'#4ade80'}},{{id:'5K',name:'5K',lo:tf,hi:above,c:'#f472b6'}},{{id:'10K',name:'10K',lo:ht,hi:tf,c:'#fb923c'}},{{id:'HM',name:'HM',lo:mh,hi:ht,c:'#a78bfa'}},{{id:'Mara',name:'Mara',lo:Math.round(m*0.93),hi:mh,c:'#38bdf8'}},{{id:'Other',name:'Other',lo:0,hi:Math.round(m*0.93),c:'#4b5563'}}];}}
+    function makeRaceHrZones(){{return[{{id:'Sub-5K',name:'Sub-5K',lo:184,hi:9999,c:'#4ade80'}},{{id:'5K',name:'5K',lo:180,hi:184,c:'#f472b6'}},{{id:'10K',name:'10K',lo:175,hi:180,c:'#fb923c'}},{{id:'HM',name:'HM',lo:170,hi:175,c:'#a78bfa'}},{{id:'Mara',name:'Mara',lo:163,hi:170,c:'#38bdf8'}},{{id:'Other',name:'Other',lo:0,hi:163,c:'#4b5563'}}];}}
+    const RACE_PW_Z=makeRacePwZones(),RACE_HR_Z=makeRaceHrZones();
+    function zonesFor(m){{if(m==='hr')return HR_Z;if(m==='power')return PW_Z;if(m==='race')return RACE_PW_Z;return RACE_HR_Z;}}
+    function valFor(r,m){{if(m==='hr'||m==='racehr')return r.avg_hr;return r.npower;}}
+    function isRaceMode(m){{return m==='race'||m==='racehr';}}
+    function assignZ(val,zones,rm){{if(!val||val<=0)return zones[zones.length-1].id;if(rm){{for(const z of zones){{if(z.id==='Other')continue;if(val>=z.lo&&val<=z.hi)return z.id;}}return'Other';}}for(const z of zones){{if(val<z.hi)return z.id;}}return zones[zones.length-1].id;}}
+    function assignToZone(val,zones,result,mins){{for(const z of zones){{if(z.id==='Other')continue;if(val>=z.lo){{result[z.id]+=mins;return;}}}}result['Other']+=mins;}}
+    function estimateRaceEffortMins(r,zones){{const result={{}};zones.forEach(z=>result[z.id]=0);const mins=r.duration_min||0,pw=r.npower||0;if(!pw||!mins){{result['Other']=mins;return result;}}assignToZone(pw*1.10,zones,result,mins*0.15);assignToZone(pw,zones,result,mins*0.60);assignToZone(pw*0.88,zones,result,mins*0.25);return result;}}
+    function estimateRaceEffortMinsHR(r,zones){{const result={{}};zones.forEach(z=>result[z.id]=0);const mins=r.duration_min||0,hr=r.avg_hr||0;if(!hr||!mins){{result['Other']=mins;return result;}}assignToZone(hr*1.06,zones,result,mins*0.15);assignToZone(hr,zones,result,mins*0.60);assignToZone(hr*0.92,zones,result,mins*0.25);return result;}}
+    function getZoneMins(r,mode,zones){{
+      // Use pre-computed NPZ zone data if available
+      const key={{hr:'hz',power:'pz',race:'rpz',racehr:'rhz'}}[mode];
+      if(r[key]){{const result={{}};zones.forEach(z=>result[z.id]=0);Object.keys(r[key]).forEach(k=>{{if(result[k]!==undefined)result[k]=r[key][k];}});return result;}}
+      // Fallback to heuristic
+      if(mode==='race')return estimateRaceEffortMins(r,zones);
+      if(mode==='racehr')return estimateRaceEffortMinsHR(r,zones);
+      // HR/Power zone fallback: assign all time to primary zone
+      const result={{}};zones.forEach(z=>result[z.id]=0);const mins=r.duration_min||0,v=valFor(r,mode),zid=assignZ(v,zones,false);if(result[zid]!==undefined)result[zid]=mins;return result;
+    }}
+    function calcSpecificity(){{const today=new Date();const c14=new Date(today);c14.setDate(c14.getDate()-14);const c28=new Date(today);c28.setDate(c28.getDate()-28);const targets=[{{key:'5K'}},{{key:'HM'}}];targets.forEach(tgt=>{{let m14=0,m28=0;ZONE_RUNS.forEach(r=>{{const d=new Date(r.date);if(d<c28)return;const est=getZoneMins(r,'race',RACE_PW_Z);const mins=est[tgt.key]||0;if(d>=c14)m14+=mins;m28+=mins;}});const e14=document.getElementById('spec14_'+tgt.key),e28=document.getElementById('spec28_'+tgt.key);if(e14)e14.innerHTML=Math.round(m14)+'<span style="font-size:0.75rem;color:var(--text-dim)">min</span>';if(e28)e28.innerHTML=Math.round(m28)+'<span style="font-size:0.75rem;color:var(--text-dim)">min</span>';}});}}calcSpecificity();
+    // Weekly zone bars
+    function weekKey(ds){{const d=new Date(ds),day=d.getDay(),m=new Date(d);m.setDate(d.getDate()-((day+6)%7));return m.toISOString().slice(0,10);}}
+    function fmtWk(s){{const d=new Date(s),tmp=new Date(d.valueOf());tmp.setDate(tmp.getDate()+3-(tmp.getDay()+6)%7);const w1=new Date(tmp.getFullYear(),0,4);const wk=1+Math.round(((tmp-w1)/864e5-3+(w1.getDay()+6)%7)/7);return'W'+String(wk).padStart(2,'0')+'/'+String(tmp.getFullYear()).slice(-2);}}
+    let wkMode='hr',wkN=8;
+    function renderWk(){{const el=document.getElementById('wk-bars');el.innerHTML='';const zones=zonesFor(wkMode),rm=isRaceMode(wkMode);const weeks={{}};ZONE_RUNS.forEach(r=>{{const w=weekKey(r.date);if(!weeks[w])weeks[w]=[];weeks[w].push(r);}});const sorted=Object.keys(weeks).sort().slice(-wkN);let maxT=0;const wd=sorted.map(wk=>{{const zm={{}};zones.forEach(z=>zm[z.id]=0);let t=0;weeks[wk].forEach(r=>{{const mins=r.duration_min||0;const est=getZoneMins(r,wkMode,zones);Object.keys(est).forEach(zid=>{{if(zm[zid]!==undefined)zm[zid]+=est[zid];}});t+=mins;}});if(t>maxT)maxT=t;return{{week:wk,zm,t}};}});wd.forEach(w=>{{const row=document.createElement('div');row.className='wr';const lbl=document.createElement('div');lbl.className='wl';lbl.textContent=fmtWk(w.week);row.appendChild(lbl);const bar=document.createElement('div');bar.className='wb';zones.forEach(z=>{{if(w.zm[z.id]>0){{const pct=(w.zm[z.id]/maxT)*100,seg=document.createElement('div');seg.className='ws';seg.style.width=pct+'%';seg.style.background=z.c;seg.innerHTML='<div class="tip">'+z.name+': '+Math.round(w.zm[z.id])+' min</div>';bar.appendChild(seg);}}}});row.appendChild(bar);const tot=document.createElement('div');tot.className='wt';tot.textContent=Math.round(w.t)+' min';row.appendChild(tot);el.appendChild(row);}});document.getElementById('wk-leg').innerHTML=zones.map(z=>'<div class="lg"><div class="lsw" style="background:'+z.c+'"></div>'+z.name+'</div>').join('');}}
+    function setWM(m,btn){{wkMode=m;document.querySelectorAll('#wk-mode button').forEach(b=>b.classList.remove('active'));btn.classList.add('active');renderWk();}}
+    function setWP(n,btn){{wkN=n;document.querySelectorAll('#wk-period button').forEach(b=>b.classList.remove('active'));btn.classList.add('active');renderWk();}}
+    renderWk();
+    // Per-run chart
+    let prMode='hr',prChart=null;
+    function renderPR(){{const ctx=document.getElementById('prChart').getContext('2d');const last30=ZONE_RUNS.slice(-30),zones=zonesFor(prMode),rm=isRaceMode(prMode);const labels=last30.map(r=>{{const d=new Date(r.date);return d.getDate()+'/'+(d.getMonth()+1);}});const datasets=zones.map((z,zi)=>({{label:z.name,data:last30.map(r=>{{const mins=r.duration_min||0;const est=getZoneMins(r,prMode,zones);return Math.round(est[z.id]||0);}}),backgroundColor:z.c+'cc',borderWidth:0,borderRadius:2}}));if(prChart)prChart.destroy();prChart=new Chart(ctx,{{type:'bar',data:{{labels,datasets}},options:{{responsive:true,maintainAspectRatio:false,plugins:{{legend:{{display:false}},tooltip:{{callbacks:{{title:items=>{{const i=items[0].dataIndex;return last30[i].name;}},label:item=>item.dataset.label+': '+item.raw+' min'}}}}}},scales:{{x:{{stacked:true,grid:{{color:'rgba(255,255,255,0.04)'}},ticks:{{color:'#8b90a0',font:{{size:10,family:"'JetBrains Mono'"}}}}}},y:{{stacked:true,grid:{{color:'rgba(255,255,255,0.04)'}},ticks:{{color:'#8b90a0',font:{{size:10,family:"'JetBrains Mono'"}},callback:v=>v+' min'}}}}}}}}}});document.getElementById('pr-leg').innerHTML=zones.map(z=>'<div class="lg"><div class="lsw" style="background:'+z.c+'"></div>'+z.name+'</div>').join('');}}
+    function setPR(m,btn){{prMode=m;document.querySelectorAll('#pr-mode button').forEach(b=>b.classList.remove('active'));btn.classList.add('active');renderPR();}}
+    renderPR();
+    </script>
+'''
+
+
+# ============================================================================
 # v51: ALERT BANNER GENERATOR
 # ============================================================================
 def _generate_alert_banner(alert_data, critical_power=None):
-    """Generate the HTML for the health check banner with CP."""
-    cp_html = f'<span style="float: right; font-size: 0.9em; color: #374151;"><strong>⚡ CP {critical_power}W</strong></span>' if critical_power else ''
-    
+    """Generate dark-themed alert banner."""
+    cp_html = f'<span style="font-size:0.82em;color:#8b90a0;">⚡ CP {critical_power}W</span>' if critical_power else ''
     if not alert_data:
-        return f'''<div style="background: #f0fdf4; border: 1px solid #86efac; border-radius: 12px; padding: 10px 16px; margin-bottom: 12px; text-align: center;">
-            <span style="font-size: 1.1em;">🟢</span> <strong>All clear</strong> — no alerts active{cp_html}
-        </div>'''
-    
-    # Determine overall level
+        return f'<div style="background:rgba(34,197,94,0.08);border:1px solid rgba(34,197,94,0.3);border-radius:10px;padding:10px 16px;margin-bottom:14px;display:flex;justify-content:center;align-items:center;gap:8px;"><span style="font-size:1.1em;">🟢</span> <strong style="color:#4ade80;">All clear</strong> <span style="color:#8b90a0;">— no alerts</span>{cp_html}</div>'
     levels = [a['level'] for a in alert_data]
     if 'concern' in levels:
-        bg = '#fef2f2'; border = '#fca5a5'; icon = '🔴'
+        bg, brd, icon, lc = 'rgba(239,68,68,0.08)', 'rgba(239,68,68,0.3)', '🔴', '#f87171'
     else:
-        bg = '#fffbeb'; border = '#fcd34d'; icon = '🟡'
-    
-    items = ''.join(
-        f'<div style="margin: 4px 0; font-size: 0.85em;">{a["icon"]} <strong>{a["name"]}</strong>{a.get("detail","")}</div>'
-        for a in alert_data
-    )
-    return f'''<div style="background: {bg}; border: 1px solid {border}; border-radius: 12px; padding: 10px 16px; margin-bottom: 12px;">
-        <div style="text-align: center; margin-bottom: 4px;"><span style="font-size: 1.1em;">{icon}</span> <strong>{len(alert_data)} alert{"s" if len(alert_data) > 1 else ""} active</strong>{cp_html}</div>
-        {items}
-    </div>'''
+        bg, brd, icon, lc = 'rgba(234,179,8,0.08)', 'rgba(234,179,8,0.3)', '🟡', '#fbbf24'
+    items = ''.join(f'<div style="margin:4px 0;font-size:0.85em;color:#e4e7ef;">{a["icon"]} <strong>{a["name"]}</strong><span style="color:#8b90a0"> {a.get("detail","")}</span></div>' for a in alert_data)
+    n = len(alert_data)
+    s = "s" if n > 1 else ""
+    return f'<div style="background:{bg};border:1px solid {brd};border-radius:10px;padding:10px 16px;margin-bottom:14px;"><div style="text-align:center;margin-bottom:4px;"><span style="font-size:1.1em;">{icon}</span> <strong style="color:{lc};">{n} alert{s} active</strong>{cp_html}</div>{items}</div>'
 
 
-# ============================================================================
-# HTML GENERATION
-# ============================================================================
-def generate_html(stats, rf_data, volume_data, ctl_atl_data, ctl_atl_lookup, rfl_trend_dates, rfl_trend_values, rfl_trendline, rfl_projection, rfl_ci_upper, rfl_ci_lower, alltime_rfl_dates, alltime_rfl_values, recent_runs, top_races, alert_data=None, weight_data=None, prediction_data=None, ag_data=None):
+def generate_html(stats, rf_data, volume_data, ctl_atl_data, ctl_atl_lookup, rfl_trend_dates, rfl_trend_values, rfl_trendline, rfl_projection, rfl_ci_upper, rfl_ci_lower, alltime_rfl_dates, alltime_rfl_values, recent_runs, top_races, alert_data=None, weight_data=None, prediction_data=None, ag_data=None, zone_data=None):
     """Generate the HTML dashboard."""
     
     # Extract data for each time range - RF (v51: now includes easy_rfl and race_flags)
@@ -1153,159 +1467,234 @@ def generate_html(stats, rf_data, volume_data, ctl_atl_data, ctl_atl_lookup, rfl
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Paul Collyer Fitness Dashboard</title>
     <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🏃</text></svg>">
+    <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3"></script>
     <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2"></script>
     <style>
+        :root {{
+            --bg: #0f1117;
+            --surface: #1a1d27;
+            --surface2: #232733;
+            --border: #2e3340;
+            --text: #e4e7ef;
+            --text-dim: #8b90a0;
+            --text-muted: #565b6b;
+            --accent: #818cf8;
+            --z1: #3b82f6;
+            --z2: #22c55e;
+            --z3: #eab308;
+            --z4: #f97316;
+            --z5: #ef4444;
+            --grid: rgba(255,255,255,0.04);
+        }}
         * {{
             box-sizing: border-box;
             -webkit-tap-highlight-color: transparent;
+            margin: 0;
+            padding: 0;
         }}
         
         body {{
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
-            margin: 0;
-            padding: 12px;
-            background: #f5f5f5;
-            color: #333;
+            font-family: 'DM Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+            padding: 14px;
+            background: var(--bg);
+            color: var(--text);
             font-size: 14px;
         }}
         
         h1 {{
-            font-size: 1.5em;
-            margin: 0 0 12px 0;
+            font-size: 1.4rem;
+            font-weight: 700;
+            letter-spacing: -0.02em;
+            margin: 0 0 4px 0;
             text-align: center;
+        }}
+        .dash-sub {{
+            text-align: center;
+            color: var(--text-dim);
+            font-size: 0.82rem;
+            margin-bottom: 14px;
         }}
         
         .stats-grid {{
             display: grid;
             grid-template-columns: repeat(2, 1fr);
-            gap: 10px;
-            margin-bottom: 16px;
+            gap: 8px;
+            margin-bottom: 10px;
         }}
         
         .stat-card {{
-            background: white;
-            border-radius: 12px;
-            padding: 12px;
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            padding: 10px;
             text-align: center;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
         }}
         
         .stat-value {{
-            font-size: 1.6em;
-            font-weight: bold;
-            color: #2563eb;
+            font-size: 1.45em;
+            font-weight: 700;
+            color: var(--accent);
+            font-family: 'JetBrains Mono', monospace;
         }}
         
         .stat-label {{
-            font-size: 0.8em;
-            color: #666;
-            margin-top: 4px;
+            font-size: 0.78em;
+            color: var(--text-dim);
+            margin-top: 2px;
+            font-weight: 500;
         }}
         
         .stat-sub {{
-            font-size: 0.75em;
-            color: #999;
+            font-size: 0.7em;
+            color: var(--text-muted);
         }}
         
-        .chart-container {{
-            background: white;
-            border-radius: 12px;
-            padding: 12px;
-            margin-bottom: 16px;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        .card {{
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            padding: 14px;
+            margin-bottom: 12px;
         }}
         
-        .chart-title {{
-            font-size: 1em;
+        .card h2 {{
+            font-size: 0.9rem;
             font-weight: 600;
-            margin-bottom: 4px;
+            margin: 0 0 10px 0;
+            display: flex;
+            align-items: center;
+            gap: 6px;
         }}
         
-        .chart-title-row {{
+        .card-header {{
             display: flex;
             flex-wrap: wrap;
             justify-content: space-between;
             align-items: center;
-            gap: 8px;
-            margin-bottom: 6px;
+            gap: 6px;
+            margin-bottom: 8px;
         }}
         
-        .chart-title-row .chart-title {{
-            margin-bottom: 0;
-        }}
-        
-        .chart-title-row .chart-toggle {{
-            flex-shrink: 0;
-        }}
-        
-        .chart-header {{
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 4px;
-        }}
-        
-        .chart-toggle {{
-            display: flex;
-            gap: 4px;
-        }}
-        
-        .chart-toggle button {{
-            padding: 3px 8px;
-            font-size: 0.7em;
-            border: 1px solid #ddd;
-            background: #f5f5f5;
-            border-radius: 4px;
-            cursor: pointer;
-            color: #666;
-        }}
-        
-        .chart-toggle button.active {{
-            background: #2563eb;
-            border-color: #2563eb;
-            color: white;
-        }}
-        
-        .chart-desc {{
+        .card-description {{
             font-size: 0.75em;
-            color: #666;
+            color: var(--text-dim);
             margin-bottom: 10px;
             line-height: 1.3;
         }}
         
+        .badge {{
+            font-size: 0.68rem;
+            font-weight: 500;
+            background: var(--surface2);
+            border: 1px solid var(--border);
+            padding: 2px 8px;
+            border-radius: 4px;
+            color: var(--text-dim);
+        }}
+
         .chart-wrapper {{
             position: relative;
-            height: 200px;
+            height: 220px;
             width: 100%;
         }}
         
-        /* Table wrapper for horizontal scroll on mobile */
+        /* Zone tables */
+        .zt {{
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 0.8rem;
+            min-width: 0;
+            table-layout: auto;
+        }}
+        .zt th {{
+            text-align: left;
+            padding: 5px 6px;
+            color: var(--text-dim);
+            font-weight: 500;
+            border-bottom: 1px solid var(--border);
+            font-size: 0.7rem;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }}
+        .zt td {{
+            padding: 5px 6px;
+            border-bottom: 1px solid var(--border);
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 0.78rem;
+        }}
+        .zt tr:last-child td {{ border-bottom: none; }}
+        .zd {{
+            width: 7px; height: 7px;
+            border-radius: 50%;
+            display: inline-block;
+            margin-right: 4px;
+            vertical-align: middle;
+        }}
+        
+        /* Weekly zone bars */
+        .wr {{ display: flex; align-items: center; gap: 6px; margin-bottom: 4px; }}
+        .wl {{ font-size: 0.72rem; font-family: 'JetBrains Mono'; color: var(--text-dim); width: 52px; flex-shrink: 0; }}
+        .wb {{ flex: 1; height: 20px; display: flex; border-radius: 3px; overflow: visible; background: rgba(255,255,255,0.02); }}
+        .ws {{ height: 100%; transition: width 0.3s; position: relative; cursor: pointer; }}
+        .ws:first-child {{ border-radius: 3px 0 0 3px; }}
+        .ws:last-child {{ border-radius: 0 3px 3px 0; }}
+        .ws:only-child {{ border-radius: 3px; }}
+        .ws:hover {{ filter: brightness(1.15); }}
+        .ws .tip {{ display: none; position: absolute; bottom: 100%; left: 50%; transform: translateX(-50%); background: var(--surface2); border: 1px solid var(--border); padding: 3px 7px; border-radius: 4px; font-size: 0.68rem; white-space: nowrap; z-index: 10; color: var(--text); pointer-events: none; margin-bottom: 4px; }}
+        .ws:hover .tip {{ display: block; }}
+        .wt {{ font-size: 0.72rem; font-family: 'JetBrains Mono'; color: var(--text-dim); width: 48px; text-align: right; flex-shrink: 0; }}
+        
+        /* Race readiness cards */
+        .rc {{ background: var(--surface2); border-radius: 8px; padding: 12px; margin-bottom: 8px; }}
+        .rc:last-child {{ margin-bottom: 0; }}
+        .rh {{ display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }}
+        .rn {{ font-weight: 600; font-size: 0.88rem; }}
+        .rd {{ font-size: 0.72rem; color: var(--text-dim); font-family: 'JetBrains Mono'; }}
+        .rs {{ display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; }}
+        .rv {{ font-size: 1.1rem; font-weight: 700; font-family: 'JetBrains Mono'; text-align: center; }}
+        .rl {{ font-size: 0.68rem; color: var(--text-dim); text-align: center; margin-top: 1px; }}
+        .rx {{ font-size: 0.64rem; color: var(--text-muted); text-align: center; }}
+        
+        /* Legend */
+        .legend {{ display: flex; gap: 10px; margin-top: 8px; flex-wrap: wrap; }}
+        .lg {{ display: flex; align-items: center; gap: 4px; font-size: 0.7rem; color: var(--text-dim); }}
+        .lsw {{ width: 9px; height: 9px; border-radius: 2px; flex-shrink: 0; }}
+        
+        .note {{
+            font-size: 0.72rem;
+            color: var(--text-muted);
+            margin-top: 10px;
+            padding: 8px 10px;
+            background: var(--surface2);
+            border-radius: 6px;
+            border-left: 3px solid var(--accent);
+        }}
+        
         .table-wrapper {{
             overflow-x: auto;
             -webkit-overflow-scrolling: touch;
-            margin: 0 -12px;
-            padding: 0 12px;
+            margin: 0 -14px;
+            padding: 0 14px;
         }}
         
         table {{
             width: 100%;
             border-collapse: collapse;
-            font-size: 0.8em;
+            font-size: 0.78em;
             table-layout: fixed;
-            min-width: 500px;  /* Force scroll on narrow screens */
+            min-width: 500px;
         }}
         
         th, td {{
-            padding: 6px 3px;
+            padding: 5px 3px;
             text-align: left;
-            border-bottom: 1px solid #eee;
+            border-bottom: 1px solid var(--border);
             overflow: hidden;
             text-overflow: ellipsis;
         }}
         
-        /* Activity/Race name column - allow wrapping */
         td:nth-child(2), td:nth-child(3) {{
             white-space: normal;
             word-wrap: break-word;
@@ -1313,11 +1702,12 @@ def generate_html(stats, rf_data, volume_data, ctl_atl_data, ctl_atl_lookup, rfl
         }}
         
         th {{
-            font-weight: 600;
-            color: #666;
+            font-weight: 500;
+            color: var(--text-dim);
             font-size: 0.7em;
             text-transform: uppercase;
             white-space: nowrap;
+            letter-spacing: 0.03em;
         }}
         
         .race-badge {{
@@ -1331,36 +1721,116 @@ def generate_html(stats, rf_data, volume_data, ctl_atl_data, ctl_atl_lookup, rfl
         
         .footer {{
             text-align: center;
-            font-size: 0.75em;
-            color: #999;
+            font-size: 0.72em;
+            color: var(--text-muted);
             margin-top: 16px;
             padding-top: 12px;
-            border-top: 1px solid #ddd;
+            border-top: 1px solid var(--border);
         }}
         
-        /* Larger screens */
         @media (min-width: 600px) {{
             body {{
-                max-width: 800px;
+                max-width: 900px;
                 margin: 0 auto;
                 padding: 20px;
             }}
-            
             .stats-grid {{
                 grid-template-columns: repeat(4, 1fr);
             }}
-            
             .chart-wrapper {{
                 height: 280px;
             }}
+            .zgrid {{
+                display: grid;
+                grid-template-columns: 1fr 1fr;
+                gap: 12px;
+            }}
+        }}
+        @media (max-width: 599px) {{
+            .rs {{ grid-template-columns: repeat(2, 1fr); }}
+        }}
+        
+        /* Legacy chart classes — dark theme */
+        .chart-container {{
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            padding: 14px;
+            margin-bottom: 12px;
+        }}
+        .chart-header {{
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+            margin-bottom: 10px;
+        }}
+        .chart-title {{
+            font-size: 0.9rem;
+            font-weight: 600;
+            font-family: 'DM Sans', -apple-system, sans-serif;
+            margin-bottom: 2px;
+        }}
+        .chart-title-row {{
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+            margin-bottom: 8px;
+        }}
+        .chart-title-row .chart-title {{
+            margin-bottom: 0;
+        }}
+        .chart-toggle {{
+            display: inline-flex;
+            gap: 2px;
+            background: var(--surface2);
+            border-radius: 6px;
+            padding: 2px;
+            align-self: flex-start;
+        }}
+        .chart-toggle button {{
+            font-family: 'DM Sans', sans-serif;
+            font-size: 0.72rem;
+            padding: 4px 10px;
+            border-radius: 5px;
+            border: none;
+            background: transparent;
+            color: var(--text-dim);
+            cursor: pointer;
+            transition: all 0.15s;
+        }}
+        .chart-toggle button:hover {{
+            color: var(--text);
+        }}
+        .chart-toggle button.active {{
+            background: var(--accent);
+            color: #fff;
+        }}
+        .chart-desc {{
+            font-size: 0.75em;
+            color: var(--text-dim);
+            margin-bottom: 12px;
+            line-height: 1.4;
+        }}
+        
+        /* Zone tables: single-card layout */
+        .zone-combined {{
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 24px;
+        }}
+        @media (max-width: 599px) {{
+            .zone-combined {{ grid-template-columns: 1fr; gap: 16px; }}
+            .zt {{ font-size: 0.72rem; }}
+            .zt th, .zt td {{ padding: 4px 4px; }}
+            .zt .pct-col {{ display: none; }}
+            .race-card {{ grid-template-columns: 1fr 1fr !important; }}
         }}
     </style>
 </head>
 <body>
-    <h1>🏃 Paul Collyer Fitness Dashboard</h1>
-    <div style="text-align: center; color: #666; font-size: 0.85em; margin-bottom: 12px;">
-        {datetime.now().strftime('%A %d %B %Y, %H:%M')}
-    </div>
+<script>Chart.defaults.color="#8b90a0";Chart.defaults.borderColor="rgba(255,255,255,0.04)";Chart.defaults.font.family="'DM Sans',sans-serif";Chart.defaults.plugins.legend.labels.padding=10;</script>
+    <h1>🏃 Paul Collyer</h1>
+    <div class="dash-sub">{datetime.now().strftime("%A %d %B %Y, %H:%M")}</div>
     
     <!-- v51: Health Check Banner -->
     {_generate_alert_banner(alert_data, critical_power=stats.get('critical_power'))}
@@ -1459,6 +1929,11 @@ def generate_html(stats, rf_data, volume_data, ctl_atl_data, ctl_atl_lookup, rfl
     </div>
     
     <!-- RF Trend Chart -->
+    
+    <!-- Training Zones Section -->
+    {_generate_zone_html(zone_data)}
+    
+    <!-- RF Trend Chart -->
     <div class="chart-container">
         <div class="chart-header">
             <div class="chart-title">📈 Relative Fitness Level</div>
@@ -1481,7 +1956,7 @@ def generate_html(stats, rf_data, volume_data, ctl_atl_data, ctl_atl_lookup, rfl
     <div class="chart-container">
         <div class="chart-title">📈 Relative Fitness Level (14 days)</div>
         <div class="chart-desc">Current fitness as % of personal best. Trendline projects 7 days ahead with 95% confidence interval.</div>
-        <div class="chart-wrapper" style="height: 150px;">
+        <div class="chart-wrapper" style="height: 180px;">
             <canvas id="rflTrendChart"></canvas>
         </div>
     </div>
@@ -1567,7 +2042,7 @@ def generate_html(stats, rf_data, volume_data, ctl_atl_data, ctl_atl_lookup, rfl
         </div>
         <div style="display: flex; justify-content: space-between; align-items: center;">
             <div class="chart-desc">Blue = predicted. <span style="color:#ef4444">●</span> race <span style="color:#fca5a5">●</span> parkrun.</div>
-            <label style="font-size: 0.75em; color: #666; white-space: nowrap; cursor: pointer;">
+            <label style="font-size: 0.75em; color: var(--text-dim); white-space: nowrap; cursor: pointer;">
                 <input type="checkbox" id="predParkrunToggle" checked style="margin-right: 3px;">parkruns
             </label>
         </div>
@@ -1689,11 +2164,11 @@ def generate_html(stats, rf_data, volume_data, ctl_atl_data, ctl_atl_lookup, rfl
                 datasets: [{{
                     label: 'RFL vs peak',
                     data: {json.dumps(rfl_trend_values)},
-                    borderColor: 'rgba(37, 99, 235, 1)',
-                    backgroundColor: 'rgba(37, 99, 235, 0.1)',
+                    borderColor: 'rgba(129, 140, 248, 1)',
+                    backgroundColor: 'rgba(129, 140, 248, 0.1)',
                     borderWidth: 2,
                     pointRadius: 3,
-                    pointBackgroundColor: 'rgba(37, 99, 235, 1)',
+                    pointBackgroundColor: 'rgba(129, 140, 248, 1)',
                     fill: false,
                     tension: 0,
                     order: 1,
@@ -1719,7 +2194,7 @@ def generate_html(stats, rf_data, volume_data, ctl_atl_data, ctl_atl_lookup, rfl
                 }}, {{
                     label: '95% CI upper',
                     data: {json.dumps(rfl_ci_upper)},
-                    borderColor: 'rgba(239, 68, 68, 0.3)',
+                    borderColor: 'rgba(239, 68, 68, 0.5)',
                     borderWidth: 1,
                     borderDash: [2, 2],
                     pointRadius: 0,
@@ -1729,12 +2204,12 @@ def generate_html(stats, rf_data, volume_data, ctl_atl_data, ctl_atl_lookup, rfl
                 }}, {{
                     label: '95% CI lower',
                     data: {json.dumps(rfl_ci_lower)},
-                    borderColor: 'rgba(239, 68, 68, 0.3)',
+                    borderColor: 'rgba(239, 68, 68, 0.5)',
                     borderWidth: 1,
                     borderDash: [2, 2],
                     pointRadius: 0,
                     fill: '-1',
-                    backgroundColor: 'rgba(239, 68, 68, 0.1)',
+                    backgroundColor: 'rgba(239, 68, 68, 0.12)',
                     tension: 0,
                     order: 5,
                 }}]
@@ -1745,11 +2220,12 @@ def generate_html(stats, rf_data, volume_data, ctl_atl_data, ctl_atl_lookup, rfl
                 plugins: {{
                     legend: {{
                         display: true,
-                        position: 'top',
+                        position: 'bottom',
                         labels: {{
                             boxWidth: 10,
+                            usePointStyle: true,
                             padding: 4,
-                            font: {{ size: 8 }},
+                            font: {{ size: 10 }},
                             filter: function(item) {{
                                 // Hide CI labels from legend
                                 return !item.text.includes('CI');
@@ -1762,14 +2238,14 @@ def generate_html(stats, rf_data, volume_data, ctl_atl_data, ctl_atl_lookup, rfl
                         display: true,
                         ticks: {{
                             maxTicksLimit: 7,
-                            font: {{ size: 9 }}
+                            font: {{ size: 10 }}
                         }}
                     }},
                     y: {{
                         display: true,
                         grace: '10%',
                         ticks: {{
-                            font: {{ size: 9 }},
+                            font: {{ size: 10 }},
                             callback: function(value) {{ return value + '%'; }}
                         }},
                         suggestedMin: Math.min(...{json.dumps(rfl_trend_values)}.filter(v => v !== null)) - 5,
@@ -1802,19 +2278,19 @@ def generate_html(stats, rf_data, volume_data, ctl_atl_data, ctl_atl_lookup, rfl
                 datasets: [{{
                     label: 'RFL',
                     data: rfData['90'].values,
-                    borderColor: 'rgba(37, 99, 235, 0.3)',
-                    backgroundColor: 'rgba(37, 99, 235, 0.1)',
+                    borderColor: 'rgba(129, 140, 248, 0.3)',
+                    backgroundColor: 'rgba(129, 140, 248, 0.1)',
                     borderWidth: 1,
                     pointRadius: 3,
-                    pointBackgroundColor: racePointColors(rfData['90'].races, 'rgba(37, 99, 235, 0.5)', 'rgba(239, 68, 68, 0.9)'),
-                    pointBorderColor: racePointColors(rfData['90'].races, 'rgba(37, 99, 235, 0.3)', 'rgba(239, 68, 68, 0.7)'),
+                    pointBackgroundColor: racePointColors(rfData['90'].races, 'rgba(129, 140, 248, 0.5)', 'rgba(239, 68, 68, 0.9)'),
+                    pointBorderColor: racePointColors(rfData['90'].races, 'rgba(129, 140, 248, 0.3)', 'rgba(239, 68, 68, 0.7)'),
                     pointBorderWidth: 1,
                     fill: false,
                     tension: 0,
                 }}, {{
                     label: 'RFL Trend',
                     data: rfData['90'].trend,
-                    borderColor: 'rgba(37, 99, 235, 1)',
+                    borderColor: 'rgba(129, 140, 248, 1)',
                     borderWidth: 2,
                     pointRadius: 0,
                     fill: false,
@@ -1837,12 +2313,12 @@ def generate_html(stats, rf_data, volume_data, ctl_atl_data, ctl_atl_lookup, rfl
                 plugins: {{
                     legend: {{
                         display: true,
-                        position: 'top',
-                        labels: {{ boxWidth: 12, padding: 8, font: {{ size: 11 }} }}
+                        position: 'bottom',
+                        labels: {{ boxWidth: 12, padding: 8, font: {{ size: 10 }}, usePointStyle: true }}
                     }}
                 }},
                 scales: {{
-                    x: {{ display: true, ticks: {{ maxTicksLimit: 5, maxRotation: 0, font: {{ size: 9 }} }} }},
+                    x: {{ display: true, ticks: {{ maxTicksLimit: 5, maxRotation: 0, font: {{ size: 10 }} }} }},
                     y: {{ 
                         display: true, 
                         ticks: {{ 
@@ -1868,12 +2344,12 @@ def generate_html(stats, rf_data, volume_data, ctl_atl_data, ctl_atl_lookup, rfl
                 
                 // Adjust point size and opacity based on data density
                 const pointSettings = {{
-                    '90': {{ radius: 3, borderColor: 'rgba(37, 99, 235, 0.3)', pointColor: 'rgba(37, 99, 235, 0.5)' }},
-                    '180': {{ radius: 2, borderColor: 'rgba(37, 99, 235, 0.25)', pointColor: 'rgba(37, 99, 235, 0.4)' }},
-                    '365': {{ radius: 1.5, borderColor: 'rgba(37, 99, 235, 0.2)', pointColor: 'rgba(37, 99, 235, 0.3)' }},
-                    '730': {{ radius: 1, borderColor: 'rgba(37, 99, 235, 0.15)', pointColor: 'rgba(37, 99, 235, 0.25)' }},
-                    '1095': {{ radius: 0.5, borderColor: 'rgba(37, 99, 235, 0.1)', pointColor: 'rgba(37, 99, 235, 0.2)' }},
-                    '1825': {{ radius: 0, borderColor: 'rgba(37, 99, 235, 0.1)', pointColor: 'rgba(37, 99, 235, 0.15)' }}
+                    '90': {{ radius: 3, borderColor: 'rgba(129, 140, 248, 0.3)', pointColor: 'rgba(129, 140, 248, 0.5)' }},
+                    '180': {{ radius: 2, borderColor: 'rgba(129, 140, 248, 0.25)', pointColor: 'rgba(129, 140, 248, 0.4)' }},
+                    '365': {{ radius: 1.5, borderColor: 'rgba(129, 140, 248, 0.2)', pointColor: 'rgba(129, 140, 248, 0.3)' }},
+                    '730': {{ radius: 1, borderColor: 'rgba(129, 140, 248, 0.15)', pointColor: 'rgba(129, 140, 248, 0.25)' }},
+                    '1095': {{ radius: 0.5, borderColor: 'rgba(129, 140, 248, 0.1)', pointColor: 'rgba(129, 140, 248, 0.2)' }},
+                    '1825': {{ radius: 0, borderColor: 'rgba(129, 140, 248, 0.1)', pointColor: 'rgba(129, 140, 248, 0.15)' }}
                 }};
                 const settings = pointSettings[range];
                 const races = rfData[range].races;
@@ -1904,8 +2380,8 @@ def generate_html(stats, rf_data, volume_data, ctl_atl_data, ctl_atl_lookup, rfl
                 datasets: [{{
                     label: 'CTL (Fitness)',
                     data: ctlAtlData['90'].ctl,
-                    borderColor: 'rgba(37, 99, 235, 1)',
-                    backgroundColor: 'rgba(37, 99, 235, 0.1)',
+                    borderColor: 'rgba(129, 140, 248, 1)',
+                    backgroundColor: 'rgba(129, 140, 248, 0.1)',
                     borderWidth: 2,
                     pointRadius: 0,
                     fill: false,
@@ -1914,7 +2390,7 @@ def generate_html(stats, rf_data, volume_data, ctl_atl_data, ctl_atl_lookup, rfl
                     label: 'ATL (Fatigue)',
                     data: ctlAtlData['90'].atl,
                     borderColor: 'rgba(239, 68, 68, 1)',
-                    backgroundColor: 'rgba(239, 68, 68, 0.1)',
+                    backgroundColor: 'rgba(239, 68, 68, 0.12)',
                     borderWidth: 2,
                     pointRadius: 0,
                     fill: false,
@@ -1922,7 +2398,7 @@ def generate_html(stats, rf_data, volume_data, ctl_atl_data, ctl_atl_lookup, rfl
                 }}, {{
                     label: 'CTL Projection',
                     data: ctlAtlData['90'].ctlProj,
-                    borderColor: 'rgba(37, 99, 235, 0.5)',
+                    borderColor: 'rgba(129, 140, 248, 0.5)',
                     borderWidth: 2,
                     borderDash: [5, 5],
                     pointRadius: 0,
@@ -1946,11 +2422,12 @@ def generate_html(stats, rf_data, volume_data, ctl_atl_data, ctl_atl_lookup, rfl
                 plugins: {{
                     legend: {{
                         display: true,
-                        position: 'top',
+                        position: 'bottom',
                         labels: {{ 
                             boxWidth: 12, 
                             padding: 8, 
-                            font: {{ size: 11 }},
+                            font: {{ size: 10 }},
+                            usePointStyle: true,
                             filter: function(item) {{
                                 // Hide projection labels from legend
                                 return !item.text.includes('Projection');
@@ -1959,7 +2436,7 @@ def generate_html(stats, rf_data, volume_data, ctl_atl_data, ctl_atl_lookup, rfl
                     }}
                 }},
                 scales: {{
-                    x: {{ display: true, ticks: {{ maxTicksLimit: 5, maxRotation: 0, font: {{ size: 9 }} }} }},
+                    x: {{ display: true, ticks: {{ maxTicksLimit: 5, maxRotation: 0, font: {{ size: 10 }} }} }},
                     y: {{ display: true, ticks: {{ font: {{ size: 10 }} }} }}
                 }}
             }}
@@ -2016,7 +2493,7 @@ def generate_html(stats, rf_data, volume_data, ctl_atl_data, ctl_atl_lookup, rfl
                 datasets: [{{
                     label: 'Distance (km)',
                     data: volumeData['W']['12'].distances,
-                    backgroundColor: 'rgba(37, 99, 235, 0.7)',
+                    backgroundColor: 'rgba(129, 140, 248, 0.7)',
                     borderRadius: 4,
                 }}]
             }},
@@ -2041,8 +2518,8 @@ def generate_html(stats, rf_data, volume_data, ctl_atl_data, ctl_atl_lookup, rfl
                         anchor: 'end',
                         align: 'end',
                         offset: -4,
-                        color: '#333',
-                        font: {{ size: 9, weight: 'bold' }},
+                        color: '#c0c4d0',
+                        font: {{ size: 10, weight: '500' }},
                         formatter: function(value) {{
                             return Math.round(value);
                         }}
@@ -2099,8 +2576,8 @@ def generate_html(stats, rf_data, volume_data, ctl_atl_data, ctl_atl_lookup, rfl
                 datasets: [{{
                     label: 'RFL vs peak',
                     data: {json.dumps(alltime_rfl_values)},
-                    borderColor: 'rgba(37, 99, 235, 1)',
-                    backgroundColor: 'rgba(37, 99, 235, 0.1)',
+                    borderColor: 'rgba(129, 140, 248, 1)',
+                    backgroundColor: 'rgba(129, 140, 248, 0.1)',
                     borderWidth: 1.5,
                     pointRadius: 0,
                     fill: true,
@@ -2113,11 +2590,12 @@ def generate_html(stats, rf_data, volume_data, ctl_atl_data, ctl_atl_lookup, rfl
                 plugins: {{
                     legend: {{
                         display: true,
-                        position: 'top',
+                        position: 'bottom',
                         labels: {{
                             boxWidth: 10,
                             padding: 4,
-                            font: {{ size: 9 }}
+                            font: {{ size: 10 }},
+                            usePointStyle: true
                         }}
                     }}
                 }},
@@ -2126,7 +2604,7 @@ def generate_html(stats, rf_data, volume_data, ctl_atl_data, ctl_atl_lookup, rfl
                         display: true,
                         ticks: {{
                             maxTicksLimit: 12,
-                            font: {{ size: 8 }}
+                            font: {{ size: 10 }}
                         }}
                     }},
                     y: {{
@@ -2134,7 +2612,7 @@ def generate_html(stats, rf_data, volume_data, ctl_atl_data, ctl_atl_lookup, rfl
                         min: 50,
                         max: 100,
                         ticks: {{
-                            font: {{ size: 9 }},
+                            font: {{ size: 10 }},
                             callback: function(value) {{ return value + '%'; }}
                         }}
                     }}
@@ -2168,7 +2646,7 @@ def generate_html(stats, rf_data, volume_data, ctl_atl_data, ctl_atl_lookup, rfl
             const races = topRacesData[period] || [];
             
             if (races.length === 0) {{
-                tbody.innerHTML = '<tr><td colspan="7" style="text-align: center; color: #666;">No races in this period</td></tr>';
+                tbody.innerHTML = '<tr><td colspan="7" style="text-align: center; color: var(--text-dim);">No races in this period</td></tr>';
                 return;
             }}
             
@@ -2235,7 +2713,7 @@ def generate_html(stats, rf_data, volume_data, ctl_atl_data, ctl_atl_lookup, rfl
                     maintainAspectRatio: false,
                     plugins: {{ legend: {{ display: false }} }},
                     scales: {{
-                        x: {{ display: true, ticks: {{ maxTicksLimit: 5, maxRotation: 0, font: {{ size: 9 }} }} }},
+                        x: {{ display: true, ticks: {{ maxTicksLimit: 5, maxRotation: 0, font: {{ size: 10 }} }} }},
                         y: {{ 
                             display: true, 
                             ticks: {{ font: {{ size: 10 }}, callback: function(v) {{ return v + 'kg'; }} }}
@@ -2309,8 +2787,8 @@ def generate_html(stats, rf_data, volume_data, ctl_atl_data, ctl_atl_lookup, rfl
                     datasets: [{{
                         label: 'Predicted',
                         data: predPoints,
-                        borderColor: 'rgba(37, 99, 235, 0.7)',
-                        backgroundColor: 'rgba(37, 99, 235, 0.05)',
+                        borderColor: 'rgba(129, 140, 248, 0.7)',
+                        backgroundColor: 'rgba(129, 140, 248, 0.05)',
                         borderWidth: 2,
                         pointRadius: 0,
                         fill: true,
@@ -2545,7 +3023,7 @@ def generate_html(stats, rf_data, volume_data, ctl_atl_data, ctl_atl_lookup, rfl
             const tbody = document.getElementById('recentRunsBody');
             
             if (runs.length === 0) {{
-                tbody.innerHTML = '<tr><td colspan="8" style="text-align: center; color: #666;">No races found</td></tr>';
+                tbody.innerHTML = '<tr><td colspan="8" style="text-align: center; color: var(--text-dim);">No races found</td></tr>';
                 return;
             }}
             
@@ -2679,9 +3157,13 @@ def main():
     print("Processing age grade data...")
     ag_data = get_age_grade_data(df)
     
+    # Zone data for training zones section
+    print("Getting zone data...")
+    zone_data = get_zone_data(df)
+    
     # Generate HTML
     print("Generating HTML...")
-    html = generate_html(stats, rf_data, volume_data, ctl_atl_data, ctl_atl_lookup, rfl_trend_dates, rfl_trend_values, rfl_trendline, rfl_projection, rfl_ci_upper, rfl_ci_lower, alltime_rfl_dates, alltime_rfl_values, recent_runs, top_races, alert_data=alert_data, weight_data=weight_data, prediction_data=prediction_data, ag_data=ag_data)
+    html = generate_html(stats, rf_data, volume_data, ctl_atl_data, ctl_atl_lookup, rfl_trend_dates, rfl_trend_values, rfl_trendline, rfl_projection, rfl_ci_upper, rfl_ci_lower, alltime_rfl_dates, alltime_rfl_values, recent_runs, top_races, alert_data=alert_data, weight_data=weight_data, prediction_data=prediction_data, ag_data=ag_data, zone_data=zone_data)
     
     # Write file
     with open(OUTPUT_FILE, 'w', encoding='utf-8') as f:

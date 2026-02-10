@@ -1,0 +1,409 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Training Zones & Race Readiness</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+  * { margin:0; padding:0; box-sizing:border-box; }
+  :root {
+    --bg:#0f1117; --surface:#1a1d27; --surface2:#232733; --border:#2e3340;
+    --text:#e4e7ef; --text-dim:#8b90a0; --text-muted:#565b6b;
+    --z1:#3b82f6; --z2:#22c55e; --z3:#eab308; --z4:#f97316; --z5:#ef4444;
+    --accent:#818cf8;
+    --rsub5k:#4ade80; --r5k:#f472b6; --r10k:#fb923c; --rhm:#a78bfa; --rmara:#38bdf8; --rother:#4b5563;
+  }
+  body { font-family:'DM Sans',-apple-system,sans-serif; background:var(--bg); color:var(--text); padding:24px; }
+  .header { margin-bottom:28px; }
+  .header h1 { font-size:1.5rem; font-weight:700; letter-spacing:-0.02em; margin-bottom:4px; }
+  .header .sub { color:var(--text-dim); font-size:0.82rem; }
+  .grid { display:grid; grid-template-columns:1fr 1fr; gap:16px; margin-bottom:16px; }
+  .grid-full { grid-column:1/-1; }
+  .card { background:var(--surface); border:1px solid var(--border); border-radius:10px; padding:18px; }
+  .card h2 { font-size:0.88rem; font-weight:600; margin-bottom:14px; display:flex; align-items:center; gap:8px; }
+  .badge { font-size:0.68rem; font-weight:500; background:var(--surface2); border:1px solid var(--border); padding:2px 8px; border-radius:4px; color:var(--text-dim); }
+
+  .zone-table { width:100%; border-collapse:collapse; font-size:0.8rem; }
+  .zone-table th { text-align:left; padding:6px 8px; color:var(--text-dim); font-weight:500; border-bottom:1px solid var(--border); font-size:0.7rem; text-transform:uppercase; letter-spacing:0.05em; }
+  .zone-table td { padding:6px 8px; border-bottom:1px solid var(--border); font-family:'JetBrains Mono',monospace; font-size:0.78rem; }
+  .zone-table tr:last-child td { border-bottom:none; }
+  .zone-label { display:inline-flex; align-items:center; gap:5px; font-family:'DM Sans'; font-weight:600; }
+  .zone-dot { width:7px; height:7px; border-radius:50%; display:inline-block; }
+
+  .controls { display:flex; align-items:center; gap:8px; margin-bottom:14px; flex-wrap:wrap; }
+  .toggle-group { display:inline-flex; gap:2px; background:var(--surface2); border-radius:6px; padding:2px; }
+  .toggle-btn { font-family:'DM Sans'; font-size:0.72rem; padding:5px 12px; border-radius:5px; border:none; background:transparent; color:var(--text-dim); cursor:pointer; transition:all 0.15s; }
+  .toggle-btn:hover { color:var(--text); }
+  .toggle-btn.active { background:var(--accent); color:#fff; }
+
+  .week-row { display:flex; align-items:center; gap:8px; margin-bottom:5px; }
+  .week-label { font-size:0.72rem; font-family:'JetBrains Mono'; color:var(--text-dim); width:56px; flex-shrink:0; }
+  .week-bar-wrap { flex:1; height:22px; display:flex; border-radius:3px; overflow:hidden; background:rgba(255,255,255,0.02); }
+  .week-seg { height:100%; transition:width 0.3s; position:relative; cursor:default; }
+  .week-seg:hover { filter:brightness(1.15); }
+  .week-seg .tip { display:none; position:absolute; bottom:100%; left:50%; transform:translateX(-50%); background:#1e2130; border:1px solid var(--border); padding:3px 7px; border-radius:4px; font-size:0.68rem; white-space:nowrap; z-index:10; color:var(--text); pointer-events:none; margin-bottom:4px; }
+  .week-seg:hover .tip { display:block; }
+  .week-total { font-size:0.72rem; font-family:'JetBrains Mono'; color:var(--text-dim); width:52px; text-align:right; flex-shrink:0; }
+
+  .race-card { background:var(--surface2); border-radius:8px; padding:14px; margin-bottom:8px; }
+  .race-card:last-child { margin-bottom:0; }
+  .race-hdr { display:flex; justify-content:space-between; align-items:center; margin-bottom:10px; }
+  .race-name { font-weight:600; font-size:0.88rem; }
+  .race-date { font-size:0.72rem; color:var(--text-dim); font-family:'JetBrains Mono'; }
+  .race-stats { display:grid; grid-template-columns:repeat(4,1fr); gap:8px; }
+  .race-stat { text-align:center; }
+  .race-stat-val { font-size:1.15rem; font-weight:700; font-family:'JetBrains Mono'; }
+  .race-stat-lbl { font-size:0.68rem; color:var(--text-dim); margin-top:2px; }
+  .race-stat-sub { font-size:0.65rem; color:var(--text-muted); }
+
+  .chart-wrap { position:relative; height:300px; }
+  .legend { display:flex; gap:12px; margin-top:10px; flex-wrap:wrap; }
+  .leg-item { display:flex; align-items:center; gap:4px; font-size:0.7rem; color:var(--text-dim); }
+  .leg-sw { width:9px; height:9px; border-radius:2px; flex-shrink:0; }
+  .note { font-size:0.72rem; color:var(--text-muted); margin-top:10px; padding:8px 10px; background:var(--surface2); border-radius:6px; border-left:3px solid var(--accent); }
+
+  @media (max-width:900px) { .grid{grid-template-columns:1fr;} body{padding:14px;} .race-stats{grid-template-columns:repeat(2,1fr);} }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <h1>Training Zones & Race Readiness</h1>
+  <div class="sub">Zones from 662 clean-surface runs · LTHR 178 · CP 335W (RFL × 372) · Race power = CP × factor from config.py · ±3% bands</div>
+</div>
+
+<div class="grid">
+  <!-- HR Zones -->
+  <div class="card">
+    <h2>HR Zones <span class="badge">LTHR 178 · Max ~192</span></h2>
+    <table class="zone-table">
+      <thead><tr><th>Zone</th><th>HR</th><th></th></tr></thead>
+      <tbody id="hr-zt"></tbody>
+    </table>
+  </div>
+  <!-- Power Zones -->
+  <div class="card">
+    <h2>Power Zones <span class="badge">CP 335W</span></h2>
+    <table class="zone-table">
+      <thead><tr><th>Zone</th><th>Power</th><th>%CP</th></tr></thead>
+      <tbody id="pw-zt"></tbody>
+    </table>
+  </div>
+
+  <!-- Race Readiness -->
+  <div class="card grid-full">
+    <h2>Race Readiness <span class="badge">±3% of target power</span></h2>
+    <div id="race-cards"></div>
+  </div>
+
+  <!-- Weekly Volume -->
+  <div class="card grid-full">
+    <h2>Weekly Training Volume</h2>
+    <div class="controls">
+      <div class="toggle-group" id="wk-mode">
+        <button class="toggle-btn active" onclick="setWM('hr',this)">HR Zone</button>
+        <button class="toggle-btn" onclick="setWM('power',this)">Power Zone</button>
+        <button class="toggle-btn" onclick="setWM('race',this)">Race Effort (W)</button>
+        <button class="toggle-btn" onclick="setWM('racehr',this)">Race Effort (HR)</button>
+      </div>
+    </div>
+    <div class="controls">
+      <div class="toggle-group" id="wk-period">
+        <button class="toggle-btn active" onclick="setWP(8,this)">8w</button>
+        <button class="toggle-btn" onclick="setWP(12,this)">12w</button>
+        <button class="toggle-btn" onclick="setWP(16,this)">16w</button>
+      </div>
+    </div>
+    <div id="wk-bars"></div>
+    <div id="wk-leg" class="legend"></div>
+  </div>
+
+  <!-- Per-Run -->
+  <div class="card grid-full">
+    <h2>Per-Run Distribution <span class="badge">last 30 runs</span></h2>
+    <div class="controls">
+      <div class="toggle-group" id="pr-mode">
+        <button class="toggle-btn active" onclick="setPR('hr',this)">HR Zone</button>
+        <button class="toggle-btn" onclick="setPR('power',this)">Power Zone</button>
+        <button class="toggle-btn" onclick="setPR('race',this)">Race Effort (W)</button>
+        <button class="toggle-btn" onclick="setPR('racehr',this)">Race Effort (HR)</button>
+      </div>
+    </div>
+    <div class="chart-wrap"><canvas id="prChart"></canvas></div>
+    <div id="pr-leg" class="legend"></div>
+    <div class="note">Zone split estimated from run-average HR/power. Production version will use per-second NPZ data for accurate time-in-zone.</div>
+  </div>
+</div>
+
+<script>
+
+const RUNS = [{"date": "2025-11-01", "name": "FK Studenterna B4 - WU via Victoria line then HiFi parkrun i", "avg_hr": 160.9, "npower": 300.0, "duration_min": 39.1, "distance_km": 8.2, "hr_zone": "Z3", "power_zone": "Z3", "rfl": 0.8878, "rfl_trend": 0.9017, "race": false, "surface_adj": 1.0}, {"date": "2025-11-03", "name": "Gentle Djurg\u00e5rden 60\u2019", "avg_hr": 136.0, "npower": 247.0, "duration_min": 60.2, "distance_km": 10.3, "hr_zone": "Z1", "power_zone": "Z1", "rfl": 0.8719, "rfl_trend": 0.9018, "race": false, "surface_adj": 1.0}, {"date": "2025-11-04", "name": "FK Studenterna \ufe0f Track A5", "avg_hr": 164.7, "npower": 314.0, "duration_min": 35.2, "distance_km": 7.7, "hr_zone": "Z3", "power_zone": "Z4", "rfl": 0.8926, "rfl_trend": 0.9018, "race": false, "surface_adj": 1.0}, {"date": "2025-11-05", "name": "Midweek 80\u2019 on tired legs and feet", "avg_hr": 142.2, "npower": 251.0, "duration_min": 80.2, "distance_km": 14.2, "hr_zone": "Z1", "power_zone": "Z1", "rfl": 0.8411, "rfl_trend": 0.9006, "race": false, "surface_adj": 1.0}, {"date": "2025-11-07", "name": "Progressive 30\u2019", "avg_hr": 150.5, "npower": 279.0, "duration_min": 30.2, "distance_km": 5.7, "hr_zone": "Z2", "power_zone": "Z2", "rfl": 0.8608, "rfl_trend": 0.9006, "race": false, "surface_adj": 1.0}, {"date": "2025-11-08", "name": "Haga parkrun 20'56 after 5k in Z2", "avg_hr": 164.3, "npower": 311.0, "duration_min": 46.2, "distance_km": 10.0, "hr_zone": "Z3", "power_zone": "Z4", "rfl": 0.8911, "rfl_trend": 0.9002, "race": false, "surface_adj": 1.0}, {"date": "2025-11-09", "name": "75\u2019 in Z1 mostly off road", "avg_hr": 135.2, "npower": 245.0, "duration_min": 75.2, "distance_km": 12.6, "hr_zone": "Z1", "power_zone": "Z1", "rfl": 0.8849, "rfl_trend": 0.8997, "race": false, "surface_adj": 1.0}, {"date": "2025-11-10", "name": "Easy Monday 30\u2019 with 6 x 30/30", "avg_hr": 135.5, "npower": 268.0, "duration_min": 30.2, "distance_km": 5.6, "hr_zone": "Z1", "power_zone": "Z2", "rfl": 0.9225, "rfl_trend": 0.9, "race": false, "surface_adj": 1.0}, {"date": "2025-11-11", "name": "Z1 in the dark with 6 x 30/30", "avg_hr": 133.9, "npower": 244.0, "duration_min": 55.3, "distance_km": 9.5, "hr_zone": "Z1", "power_zone": "Z1", "rfl": 0.8511, "rfl_trend": 0.899, "race": false, "surface_adj": 1.0}, {"date": "2025-11-12", "name": "Progressive 40\u2019 Z1->LT", "avg_hr": 151.2, "npower": 281.0, "duration_min": 40.5, "distance_km": 8.0, "hr_zone": "Z2", "power_zone": "Z2", "rfl": 0.8627, "rfl_trend": 0.8978, "race": false, "surface_adj": 1.0}, {"date": "2025-11-14", "name": "Tuneup 5k", "avg_hr": 143.9, "npower": 291.0, "duration_min": 25.3, "distance_km": 5.0, "hr_zone": "Z1", "power_zone": "Z3", "rfl": 0.9177, "rfl_trend": 0.8978, "race": false, "surface_adj": 1.0}, {"date": "2025-11-15", "name": "Preamble with strides", "avg_hr": 144.8, "npower": 266.0, "duration_min": 22.1, "distance_km": 4.0, "hr_zone": "Z2", "power_zone": "Z2", "rfl": 0.8569, "rfl_trend": 0.8969, "race": false, "surface_adj": 1.0}, {"date": "2025-11-15", "name": "Haga parkrun FK Studenterna m\u00e4sterskap 20\u201910 course AG% PB", "avg_hr": 180.9, "npower": 350.0, "duration_min": 20.1, "distance_km": 5.0, "hr_zone": "Z5", "power_zone": "Z5", "rfl": 0.9323, "rfl_trend": 0.9002, "race": true, "surface_adj": 1.0}, {"date": "2025-11-16", "name": "90\u2019 in Z1", "avg_hr": 137.5, "npower": 249.0, "duration_min": 90.3, "distance_km": 15.6, "hr_zone": "Z1", "power_zone": "Z1", "rfl": 0.8649, "rfl_trend": 0.8986, "race": false, "surface_adj": 1.0}, {"date": "2025-11-17", "name": "Easy run before gym", "avg_hr": 134.7, "npower": 258.0, "duration_min": 35.2, "distance_km": 6.2, "hr_zone": "Z1", "power_zone": "Z2", "rfl": 0.9092, "rfl_trend": 0.8984, "race": false, "surface_adj": 1.0}, {"date": "2025-11-18", "name": "12 x 60/60 VO2/jog", "avg_hr": 149.8, "npower": 287.0, "duration_min": 50.2, "distance_km": 9.9, "hr_zone": "Z2", "power_zone": "Z3", "rfl": 0.9143, "rfl_trend": 0.8988, "race": false, "surface_adj": 1.0}, {"date": "2025-11-19", "name": "Recovery 40\u2019 with 5 x 30/30", "avg_hr": 139.0, "npower": 261.0, "duration_min": 40.2, "distance_km": 7.3, "hr_zone": "Z1", "power_zone": "Z2", "rfl": 0.8733, "rfl_trend": 0.8979, "race": false, "surface_adj": 1.0}, {"date": "2025-11-21", "name": "30\u2019 in snowy Haga with a 3\u2019 Critical Power test\u2026..", "avg_hr": 144.9, "npower": 272.0, "duration_min": 30.2, "distance_km": 5.4, "hr_zone": "Z2", "power_zone": "Z2", "rfl": 0.8494, "rfl_trend": 0.8963, "race": false, "surface_adj": 1.05}, {"date": "2025-11-22", "name": "5k @ Z2, parkrun @ Z3 22\u201943", "avg_hr": 162.8, "npower": 297.0, "duration_min": 48.9, "distance_km": 10.0, "hr_zone": "Z3", "power_zone": "Z3", "rfl": 0.9033, "rfl_trend": 0.8965, "race": false, "surface_adj": 1.05}, {"date": "2025-11-23", "name": "Easy 30\u2019 with 5 x 30/30", "avg_hr": 139.5, "npower": 264.0, "duration_min": 30.2, "distance_km": 5.6, "hr_zone": "Z1", "power_zone": "Z2", "rfl": 0.8902, "rfl_trend": 0.8963, "race": false, "surface_adj": 1.0}, {"date": "2025-11-24", "name": "Easy 10k with 5 x 30/30", "avg_hr": 135.3, "npower": 254.0, "duration_min": 55.2, "distance_km": 9.9, "hr_zone": "Z1", "power_zone": "Z1", "rfl": 0.8921, "rfl_trend": 0.8963, "race": false, "surface_adj": 1.0}, {"date": "2025-11-25", "name": "Classic pyramid session", "avg_hr": 153.7, "npower": 296.0, "duration_min": 60.1, "distance_km": 12.1, "hr_zone": "Z2", "power_zone": "Z3", "rfl": 0.9167, "rfl_trend": 0.8975, "race": false, "surface_adj": 1.0}, {"date": "2025-11-26", "name": "Easy midweek 75\u2019", "avg_hr": 136.2, "npower": 249.0, "duration_min": 75.3, "distance_km": 13.4, "hr_zone": "Z1", "power_zone": "Z1", "rfl": 0.8818, "rfl_trend": 0.897, "race": false, "surface_adj": 1.0}, {"date": "2025-11-28", "name": "Progressive 90\u2019 - Z1->Z2->Z3", "avg_hr": 150.5, "npower": 275.0, "duration_min": 90.2, "distance_km": 17.3, "hr_zone": "Z2", "power_zone": "Z2", "rfl": 0.88, "rfl_trend": 0.8959, "race": false, "surface_adj": 1.0}, {"date": "2025-11-29", "name": "Recovery 40\u2019 with 5 x 30/30", "avg_hr": 135.2, "npower": 258.0, "duration_min": 40.4, "distance_km": 7.3, "hr_zone": "Z1", "power_zone": "Z2", "rfl": 0.894, "rfl_trend": 0.8958, "race": false, "surface_adj": 1.0}, {"date": "2025-12-01", "name": "Adventstreak#1: Easy hour with 3x accelerations at the end -", "avg_hr": 138.3, "npower": 263.0, "duration_min": 60.2, "distance_km": 10.9, "hr_zone": "Z1", "power_zone": "Z2", "rfl": 0.9174, "rfl_trend": 0.8965, "race": false, "surface_adj": 1.0}, {"date": "2025-12-02", "name": "Adventstreak#2 - FK Studenterna A9 lite at Stadion \ufe0f", "avg_hr": 164.9, "npower": 320.0, "duration_min": 39.4, "distance_km": 8.9, "hr_zone": "Z3", "power_zone": "Z4", "rfl": 0.9075, "rfl_trend": 0.8974, "race": false, "surface_adj": 1.0}, {"date": "2025-12-03", "name": "Adventstreak#3 - Easy midweek 60\u2019", "avg_hr": 129.6, "npower": 247.0, "duration_min": 60.2, "distance_km": 10.3, "hr_zone": "Z1", "power_zone": "Z1", "rfl": 0.9243, "rfl_trend": 0.8981, "race": false, "surface_adj": 1.0}, {"date": "2025-12-04", "name": "Adventstreak#4 - Mini 5k pacing workout", "avg_hr": 147.8, "npower": 286.0, "duration_min": 35.3, "distance_km": 6.9, "hr_zone": "Z2", "power_zone": "Z3", "rfl": 0.9042, "rfl_trend": 0.8983, "race": false, "surface_adj": 1.0}, {"date": "2025-12-05", "name": "Adventstreak#5 - Around the block at stupid o\u2019clock\u2026.", "avg_hr": 129.5, "npower": 249.0, "duration_min": 35.2, "distance_km": 6.2, "hr_zone": "Z1", "power_zone": "Z1", "rfl": 0.9312, "rfl_trend": 0.8988, "race": false, "surface_adj": 1.0}, {"date": "2025-12-06", "name": "Preamble with strides\u2026.", "avg_hr": 141.2, "npower": 252.0, "duration_min": 21.2, "distance_km": 3.7, "hr_zone": "Z1", "power_zone": "Z1", "rfl": 0.842, "rfl_trend": 0.8984, "race": false, "surface_adj": 1.0}, {"date": "2025-12-06", "name": "Adventstreak#6 - F\u00e6lled parkrun 20\u201911", "avg_hr": 179.5, "npower": 342.0, "duration_min": 20.2, "distance_km": 5.0, "hr_zone": "Z5", "power_zone": "Z5", "rfl": 0.9144, "rfl_trend": 0.8998, "race": true, "surface_adj": 1.0}, {"date": "2025-12-07", "name": "Adventstreak#7 - Easy 65\u2019 exploring wonderful K\u00f8benhavn", "avg_hr": 130.1, "npower": 249.0, "duration_min": 65.2, "distance_km": 11.4, "hr_zone": "Z1", "power_zone": "Z1", "rfl": 0.9101, "rfl_trend": 0.9001, "race": false, "surface_adj": 1.0}, {"date": "2025-12-08", "name": "Adventstreak#8 - Easy 30\u2019 with 5 x 30/30", "avg_hr": 135.0, "npower": 266.0, "duration_min": 30.2, "distance_km": 5.6, "hr_zone": "Z1", "power_zone": "Z2", "rfl": 0.9133, "rfl_trend": 0.9004, "race": false, "surface_adj": 1.0}, {"date": "2025-12-09", "name": "Adventstreak#9 - FK Studenterna Indoor Track - 200\u2019s @ \u20183kE\u2019", "avg_hr": 153.5, "npower": 299.0, "duration_min": 40.2, "distance_km": 7.3, "hr_zone": "Z2", "power_zone": "Z3", "rfl": 0.9095, "rfl_trend": 0.9008, "race": false, "surface_adj": 1.0}, {"date": "2025-12-10", "name": "Adventstreak#10 - Recovery 40\u2019", "avg_hr": 134.6, "npower": 242.0, "duration_min": 40.2, "distance_km": 6.8, "hr_zone": "Z1", "power_zone": "Z1", "rfl": 0.8376, "rfl_trend": 0.9002, "race": false, "surface_adj": 1.0}, {"date": "2025-12-11", "name": "Adventstreak#11 - 20\u2019 @Z1, 5 x 60/60", "avg_hr": 141.0, "npower": 269.0, "duration_min": 30.2, "distance_km": 5.5, "hr_zone": "Z1", "power_zone": "Z2", "rfl": 0.8608, "rfl_trend": 0.8996, "race": false, "surface_adj": 1.0}, {"date": "2025-12-12", "name": "Adventstreak#12 - Friday tune-up", "avg_hr": 141.9, "npower": 271.0, "duration_min": 30.1, "distance_km": 5.6, "hr_zone": "Z1", "power_zone": "Z2", "rfl": 0.8752, "rfl_trend": 0.8991, "race": false, "surface_adj": 1.0}, {"date": "2025-12-13", "name": "Preamble with strides", "avg_hr": 139.7, "npower": 255.0, "duration_min": 22.6, "distance_km": 4.0, "hr_zone": "Z1", "power_zone": "Z1", "rfl": 0.8569, "rfl_trend": 0.8988, "race": false, "surface_adj": 1.0}, {"date": "2025-12-13", "name": "Adventstreak#13 - Haga parkrun 20\u201934", "avg_hr": 178.5, "npower": 347.0, "duration_min": 20.6, "distance_km": 5.0, "hr_zone": "Z5", "power_zone": "Z5", "rfl": 0.9268, "rfl_trend": 0.9012, "race": true, "surface_adj": 1.0}, {"date": "2025-12-14", "name": "Adventstreak#14 - Sunday seventy five", "avg_hr": 134.9, "npower": 252.0, "duration_min": 75.2, "distance_km": 13.2, "hr_zone": "Z1", "power_zone": "Z1", "rfl": 0.9011, "rfl_trend": 0.9015, "race": false, "surface_adj": 1.0}, {"date": "2025-12-15", "name": "Adventstreak#15 - Easy 30\u2019 with 5 x 30/30s", "avg_hr": 132.9, "npower": 270.0, "duration_min": 30.2, "distance_km": 5.6, "hr_zone": "Z1", "power_zone": "Z2", "rfl": 0.9452, "rfl_trend": 0.9025, "race": false, "surface_adj": 1.0}, {"date": "2025-12-16", "name": "Preamble with strides", "avg_hr": 130.4, "npower": 241.0, "duration_min": 16.1, "distance_km": 2.7, "hr_zone": "Z1", "power_zone": "Z1", "rfl": 0.8804, "rfl_trend": 0.9027, "race": false, "surface_adj": 1.0}, {"date": "2025-12-16", "name": "Adventstreak#16 - FK Studenterna indoor session #2", "avg_hr": 176.6, "npower": 331.0, "duration_min": 21.7, "distance_km": 5.5, "hr_zone": "Z4", "power_zone": "Z5", "rfl": 0.9207, "rfl_trend": 0.9042, "race": false, "surface_adj": 1.0}, {"date": "2025-12-17", "name": "#Adventstreak#17 part 1 - Stryd 4.0 benchmark", "avg_hr": 144.8, "npower": 271.0, "duration_min": 26.5, "distance_km": 5.0, "hr_zone": "Z2", "power_zone": "Z2", "rfl": 0.8852, "rfl_trend": 0.9041, "race": false, "surface_adj": 1.0}, {"date": "2025-12-17", "name": "Adventstreak#17 part 2 - Stryd 5.0 test", "avg_hr": 146.3, "npower": 275.0, "duration_min": 27.1, "distance_km": 5.1, "hr_zone": "Z2", "power_zone": "Z2", "rfl": 0.8723, "rfl_trend": 0.9036, "race": false, "surface_adj": 1.0}, {"date": "2025-12-18", "name": "Adventstreak#18 - Gentle 35\u2019", "avg_hr": 126.8, "npower": 242.0, "duration_min": 35.2, "distance_km": 5.9, "hr_zone": "Z1", "power_zone": "Z1", "rfl": 0.9006, "rfl_trend": 0.9037, "race": false, "surface_adj": 1.0}, {"date": "2025-12-19", "name": "Adventstreak#19 - Friday tune-up", "avg_hr": 139.1, "npower": 273.0, "duration_min": 30.1, "distance_km": 5.5, "hr_zone": "Z1", "power_zone": "Z2", "rfl": 0.8929, "rfl_trend": 0.9038, "race": false, "surface_adj": 1.0}, {"date": "2025-12-20", "name": "Preamble with strides", "avg_hr": 144.6, "npower": 260.0, "duration_min": 22.9, "distance_km": 4.0, "hr_zone": "Z2", "power_zone": "Z2", "rfl": 0.8531, "rfl_trend": 0.9034, "race": false, "surface_adj": 1.0}, {"date": "2025-12-20", "name": "Adventstreak#20 - Haga parkrun 20\u201909", "avg_hr": 182.5, "npower": 354.0, "duration_min": 20.1, "distance_km": 5.0, "hr_zone": "Z5", "power_zone": "Z5", "rfl": 0.941, "rfl_trend": 0.9069, "race": true, "surface_adj": 1.0}, {"date": "2025-12-21", "name": "Adventstreak#21 - 10 British miles in Z1\u2026.", "avg_hr": 133.4, "npower": 255.0, "duration_min": 90.2, "distance_km": 16.1, "hr_zone": "Z1", "power_zone": "Z1", "rfl": 0.9324, "rfl_trend": 0.9082, "race": false, "surface_adj": 1.0}, {"date": "2025-12-22", "name": "Adventstreak#22 - Easy 30\u2019 with 5 x 30/30", "avg_hr": 134.5, "npower": 271.0, "duration_min": 30.1, "distance_km": 5.6, "hr_zone": "Z1", "power_zone": "Z2", "rfl": 0.9428, "rfl_trend": 0.9089, "race": false, "surface_adj": 1.0}, {"date": "2025-12-23", "name": "Adventstreak#23 - An unexpected and welcome pre-Christmas sn", "avg_hr": 129.6, "npower": 252.0, "duration_min": 50.2, "distance_km": 8.8, "hr_zone": "Z1", "power_zone": "Z1", "rfl": 0.9623, "rfl_trend": 0.9103, "race": false, "surface_adj": 1.05}, {"date": "2025-12-24", "name": "Adventstreak#24 - 10k Z1->Z2->Z3", "avg_hr": 148.2, "npower": 286.0, "duration_min": 50.2, "distance_km": 10.1, "hr_zone": "Z2", "power_zone": "Z3", "rfl": 0.9542, "rfl_trend": 0.9122, "race": false, "surface_adj": 1.05}, {"date": "2025-12-25", "name": "Adventstreak#25 - One hour easy to complete the challenge", "avg_hr": 142.6, "npower": 260.0, "duration_min": 60.2, "distance_km": 11.0, "hr_zone": "Z1", "power_zone": "Z2", "rfl": 0.9109, "rfl_trend": 0.9124, "race": false, "surface_adj": 1.05}, {"date": "2025-12-27", "name": "Preamble with strides", "avg_hr": 147.5, "npower": 268.0, "duration_min": 22.2, "distance_km": 4.0, "hr_zone": "Z2", "power_zone": "Z2", "rfl": 0.8454, "rfl_trend": 0.9125, "race": false, "surface_adj": 1.0}, {"date": "2025-12-27", "name": "Haga parkrun 20\u201959", "avg_hr": 178.4, "npower": 348.0, "duration_min": 21.0, "distance_km": 5.0, "hr_zone": "Z5", "power_zone": "Z5", "rfl": 0.9217, "rfl_trend": 0.9133, "race": true, "surface_adj": 1.0}, {"date": "2025-12-29", "name": "5k before the slopes", "avg_hr": 138.1, "npower": 266.0, "duration_min": 28.8, "distance_km": 5.0, "hr_zone": "Z1", "power_zone": "Z2", "rfl": 0.9434, "rfl_trend": 0.9144, "race": false, "surface_adj": 1.025}, {"date": "2026-01-01", "name": "Good morning 2026", "avg_hr": 142.2, "npower": 275.0, "duration_min": 28.1, "distance_km": 5.1, "hr_zone": "Z1", "power_zone": "Z2", "rfl": 0.9396, "rfl_trend": 0.9159, "race": false, "surface_adj": 1.025}, {"date": "2026-01-04", "name": "The real winter starts here", "avg_hr": 139.4, "npower": 255.0, "duration_min": 43.3, "distance_km": 7.8, "hr_zone": "Z1", "power_zone": "Z1", "rfl": 0.8852, "rfl_trend": 0.9164, "race": false, "surface_adj": 1.05}, {"date": "2026-01-05", "name": "Glorious winter 10k around Djurg\u00e5rden", "avg_hr": 146.1, "npower": 265.0, "duration_min": 52.2, "distance_km": 10.0, "hr_zone": "Z2", "power_zone": "Z2", "rfl": 0.9188, "rfl_trend": 0.9168, "race": false, "surface_adj": 1.08}, {"date": "2026-01-06", "name": "Warmup in the snow", "avg_hr": 142.8, "npower": 244.0, "duration_min": 14.6, "distance_km": 2.4, "hr_zone": "Z1", "power_zone": "Z1", "rfl": 0.8829, "rfl_trend": 0.917, "race": false, "surface_adj": 1.1}, {"date": "2026-01-06", "name": "FKS indoor session #3", "avg_hr": 174.8, "npower": 319.0, "duration_min": 30.7, "distance_km": 6.2, "hr_zone": "Z4", "power_zone": "Z4", "rfl": 0.9225, "rfl_trend": 0.9173, "race": false, "surface_adj": 1.0}, {"date": "2026-01-07", "name": "Z1 in the snow is very very slow", "avg_hr": 125.3, "npower": 220.0, "duration_min": 40.2, "distance_km": 6.2, "hr_zone": "Z1", "power_zone": "Z1", "rfl": 0.8928, "rfl_trend": 0.9172, "race": false, "surface_adj": 1.08}, {"date": "2026-01-08", "name": "FK Studenterna C4 - WU, 6 x 1km @ Z3, 1\u2019 jog, CD, 3 x 30/30", "avg_hr": 152.9, "npower": 272.0, "duration_min": 55.2, "distance_km": 10.3, "hr_zone": "Z2", "power_zone": "Z2", "rfl": 0.8827, "rfl_trend": 0.916, "race": false, "surface_adj": 1.05}, {"date": "2026-01-10", "name": "Pre-parkrun jog around Haga", "avg_hr": 148.0, "npower": 255.0, "duration_min": 50.2, "distance_km": 8.9, "hr_zone": "Z2", "power_zone": "Z1", "rfl": 0.8695, "rfl_trend": 0.9149, "race": false, "surface_adj": 1.08}, {"date": "2026-01-10", "name": "Haga parkrun 22\u201909", "avg_hr": 178.0, "npower": 321.0, "duration_min": 22.1, "distance_km": 5.0, "hr_zone": "Z5", "power_zone": "Z4", "rfl": 0.9234, "rfl_trend": 0.9157, "race": true, "surface_adj": 1.08}, {"date": "2026-01-11", "name": "Easy pre-sauna ( and a couple of dips into ice cold water ) ", "avg_hr": 129.2, "npower": 230.0, "duration_min": 30.8, "distance_km": 4.8, "hr_zone": "Z1", "power_zone": "Z1", "rfl": 0.9084, "rfl_trend": 0.9156, "race": false, "surface_adj": 1.08}, {"date": "2026-01-12", "name": "Gentle Djurg\u00e5rden 10", "avg_hr": 129.6, "npower": 231.0, "duration_min": 61.1, "distance_km": 10.0, "hr_zone": "Z1", "power_zone": "Z1", "rfl": 0.9224, "rfl_trend": 0.9159, "race": false, "surface_adj": 1.08}, {"date": "2026-01-13", "name": "FK Studenterna Indoor session #4", "avg_hr": 171.1, "npower": 322.0, "duration_min": 27.5, "distance_km": 6.2, "hr_zone": "Z4", "power_zone": "Z5", "rfl": 0.9166, "rfl_trend": 0.9161, "race": false, "surface_adj": 1.0}, {"date": "2026-01-14", "name": "Gentle recovery", "avg_hr": 119.2, "npower": 210.0, "duration_min": 30.2, "distance_km": 4.4, "hr_zone": "Z1", "power_zone": "Z1", "rfl": 0.9131, "rfl_trend": 0.9161, "race": false, "surface_adj": 1.1}, {"date": "2026-01-16", "name": "Good morning London", "avg_hr": 141.1, "npower": 262.0, "duration_min": 45.2, "distance_km": 8.1, "hr_zone": "Z1", "power_zone": "Z2", "rfl": 0.8742, "rfl_trend": 0.9151, "race": false, "surface_adj": 1.0}, {"date": "2026-01-17", "name": "Preamble with strides", "avg_hr": 134.6, "npower": 247.0, "duration_min": 17.7, "distance_km": 3.0, "hr_zone": "Z1", "power_zone": "Z1", "rfl": 0.8526, "rfl_trend": 0.9148, "race": false, "surface_adj": 1.0}, {"date": "2026-01-17", "name": "Battersea parkrun 19\u201950 official ( 167th finisher )", "avg_hr": 176.5, "npower": 350.0, "duration_min": 19.8, "distance_km": 5.0, "hr_zone": "Z4", "power_zone": "Z5", "rfl": 0.9342, "rfl_trend": 0.9165, "race": true, "surface_adj": 1.0}, {"date": "2026-01-18", "name": "Easy London half", "avg_hr": 142.0, "npower": 248.0, "duration_min": 120.5, "distance_km": 21.1, "hr_zone": "Z1", "power_zone": "Z1", "rfl": 0.8351, "rfl_trend": 0.9151, "race": false, "surface_adj": 1.0}, {"date": "2026-01-20", "name": "Warmup outdoors", "avg_hr": 151.5, "npower": 266.0, "duration_min": 17.9, "distance_km": 3.2, "hr_zone": "Z2", "power_zone": "Z2", "rfl": 0.8482, "rfl_trend": 0.9145, "race": false, "surface_adj": 1.0}, {"date": "2026-01-20", "name": "FK Studenterna Indoor Session #5", "avg_hr": 172.8, "npower": 326.0, "duration_min": 24.2, "distance_km": 5.3, "hr_zone": "Z4", "power_zone": "Z5", "rfl": 0.9122, "rfl_trend": 0.9144, "race": false, "surface_adj": 1.0}, {"date": "2026-01-21", "name": "Recovery 35\u2019", "avg_hr": 127.2, "npower": 234.0, "duration_min": 35.2, "distance_km": 5.7, "hr_zone": "Z1", "power_zone": "Z1", "rfl": 0.8641, "rfl_trend": 0.9138, "race": false, "surface_adj": 1.0}, {"date": "2026-01-23", "name": "Shakeout - WU, strides, 3 x 60/60, CD", "avg_hr": 137.7, "npower": 257.0, "duration_min": 28.8, "distance_km": 5.0, "hr_zone": "Z1", "power_zone": "Z1", "rfl": 0.855, "rfl_trend": 0.9128, "race": false, "surface_adj": 1.0}, {"date": "2026-01-24", "name": "Warmup", "avg_hr": 138.8, "npower": 245.0, "duration_min": 14.7, "distance_km": 2.5, "hr_zone": "Z1", "power_zone": "Z1", "rfl": 0.8214, "rfl_trend": 0.9124, "race": false, "surface_adj": 1.0}, {"date": "2026-01-24", "name": "Vinthundsvintern indoor 3000 11\u201921 PB.", "avg_hr": 182.7, "npower": 362.0, "duration_min": 11.3, "distance_km": 3.0, "hr_zone": "Z5", "power_zone": "Z5", "rfl": 0.9394, "rfl_trend": 0.9143, "race": true, "surface_adj": 1.0}, {"date": "2026-01-25", "name": "Gentle snowy recovery run", "avg_hr": 122.8, "npower": 216.0, "duration_min": 45.2, "distance_km": 6.8, "hr_zone": "Z1", "power_zone": "Z1", "rfl": 0.9011, "rfl_trend": 0.914, "race": false, "surface_adj": 1.08}, {"date": "2026-01-26", "name": "Gentle 10k in cycle lanes", "avg_hr": 125.5, "npower": 236.0, "duration_min": 60.5, "distance_km": 10.0, "hr_zone": "Z1", "power_zone": "Z1", "rfl": 0.9062, "rfl_trend": 0.9136, "race": false, "surface_adj": 1.01}, {"date": "2026-01-27", "name": "FK Studenterna F4 - WU, 6 x ( 5\u2019@ME, 1\u2019@HME ), CD", "avg_hr": 152.4, "npower": 284.0, "duration_min": 55.1, "distance_km": 10.9, "hr_zone": "Z2", "power_zone": "Z3", "rfl": 0.8761, "rfl_trend": 0.9116, "race": false, "surface_adj": 1.0}, {"date": "2026-01-28", "name": "Easy Djurg\u00e5rden 60\u2019", "avg_hr": 131.7, "npower": 242.0, "duration_min": 60.2, "distance_km": 10.3, "hr_zone": "Z1", "power_zone": "Z1", "rfl": 0.9159, "rfl_trend": 0.9114, "race": false, "surface_adj": 1.05}, {"date": "2026-01-29", "name": "FK Studenterna D4 - WU, 4 x ( 6\u2019@LTE, 2\u2019 jog ), CD", "avg_hr": 151.7, "npower": 296.0, "duration_min": 45.2, "distance_km": 9.1, "hr_zone": "Z2", "power_zone": "Z3", "rfl": 0.9116, "rfl_trend": 0.9111, "race": false, "surface_adj": 1.0}, {"date": "2026-02-02", "name": "Easy 35\u2019 on last night\u2019s snow", "avg_hr": 128.5, "npower": 236.0, "duration_min": 35.2, "distance_km": 5.9, "hr_zone": "Z1", "power_zone": "Z1", "rfl": 0.9013, "rfl_trend": 0.9096, "race": false, "surface_adj": 1.05}, {"date": "2026-02-03", "name": "FK Studenterna F5 - WU, 6 x ( 4\u2019@ME, 2\u2019@HME ), CD", "avg_hr": 156.5, "npower": 288.0, "duration_min": 60.2, "distance_km": 12.0, "hr_zone": "Z2", "power_zone": "Z3", "rfl": 0.8713, "rfl_trend": 0.9069, "race": false, "surface_adj": 1.0}, {"date": "2026-02-04", "name": "Easy Djurg\u00e5rden hour", "avg_hr": 134.0, "npower": 242.0, "duration_min": 60.2, "distance_km": 10.2, "hr_zone": "Z1", "power_zone": "Z1", "rfl": 0.898, "rfl_trend": 0.9062, "race": false, "surface_adj": 1.05}, {"date": "2026-02-08", "name": "Easy \"post-flu\" 40' in Haga", "avg_hr": 140.1, "npower": 271.0, "duration_min": 40.2, "distance_km": 6.8, "hr_zone": "Z1", "power_zone": "Z2", "rfl": 0.859, "rfl_trend": 0.9043, "race": false, "surface_adj": 1.05}, {"date": "2026-02-09", "name": "Easy 45\u2019 with 6 x 30/30", "avg_hr": 138.6, "npower": 255.0, "duration_min": 45.2, "distance_km": 8.1, "hr_zone": "Z1", "power_zone": "Z1", "rfl": 0.9068, "rfl_trend": 0.9042, "race": false, "surface_adj": 1.05}, {"date": "2026-02-10", "name": "FK Studenterna F6 - 6 x ( 4\u2019@ME, 2\u2019@HME )", "avg_hr": 156.4, "npower": 281.0, "duration_min": 60.2, "distance_km": 11.8, "hr_zone": "Z2", "power_zone": "Z2", "rfl": 0.8507, "rfl_trend": 0.9011, "race": false, "surface_adj": 1.0}];
+const PEAK_CP = 372;
+const RFL_TREND = 0.9011;
+const CP = Math.round(PEAK_CP * RFL_TREND);
+const MASS = 76.0;
+const RE_P90 = 0.9206;
+const LTHR = 178;
+const MAX_HR = 192;
+
+const RACE_FACTORS = {'Sub-5K':1.07,'5K':1.05,'10K':1.00,'HM':0.95,'Mara':0.90};
+const RACE = {
+  'Sub-5K':{factor:1.07,dist:3.0,  color:'#4ade80'},
+  '5K':    {factor:1.05,dist:5.0,  color:'#f472b6'},
+  '10K':   {factor:1.00,dist:10.0, color:'#fb923c'},
+  'HM':    {factor:0.95,dist:21.097,color:'#a78bfa'},
+  'Mara':  {factor:0.90,dist:42.195,color:'#38bdf8'},
+};
+Object.keys(RACE).forEach(k=>{
+  const r=RACE[k];
+  r.pw=Math.round(CP*r.factor);
+  const speed=(r.pw/MASS)*RE_P90;
+  r.t=Math.round(r.dist*1000/speed);
+});
+
+const PLANNED=[
+  {name:'5K London',date:'2026-02-27',key:'5K'},
+  {name:'HM Stockholm',date:'2026-04-25',key:'HM'},
+];
+
+const HR_Z=[
+  {id:'Z1',name:'Recovery', lo:0,  hi:144,c:'#3b82f6'},
+  {id:'Z2',name:'Aerobic',  lo:144,hi:160,c:'#22c55e'},
+  {id:'Z3',name:'Tempo',    lo:160,hi:169,c:'#eab308'},
+  {id:'Z4',name:'Threshold',lo:169,hi:178,c:'#f97316'},
+  {id:'Z5',name:'VO2max',   lo:178,hi:192,c:'#ef4444'},
+];
+const PW_Z=[
+  {id:'Z1',name:'Recovery', lo:0,  hi:258,pL:0, pH:77, c:'#3b82f6'},
+  {id:'Z2',name:'Endurance',lo:258,hi:283,pL:77,pH:84, c:'#22c55e'},
+  {id:'Z3',name:'Tempo',    lo:283,hi:301,pL:84,pH:90, c:'#eab308'},
+  {id:'Z4',name:'Threshold',lo:301,hi:322,pL:90,pH:96, c:'#f97316'},
+  {id:'Z5',name:'VO2max',   lo:322,hi:400,pL:96,pH:108,c:'#ef4444'},
+];
+
+function makeRacePwZones(){
+  const z=[];
+  const top5k=Math.round(RACE['5K'].pw*1.03);
+  z.push({id:'Sub-5K',name:'Sub-5K',lo:top5k+1,hi:9999,c:'#4ade80'});
+  ['5K','10K','HM','Mara'].forEach(k=>{
+    const r=RACE[k];
+    z.push({id:k,name:k,lo:Math.round(r.pw*0.97),hi:Math.round(r.pw*1.03),c:r.color});
+  });
+  z.push({id:'Other',name:'Other',lo:0,hi:9999,c:'#4b5563'});
+  return z;
+}
+function makeRaceHrZones(){
+  return[
+    {id:'Sub-5K',name:'Sub-5K',lo:182,hi:210,c:'#4ade80'},
+    {id:'5K',    name:'5K',    lo:178,hi:182,c:'#f472b6'},
+    {id:'10K',   name:'10K',   lo:174,hi:178,c:'#fb923c'},
+    {id:'HM',    name:'HM',    lo:169,hi:174,c:'#a78bfa'},
+    {id:'Mara',  name:'Mara',  lo:162,hi:169,c:'#38bdf8'},
+    {id:'Other', name:'Other', lo:0,  hi:162,c:'#4b5563'},
+  ];
+}
+const RACE_PW_Z=makeRacePwZones();
+const RACE_HR_Z=makeRaceHrZones();
+
+function zonesFor(m){
+  if(m==='hr')return HR_Z; if(m==='power')return PW_Z;
+  if(m==='race')return RACE_PW_Z; return RACE_HR_Z;
+}
+function valFor(r,m){
+  if(m==='hr'||m==='racehr')return r.avg_hr; return r.npower;
+}
+function isRaceMode(m){return m==='race'||m==='racehr';}
+function assignZ(val,zones,raceMode){
+  if(!val||val<=0)return zones[zones.length-1].id;
+  if(raceMode){
+    for(const z of zones){if(z.id==='Other')continue;if(val>=z.lo&&val<=z.hi)return z.id;}
+    return'Other';
+  }
+  for(const z of zones){if(val<z.hi)return z.id;}
+  return zones[zones.length-1].id;
+}
+
+// Smart race effort estimation for structured sessions
+function estimateRaceEffortMins(r,zones){
+  const result={}; zones.forEach(z=>result[z.id]=0);
+  const mins=r.duration_min||0,pw=r.npower||0,hr=r.avg_hr||0;
+  if(!pw||!mins){result['Other']=mins;return result;}
+  const isStructured=hr>148&&pw>265&&pw<330;
+  if(isStructured){
+    const hardPw=pw*1.18,hardMins=mins*0.40,easyMins=mins*0.60;
+    let done=false;
+    for(const z of zones){if(z.id==='Other')continue;if(hardPw>=z.lo&&hardPw<=z.hi){result[z.id]+=hardMins;done=true;break;}}
+    if(!done){const s=zones.find(z=>z.id==='Sub-5K');if(s&&hardPw>=s.lo){result['Sub-5K']+=hardMins;done=true;}}
+    if(!done)result['Other']+=hardMins;
+    result['Other']+=easyMins;
+  }else{
+    let done=false;
+    for(const z of zones){if(z.id==='Other')continue;if(pw>=z.lo&&pw<=z.hi){result[z.id]+=mins*0.65;result['Other']+=mins*0.35;done=true;break;}}
+    if(!done){const s=zones.find(z=>z.id==='Sub-5K');if(s&&pw>=s.lo){result['Sub-5K']+=mins*0.65;result['Other']+=mins*0.35;done=true;}}
+    if(!done)result['Other']+=mins;
+  }
+  return result;
+}
+function estimateRaceEffortMinsHR(r,zones){
+  const result={}; zones.forEach(z=>result[z.id]=0);
+  const mins=r.duration_min||0,hr=r.avg_hr||0;
+  if(!hr||!mins){result['Other']=mins;return result;}
+  const isStructured=hr>148&&hr<175;
+  if(isStructured){
+    const hardHR=hr*1.12,hardMins=mins*0.40,easyMins=mins*0.60;
+    let done=false;
+    for(const z of zones){if(z.id==='Other')continue;if(hardHR>=z.lo&&hardHR<=z.hi){result[z.id]+=hardMins;done=true;break;}}
+    if(!done){const s=zones.find(z=>z.id==='Sub-5K');if(s&&hardHR>=s.lo){result['Sub-5K']+=hardMins;done=true;}}
+    if(!done)result['Other']+=hardMins;
+    result['Other']+=easyMins;
+  }else{
+    let done=false;
+    for(const z of zones){if(z.id==='Other')continue;if(hr>=z.lo&&hr<=z.hi){result[z.id]+=mins*0.65;result['Other']+=mins*0.35;done=true;break;}}
+    if(!done)result['Other']+=mins;
+  }
+  return result;
+}
+
+// Helpers
+function weekKey(ds){const d=new Date(ds),day=d.getDay(),m=new Date(d);m.setDate(d.getDate()-((day+6)%7));return m.toISOString().slice(0,10);}
+function fmtWk(s){
+  const d=new Date(s),tmp=new Date(d.valueOf());
+  tmp.setDate(tmp.getDate()+3-(tmp.getDay()+6)%7);
+  const w1=new Date(tmp.getFullYear(),0,4);
+  const wk=1+Math.round(((tmp-w1)/864e5-3+(w1.getDay()+6)%7)/7);
+  const yr=String(tmp.getFullYear()).slice(-2);
+  return'W'+String(wk).padStart(2,'0')+'/'+yr;
+}
+function fmtTime(s){const m=Math.floor(s/60),ss=Math.round(s%60);return m+':'+String(ss).padStart(2,'0');}
+function fmtPace(s,d){const p=s/d;return Math.floor(p/60)+':'+String(Math.round(p%60)).padStart(2,'0')+'/km';}
+
+// Zone tables
+function renderTables(){
+  let h='';
+  HR_Z.forEach(z=>{const r=z.lo===0?'<'+z.hi:z.lo+'–'+z.hi;h+=`<tr><td><span class="zone-label"><span class="zone-dot" style="background:${z.c}"></span>${z.id}</span></td><td>${r}</td><td style="font-family:'DM Sans';color:var(--text-dim)">${z.name}</td></tr>`;});
+  document.getElementById('hr-zt').innerHTML=h;
+  h='';
+  PW_Z.forEach(z=>{const r=z.lo===0?'<'+z.hi:z.lo+'–'+z.hi;h+=`<tr><td><span class="zone-label"><span class="zone-dot" style="background:${z.c}"></span>${z.id}</span></td><td>${r}W</td><td style="color:var(--text-dim)">${z.pL}–${z.pH}%</td></tr>`;});
+  document.getElementById('pw-zt').innerHTML=h;
+}
+
+// Race readiness
+function renderRace(){
+  const el=document.getElementById('race-cards'),today=new Date();
+  let html='';
+  PLANNED.forEach(race=>{
+    const rd=new Date(race.date),days=Math.ceil((rd-today)/864e5);
+    const r=RACE[race.key],band3=Math.round(r.pw*0.03);
+    const lo=r.pw*0.97,hi=r.pw*1.03;
+    const c14=new Date(today);c14.setDate(c14.getDate()-14);
+    const c28=new Date(today);c28.setDate(c28.getDate()-28);
+    let m14=0,m28=0;
+    RUNS.forEach(run=>{
+      if(!run.npower)return;
+      const d=new Date(run.date),mins=run.duration_min||0,pw=run.npower,hr=run.avg_hr||0;
+      if(pw>=lo&&pw<=hi){
+        const m=mins*0.50;if(d>=c14)m14+=m;if(d>=c28)m28+=m;
+      }else if(hr>148&&pw>265&&pw<hi){
+        const estHardPw=pw*1.18;
+        if(estHardPw>=lo&&estHardPw<=hi*1.05){const m=mins*0.35;if(d>=c14)m14+=m;if(d>=c28)m28+=m;}
+      }else if(pw>hi&&pw<hi*1.15){
+        const m=mins*0.20;if(d>=c14)m14+=m;if(d>=c28)m28+=m;
+      }
+    });
+    html+=`<div class="race-card"><div class="race-hdr"><span class="race-name">${race.name}</span><span class="race-date">${race.date} · ${days>0?days+'d':'TODAY'}</span></div><div class="race-stats"><div class="race-stat"><div class="race-stat-val" style="color:var(--accent)">${r.pw}W</div><div class="race-stat-lbl">Target</div><div class="race-stat-sub">±${band3}W (3%)</div></div><div class="race-stat"><div class="race-stat-val">${fmtTime(r.t)}</div><div class="race-stat-lbl">Predicted</div><div class="race-stat-sub">${fmtPace(r.t,r.dist)}</div></div><div class="race-stat"><div class="race-stat-val">${Math.round(m14)}<span style="font-size:0.75rem;color:var(--text-dim)">min</span></div><div class="race-stat-lbl">14-day</div><div class="race-stat-sub">at effort</div></div><div class="race-stat"><div class="race-stat-val">${Math.round(m28)}<span style="font-size:0.75rem;color:var(--text-dim)">min</span></div><div class="race-stat-lbl">28-day</div><div class="race-stat-sub">at effort</div></div></div></div>`;
+  });
+  el.innerHTML=html;
+}
+
+// Weekly bars
+let wkMode='hr',wkN=8;
+function renderWk(){
+  const el=document.getElementById('wk-bars');el.innerHTML='';
+  const zones=zonesFor(wkMode),rm=isRaceMode(wkMode);
+  const weeks={};
+  RUNS.forEach(r=>{const w=weekKey(r.date);if(!weeks[w])weeks[w]=[];weeks[w].push(r);});
+  const sorted=Object.keys(weeks).sort().slice(-wkN);
+  let maxT=0;
+  const wd=sorted.map(wk=>{
+    const zm={};zones.forEach(z=>zm[z.id]=0);let t=0;
+    weeks[wk].forEach(r=>{
+      const mins=r.duration_min||0;
+      if(rm){
+        const est=(wkMode==='race')?estimateRaceEffortMins(r,zones):estimateRaceEffortMinsHR(r,zones);
+        Object.keys(est).forEach(zid=>{if(zm[zid]!==undefined)zm[zid]+=est[zid];});
+      }else{
+        const v=valFor(r,wkMode),zid=assignZ(v,zones,false);
+        if(zm[zid]!==undefined)zm[zid]+=mins;
+      }
+      t+=mins;
+    });
+    if(t>maxT)maxT=t;return{week:wk,zm,t};
+  });
+  wd.forEach(w=>{
+    const row=document.createElement('div');row.className='week-row';
+    const lbl=document.createElement('div');lbl.className='week-label';lbl.textContent=fmtWk(w.week);row.appendChild(lbl);
+    const bar=document.createElement('div');bar.className='week-bar-wrap';
+    zones.forEach(z=>{
+      if(w.zm[z.id]>0){
+        const pct=(w.zm[z.id]/maxT)*100,seg=document.createElement('div');
+        seg.className='week-seg';seg.style.width=pct+'%';seg.style.background=z.c;
+        seg.innerHTML=`<div class="tip">${z.name}: ${Math.round(w.zm[z.id])} min</div>`;
+        bar.appendChild(seg);
+      }
+    });
+    row.appendChild(bar);
+    const tot=document.createElement('div');tot.className='week-total';
+    tot.textContent=Math.round(w.t)+' min';row.appendChild(tot);
+    el.appendChild(row);
+  });
+  document.getElementById('wk-leg').innerHTML=zones.map(z=>`<div class="leg-item"><div class="leg-sw" style="background:${z.c}"></div>${z.name}</div>`).join('');
+}
+function setWM(m,btn){wkMode=m;document.querySelectorAll('#wk-mode .toggle-btn').forEach(b=>b.classList.remove('active'));btn.classList.add('active');renderWk();}
+function setWP(n,btn){wkN=n;document.querySelectorAll('#wk-period .toggle-btn').forEach(b=>b.classList.remove('active'));btn.classList.add('active');renderWk();}
+
+// Per-run chart
+let prMode='hr',prChart=null;
+function renderPR(){
+  const ctx=document.getElementById('prChart').getContext('2d');
+  const last30=RUNS.slice(-30),zones=zonesFor(prMode),rm=isRaceMode(prMode);
+  const labels=last30.map(r=>{const d=new Date(r.date);return d.getDate()+'/'+(d.getMonth()+1);});
+  const datasets=zones.map((z,zi)=>({
+    label:z.name,
+    data:last30.map(r=>{
+      const mins=r.duration_min||0;
+      if(rm){
+        const est=(prMode==='race')?estimateRaceEffortMins(r,zones):estimateRaceEffortMinsHR(r,zones);
+        return Math.round(est[z.id]||0);
+      }else{
+        const v=valFor(r,prMode),primary=assignZ(v,zones,false);
+        const pIdx=zones.findIndex(zz=>zz.id===primary),diff=Math.abs(zi-pIdx);
+        if(diff===0)return Math.round(mins*0.65);
+        if(diff===1)return Math.round(mins*0.15);
+        return 0;
+      }
+    }),
+    backgroundColor:z.c+'cc',borderWidth:0,borderRadius:2,
+  }));
+  if(prChart)prChart.destroy();
+  prChart=new Chart(ctx,{
+    type:'bar',data:{labels,datasets},
+    options:{
+      responsive:true,maintainAspectRatio:false,
+      plugins:{legend:{display:false},tooltip:{callbacks:{title:items=>{const i=items[0].dataIndex;return last30[i].name;},label:item=>item.dataset.label+': '+item.raw+' min'}}},
+      scales:{
+        x:{stacked:true,grid:{color:'rgba(255,255,255,0.04)'},ticks:{color:'#8b90a0',font:{size:10,family:'JetBrains Mono'}}},
+        y:{stacked:true,grid:{color:'rgba(255,255,255,0.04)'},ticks:{color:'#8b90a0',font:{size:10,family:'JetBrains Mono'},callback:v=>v+' min'}}
+      }
+    }
+  });
+  document.getElementById('pr-leg').innerHTML=zones.map(z=>`<div class="leg-item"><div class="leg-sw" style="background:${z.c}"></div>${z.name}</div>`).join('');
+}
+function setPR(m,btn){prMode=m;document.querySelectorAll('#pr-mode .toggle-btn').forEach(b=>b.classList.remove('active'));btn.classList.add('active');renderPR();}
+
+renderTables();renderRace();renderWk();renderPR();
+
+</script>
+</body>
+</html>
