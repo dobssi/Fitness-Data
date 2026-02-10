@@ -7,6 +7,12 @@ Usage:
   python ci/dropbox_sync.py download --items file1.xlsx file2.csv
   python ci/dropbox_sync.py upload --items file1.xlsx file2.csv
   python ci/dropbox_sync.py download --cache-dir persec_cache_FULL
+  python ci/dropbox_sync.py upload --cache-dir persec_cache_FULL
+  python ci/dropbox_sync.py download --cache-dir persec_cache_FULL --cache-full  # tar.gz mode
+
+Cache sync modes:
+  --cache-dir DIR             Incremental: upload/download only new .npz files (default)
+  --cache-dir DIR --cache-full  Full tar.gz pack/unpack (for rebuilds or first-time setup)
 
 Authentication (refresh token — recommended, never expires):
   DROPBOX_REFRESH_TOKEN — long-lived refresh token
@@ -25,7 +31,11 @@ Dropbox folder layout:
     ├── sync_state.json
     ├── TotalHistory.zip
     └── cache/
-        └── persec_cache_FULL.tar.gz
+        ├── persec_cache_FULL.tar.gz          (full archive, for --cache-full)
+        └── persec_cache_FULL/                (individual .npz files, for incremental)
+            ├── 524737937055_token_xxx.npz
+            ├── 524737937055_token_xxx_summary.json
+            └── ...
 """
 
 import os
@@ -274,13 +284,189 @@ def unpack_cache(archive_path: str, cache_dir: str):
     return True
 
 
+# --- Incremental cache sync ---
+
+LIST_FOLDER_URL = "https://api.dropboxapi.com/2/files/list_folder"
+LIST_FOLDER_CONTINUE_URL = "https://api.dropboxapi.com/2/files/list_folder/continue"
+
+
+def dropbox_list_folder(remote_dir: str, token: str) -> dict:
+    """List files in a Dropbox folder. Returns {filename: size} dict.
+    
+    Returns empty dict if folder doesn't exist.
+    """
+    import json
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Content-Type": "application/json",
+    }
+    
+    files = {}
+    body = {"path": remote_dir, "recursive": False, "limit": 2000}
+    
+    resp = requests.post(LIST_FOLDER_URL, headers=headers, json=body, timeout=60)
+    
+    if resp.status_code == 409:
+        # Folder doesn't exist yet — that's OK
+        detail = resp.text
+        if "not_found" in detail:
+            print(f"  ⚠ Remote folder not found: {remote_dir} (will be created on first upload)")
+            return {}
+        print(f"  ✗ List folder error ({resp.status_code}): {detail[:200]}")
+        return {}
+    elif resp.status_code != 200:
+        print(f"  ✗ List folder failed ({resp.status_code}): {resp.text[:200]}")
+        return {}
+    
+    data = resp.json()
+    for entry in data.get("entries", []):
+        if entry[".tag"] == "file":
+            files[entry["name"]] = entry["size"]
+    
+    # Handle pagination
+    while data.get("has_more", False):
+        resp = requests.post(
+            LIST_FOLDER_CONTINUE_URL,
+            headers=headers,
+            json={"cursor": data["cursor"]},
+            timeout=60,
+        )
+        if resp.status_code != 200:
+            print(f"  ✗ List folder continue failed ({resp.status_code})")
+            break
+        data = resp.json()
+        for entry in data.get("entries", []):
+            if entry[".tag"] == "file":
+                files[entry["name"]] = entry["size"]
+    
+    return files
+
+
+def sync_cache_incremental_upload(cache_dir: str, base: str, token: str) -> tuple:
+    """Upload only new/changed cache files (NPZ + summary JSON) to Dropbox.
+    
+    Compares local files against remote listing. Uploads files that are
+    missing remotely or differ in size.
+    
+    Returns (uploaded_count, skipped_count).
+    """
+    if not os.path.isdir(cache_dir):
+        print(f"  ⚠ Cache directory not found: {cache_dir}")
+        return (0, 0)
+    
+    cache_name = os.path.basename(cache_dir)
+    remote_dir = f"{base}/{cache_name}"
+    
+    # List local cache files (.npz + _summary.json + _cache_index.json)
+    local_files = {}
+    for f in Path(cache_dir).iterdir():
+        if f.suffix in (".npz", ".json"):
+            local_files[f.name] = f.stat().st_size
+    
+    if not local_files:
+        print(f"  ⚠ No cache files found in {cache_dir}")
+        return (0, 0)
+    
+    print(f"  Local cache: {len(local_files)} files")
+    
+    # List remote cache files
+    remote_files = dropbox_list_folder(remote_dir, token)
+    print(f"  Remote cache: {len(remote_files)} files")
+    
+    # Find files to upload (missing remotely or different size)
+    to_upload = []
+    for name, local_size in local_files.items():
+        remote_size = remote_files.get(name)
+        if remote_size is None or remote_size != local_size:
+            to_upload.append(name)
+    
+    if not to_upload:
+        print(f"  ✓ Cache in sync — nothing to upload")
+        return (0, len(local_files))
+    
+    print(f"  Uploading {len(to_upload)} new/changed cache files...")
+    uploaded = 0
+    for name in to_upload:
+        local_path = os.path.join(cache_dir, name)
+        remote_path = f"{remote_dir}/{name}"
+        if dropbox_upload(local_path, remote_path, token):
+            uploaded += 1
+    
+    skipped = len(local_files) - len(to_upload)
+    print(f"  ✓ Cache upload: {uploaded} uploaded, {skipped} already in sync")
+    return (uploaded, skipped)
+
+
+def sync_cache_incremental_download(cache_dir: str, base: str, token: str) -> tuple:
+    """Download only missing cache files (NPZ + summary JSON) from Dropbox.
+    
+    Compares remote files against local listing. Downloads files that are
+    missing locally or differ in size.
+    
+    Falls back to tar.gz download if no incremental files exist on Dropbox.
+    
+    Returns (downloaded_count, skipped_count).
+    """
+    cache_name = os.path.basename(cache_dir)
+    remote_dir = f"{base}/{cache_name}"
+    
+    # List remote cache files
+    remote_files = dropbox_list_folder(remote_dir, token)
+    if not remote_files:
+        print(f"  ⚠ No remote cache files found — falling back to tar.gz if available")
+        # Try tar.gz fallback
+        archive = f"{cache_dir}.tar.gz"
+        remote_archive = f"{base}/cache/{os.path.basename(archive)}"
+        if dropbox_download(remote_archive, archive, token):
+            unpack_cache(archive, cache_dir)
+            os.remove(archive)
+            return (1, 0)
+        return (0, 0)
+    
+    print(f"  Remote cache: {len(remote_files)} files")
+    
+    # List local cache files
+    os.makedirs(cache_dir, exist_ok=True)
+    local_files = {}
+    for f in Path(cache_dir).iterdir():
+        if f.suffix in (".npz", ".json"):
+            local_files[f.name] = f.stat().st_size
+    
+    print(f"  Local cache: {len(local_files)} files")
+    
+    # Find files to download (missing locally or different size)
+    to_download = []
+    for name, remote_size in remote_files.items():
+        local_size = local_files.get(name)
+        if local_size is None or local_size != remote_size:
+            to_download.append(name)
+    
+    if not to_download:
+        print(f"  ✓ Cache in sync — nothing to download")
+        return (0, len(remote_files))
+    
+    print(f"  Downloading {len(to_download)} missing/changed cache files...")
+    downloaded = 0
+    for name in to_download:
+        remote_path = f"{remote_dir}/{name}"
+        local_path = os.path.join(cache_dir, name)
+        if dropbox_download(remote_path, local_path, token):
+            downloaded += 1
+    
+    skipped = len(remote_files) - len(to_download)
+    print(f"  ✓ Cache download: {downloaded} downloaded, {skipped} already in sync")
+    return (downloaded, skipped)
+
+
 def main():
     parser = argparse.ArgumentParser(description="Dropbox sync for pipeline CI/CD")
     parser.add_argument("action", choices=["upload", "download"])
     parser.add_argument("--items", nargs="*", default=[],
                         help="Files to upload/download")
     parser.add_argument("--cache-dir", default=None,
-                        help="Persec cache directory to sync")
+                        help="Persec cache directory to sync (incremental by default)")
+    parser.add_argument("--cache-full", action="store_true",
+                        help="Use full tar.gz mode instead of incremental sync")
     parser.add_argument("--dropbox-base", default=DROPBOX_BASE,
                         help=f"Dropbox base path (default: {DROPBOX_BASE})")
     args = parser.parse_args()
@@ -302,14 +488,25 @@ def main():
                 failed += 1
         
         if args.cache_dir:
-            archive = f"{args.cache_dir}.tar.gz"
-            remote = f"{base}/cache/{os.path.basename(archive)}"
-            if dropbox_download(remote, archive, token):
-                unpack_cache(archive, args.cache_dir)
-                os.remove(archive)  # Clean up local archive
-                success += 1
+            if args.cache_full:
+                # Full tar.gz download + unpack
+                archive = f"{args.cache_dir}.tar.gz"
+                remote = f"{base}/cache/{os.path.basename(archive)}"
+                if dropbox_download(remote, archive, token):
+                    unpack_cache(archive, args.cache_dir)
+                    os.remove(archive)  # Clean up local archive
+                    success += 1
+                else:
+                    failed += 1
             else:
-                failed += 1
+                # Incremental: download only missing .npz files
+                downloaded, skipped = sync_cache_incremental_download(
+                    args.cache_dir, base, token
+                )
+                if downloaded > 0 or skipped > 0:
+                    success += 1
+                else:
+                    failed += 1
     
     elif args.action == "upload":
         print(f"\nUploading to Dropbox ({base})...")
@@ -324,15 +521,25 @@ def main():
                     failed += 1
         
         if args.cache_dir and os.path.isdir(args.cache_dir):
-            archive = f"{args.cache_dir}.tar.gz"
-            if pack_cache(args.cache_dir, archive):
-                remote = f"{base}/cache/{os.path.basename(archive)}"
-                ok = dropbox_upload(archive, remote, token)
-                os.remove(archive)  # Clean up local archive
-                if ok:
+            if args.cache_full:
+                # Full tar.gz pack + upload
+                archive = f"{args.cache_dir}.tar.gz"
+                if pack_cache(args.cache_dir, archive):
+                    remote = f"{base}/cache/{os.path.basename(archive)}"
+                    ok = dropbox_upload(archive, remote, token)
+                    os.remove(archive)  # Clean up local archive
+                    if ok:
+                        success += 1
+                    else:
+                        failed += 1
+            else:
+                # Incremental: upload only new/changed .npz files
+                uploaded, skipped = sync_cache_incremental_upload(
+                    args.cache_dir, base, token
+                )
+                if uploaded > 0 or skipped > 0:
                     success += 1
-                else:
-                    failed += 1
+                # No failure count for "nothing to upload"
     
     print(f"\nDone: {success} succeeded, {failed} failed")
     return 0 if failed == 0 else 1
