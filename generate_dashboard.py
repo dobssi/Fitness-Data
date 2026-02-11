@@ -1197,8 +1197,28 @@ def get_zone_data(df):
         if npz_path:
             try:
                 npz_data = np.load(npz_path, allow_pickle=True)
-                pw_arr = npz_data['power_w']
+                pw_arr = npz_data['power_w'].copy()
                 hr_arr = npz_data['hr_bpm']
+                spd_arr = npz_data['speed_mps']
+                grd_arr = npz_data['grade']
+                
+                # Clean power: exclude sections with implausible cost-of-transport
+                # COT = power/(mass*speed); sensor errors inflate COT >25% above run median
+                running = spd_arr > 2.0  # only assess at running pace (>8:20/km)
+                if running.sum() > 60:
+                    grd_safe = np.where(np.isnan(grd_arr), 0, grd_arr)
+                    cot = np.full_like(pw_arr, np.nan)
+                    mass_kg = row.get('weight_kg', ATHLETE_MASS_KG_DASH)
+                    cot[running] = pw_arr[running] / (mass_kg * spd_arr[running])
+                    cot_adj = cot - 4.0 * grd_safe
+                    cot_30 = pd.Series(cot_adj).rolling(30, min_periods=15).median().values
+                    cot_med = np.nanmedian(cot_adj)
+                    bad_pw = running & (~np.isnan(cot_30)) & (cot_30 > cot_med * 1.25)
+                    pw_arr[bad_pw] = 0.0  # zero so rolling avg doesn't bleed
+                    # Also zero HR for these seconds to keep zones consistent
+                    hr_arr = hr_arr.copy()
+                    hr_arr[bad_pw] = 0.0
+                
                 run_entry['hz'] = _time_in_zones(hr_arr, hr_bounds, hr_znames)
                 run_entry['pz'] = _time_in_zones(pw_arr, pw_bounds, pw_znames)
                 run_entry['rpz'] = _time_in_zones(pw_arr, race_pw_bounds, race_pw_names)
@@ -1235,9 +1255,9 @@ def _generate_zone_html(zone_data):
     pw_z23 = round(rf_thr * 155)
     pw_z34 = round(rf_thr * 169)
     pw_5k = round(PEAK_CP_WATTS_DASH * zone_data['current_rfl'] * 1.05)  # 5K power
-    hr_ranges =   ['<140',      '140–155',      '155–169',      '169–178',      '178–185',    '≥185']
-    pw_strs =     [f'<{pw_z12}', f'{pw_z12}–{pw_z23}', f'{pw_z23}–{pw_z34}', f'{pw_z34}–{cp}', f'{cp}–{pw_5k}', f'≥{pw_5k}']
-    pct_strs =    [f'<{round(pw_z12/cp*100)}', f'{round(pw_z12/cp*100)}–{round(pw_z23/cp*100)}', f'{round(pw_z23/cp*100)}–{round(pw_z34/cp*100)}', f'{round(pw_z34/cp*100)}–100', '100–105', '≥105']
+    hr_ranges =   ['<140',      '140–155',      '155–169',      '169–178',      '178–185',    '>185']
+    pw_strs =     [f'<{pw_z12}', f'{pw_z12}–{pw_z23}', f'{pw_z23}–{pw_z34}', f'{pw_z34}–{cp}', f'{cp}–{pw_5k}', f'>{pw_5k}']
+    pct_strs =    [f'<{round(pw_z12/cp*100)}', f'{round(pw_z12/cp*100)}–{round(pw_z23/cp*100)}', f'{round(pw_z23/cp*100)}–{round(pw_z34/cp*100)}', f'{round(pw_z34/cp*100)}–100', '100–105', '>105']
     effort_hints = ['', 'easy–Mara', 'Mara–HM', 'HM–10K', '10K–5K', '>5K']
     combined_rows = ''
     for i in range(6):
