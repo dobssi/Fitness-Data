@@ -687,7 +687,7 @@ def get_recent_runs(df, n=10):
             name_val = row.get('activity_name', row.get('Activity_Name', ''))
             
             runs.append({
-                'date': row['date'].strftime('%d %b'),
+                'date': row['date'].strftime('%d %b %y'),
                 'name': str(name_val) if name_val else '',
                 'dist': round(dist_km, 1) if dist_km > 0 else None,
                 'pace': pace_str,
@@ -866,6 +866,9 @@ def get_top_races(df, n=10):
         # Age grade percentage
         ag_val = round(row['age_grade_pct'], 1) if pd.notna(row.get('age_grade_pct')) else None
         
+        # RFL percentage
+        rfl_val = round(row['RFL'] * 100, 1) if pd.notna(row.get('RFL')) else None
+        
         return {
             'date': row['date'].strftime('%d %b %y'),
             'name': str(name_val) if name_val else '',
@@ -873,6 +876,7 @@ def get_top_races(df, n=10):
             'time': time_str,
             'ps': ps_val,
             'ag': ag_val,
+            'rfl': rfl_val,
         }
     
     result = {}
@@ -1107,14 +1111,19 @@ def get_zone_data(df):
     else:
         re_p90 = 0.92
     
-    # Zone boundaries
+    # Zone boundaries — 5-zone model anchored to Lactate Threshold
+    # LT power derived from CP via Riegel: LT = CP × (40/60)^(1/1.06 - 1) ≈ 0.956 × CP
+    LT_POWER = round(current_cp * 0.956)
     RF_THR = current_cp / LTHR_DASH
-    # HR zones (6): boundaries ascending
-    hr_bounds = [0, 140, 155, 169, 178, 185, 9999]
-    hr_znames = ['Z1', 'Z2', 'Z3', 'Z4', 'Z5', 'Z6']
-    # Power zones (6): RF-derived
-    pw_bounds = [0, round(RF_THR*140), round(RF_THR*155), round(RF_THR*169), current_cp, round(current_cp*1.05), 9999]
-    pw_znames = ['Z1', 'Z2', 'Z3', 'Z4', 'Z5', 'Z6']
+    # HR zones (5): Z1 Easy, Z2 Aerobic, Z3 Tempo (up to LT), Z4 Threshold, Z5 Max
+    hr_bounds = [0, 140, 157, 178, 184, 9999]
+    hr_znames = ['Z1', 'Z2', 'Z3', 'Z4', 'Z5']
+    # Power zones (5): LT-anchored
+    pw_z12 = round(LT_POWER * 0.75)  # ~240W
+    pw_z23 = round(LT_POWER * 0.88)  # ~282W
+    pw_z45 = round(current_cp * 1.07)  # ~358W — above 5K effort
+    pw_bounds = [0, pw_z12, pw_z23, LT_POWER, pw_z45, 9999]
+    pw_znames = ['Z1', 'Z2', 'Z3', 'Z4', 'Z5']
     # Race power zones: contiguous midpoint bands
     m_pw = current_cp * 0.90
     h_pw = current_cp * 0.95
@@ -1246,21 +1255,20 @@ def _generate_zone_html(zone_data):
     
     # Combined zone table rows (single table, 5 columns)
     combined_rows = ''
-    zone_names = ['Z1', 'Z2', 'Z3', 'Z4', 'Z5', 'Z6']
-    zone_labels = ['Recovery', 'Endurance', 'Tempo', 'Threshold', 'VO2max', 'Anaerobic']
-    zone_colors = ['#3b82f6', '#22c55e', '#eab308', '#f97316', '#ef4444', '#d946ef']
-    # Power zones: RF-derived for Z1-Z4, race-factor for Z5-Z6
-    rf_thr = cp / LTHR_DASH
-    pw_z12 = round(rf_thr * 140)
-    pw_z23 = round(rf_thr * 155)
-    pw_z34 = round(rf_thr * 169)
-    pw_5k = round(PEAK_CP_WATTS_DASH * zone_data['current_rfl'] * 1.05)  # 5K power
-    hr_ranges =   ['<140',      '140–155',      '155–169',      '169–178',      '178–185',    '>185']
-    pw_strs =     [f'<{pw_z12}', f'{pw_z12}–{pw_z23}', f'{pw_z23}–{pw_z34}', f'{pw_z34}–{cp}', f'{cp}–{pw_5k}', f'>{pw_5k}']
-    pct_strs =    [f'<{round(pw_z12/cp*100)}', f'{round(pw_z12/cp*100)}–{round(pw_z23/cp*100)}', f'{round(pw_z23/cp*100)}–{round(pw_z34/cp*100)}', f'{round(pw_z34/cp*100)}–100', '100–105', '>105']
-    effort_hints = ['', 'easy–Mara', 'Mara–HM', 'HM–10K', '10K–5K', '>5K']
+    zone_names = ['Z1', 'Z2', 'Z3', 'Z4', 'Z5']
+    zone_labels = ['Easy', 'Aerobic', 'Tempo', 'Threshold', 'Max']
+    zone_colors = ['#3b82f6', '#22c55e', '#eab308', '#f97316', '#ef4444']
+    # Power zones: LT-anchored
+    lt_pw = round(cp * 0.956)
+    pw_z12 = round(lt_pw * 0.75)
+    pw_z23 = round(lt_pw * 0.88)
+    pw_z45 = round(cp * 1.07)
+    hr_ranges =   ['<140',      '140–157',      '157–178',      '178–184',      '>184']
+    pw_strs =     [f'<{pw_z12}', f'{pw_z12}–{pw_z23}', f'{pw_z23}–{lt_pw}', f'{lt_pw}–{pw_z45}', f'>{pw_z45}']
+    pct_strs =    [f'<{round(pw_z12/cp*100)}', f'{round(pw_z12/cp*100)}–{round(pw_z23/cp*100)}', f'{round(pw_z23/cp*100)}–{round(lt_pw/cp*100)}', f'{round(lt_pw/cp*100)}–{round(pw_z45/cp*100)}', f'>{round(pw_z45/cp*100)}']
+    effort_hints = ['', 'easy–Mara', 'Mara–10K', '10K–5K', '>5K']
     combined_rows = ''
-    for i in range(6):
+    for i in range(5):
         combined_rows += f'<tr><td><span class="zd" style="background:{zone_colors[i]}"></span><strong>{zone_names[i]}</strong></td><td style="color:var(--text-dim);font-family:DM Sans">{zone_labels[i]}</td><td>{hr_ranges[i]}</td><td>{pw_strs[i]}W</td><td class="pct-col" style="color:var(--text-dim)">{pct_strs[i]}%</td></tr>'
     
     # Race readiness cards
@@ -1303,7 +1311,7 @@ def _generate_zone_html(zone_data):
     
     return f'''
     <div class="card">
-        <h2>Training Zones <span class="badge">CP {cp}W · LTHR {LTHR_DASH} · Max ~{MAX_HR_DASH}</span></h2>
+        <h2>Training Zones <span class="badge">LT {lt_pw}W · CP {cp}W · LTHR {LTHR_DASH} · Max ~{MAX_HR_DASH}</span></h2>
         <table class="zt"><thead><tr><th>Zone</th><th></th><th>HR</th><th>Power</th><th class="pct-col">%CP</th></tr></thead><tbody>{combined_rows}</tbody></table>
     </div>
 
@@ -1350,22 +1358,22 @@ def _generate_zone_html(zone_data):
     const ZONE_RUNS=''' + zone_runs_json + f''';
     const ZONE_CP={cp};const ZONE_PEAK_CP={PEAK_CP_WATTS_DASH};const ZONE_MASS={ATHLETE_MASS_KG_DASH};const ZONE_RE={re_p90};
     const HR_Z=[
-      {{id:'Z1',name:'Recovery',lo:0,hi:140,c:'#3b82f6'}},
-      {{id:'Z2',name:'Endurance',lo:140,hi:155,c:'#22c55e'}},
-      {{id:'Z3',name:'Tempo',lo:155,hi:169,c:'#eab308'}},
-      {{id:'Z4',name:'Threshold',lo:169,hi:178,c:'#f97316'}},
-      {{id:'Z5',name:'VO2max',lo:178,hi:185,c:'#ef4444'}},
-      {{id:'Z6',name:'Anaerobic',lo:185,hi:9999,c:'#d946ef'}}
+      {{id:'Z1',name:'Easy',lo:0,hi:140,c:'#3b82f6'}},
+      {{id:'Z2',name:'Aerobic',lo:140,hi:157,c:'#22c55e'}},
+      {{id:'Z3',name:'Tempo',lo:157,hi:178,c:'#eab308'}},
+      {{id:'Z4',name:'Threshold',lo:178,hi:184,c:'#f97316'}},
+      {{id:'Z5',name:'Max',lo:184,hi:9999,c:'#ef4444'}}
     ];
-    const RF_THR=ZONE_CP/178;
-    const PW_5K=Math.round(ZONE_CP*1.05);
+    const LT_PW=Math.round(ZONE_CP*0.956);
+    const PW_Z12=Math.round(LT_PW*0.75);
+    const PW_Z23=Math.round(LT_PW*0.88);
+    const PW_Z45=Math.round(ZONE_CP*1.07);
     const PW_Z=[
-      {{id:'Z1',name:'Recovery',lo:0,hi:Math.round(RF_THR*140),c:'#3b82f6'}},
-      {{id:'Z2',name:'Endurance',lo:Math.round(RF_THR*140),hi:Math.round(RF_THR*155),c:'#22c55e'}},
-      {{id:'Z3',name:'Tempo',lo:Math.round(RF_THR*155),hi:Math.round(RF_THR*169),c:'#eab308'}},
-      {{id:'Z4',name:'Threshold',lo:Math.round(RF_THR*169),hi:ZONE_CP,c:'#f97316'}},
-      {{id:'Z5',name:'VO2max',lo:ZONE_CP,hi:PW_5K,c:'#ef4444'}},
-      {{id:'Z6',name:'Anaerobic',lo:PW_5K,hi:9999,c:'#d946ef'}}
+      {{id:'Z1',name:'Easy',lo:0,hi:PW_Z12,c:'#3b82f6'}},
+      {{id:'Z2',name:'Aerobic',lo:PW_Z12,hi:PW_Z23,c:'#22c55e'}},
+      {{id:'Z3',name:'Tempo',lo:PW_Z23,hi:LT_PW,c:'#eab308'}},
+      {{id:'Z4',name:'Threshold',lo:LT_PW,hi:PW_Z45,c:'#f97316'}},
+      {{id:'Z5',name:'Max',lo:PW_Z45,hi:9999,c:'#ef4444'}}
     ];
     const RACE_CFG={{}};
     ['Sub-5K','5K','10K','HM','Mara'].forEach(k=>{{
@@ -1441,6 +1449,7 @@ def generate_html(stats, rf_data, volume_data, ctl_atl_data, ctl_atl_lookup, rfl
     rf_dates_730, rf_values_730, rf_trend_730, rf_easy_730, rf_races_730 = rf_data['730']
     rf_dates_1095, rf_values_1095, rf_trend_1095, rf_easy_1095, rf_races_1095 = rf_data['1095']
     rf_dates_1825, rf_values_1825, rf_trend_1825, rf_easy_1825, rf_races_1825 = rf_data['1825']
+    rf_dates_all, rf_values_all, rf_trend_all, rf_easy_all, rf_races_all = rf_data['all']
     
     # Volume data - weeks
     week_labels_12, week_distances_12, week_runs_12 = volume_data['W']['12']
@@ -1958,12 +1967,13 @@ def generate_html(stats, rf_data, volume_data, ctl_atl_data, ctl_atl_lookup, rfl
         <div class="chart-header">
             <div class="chart-title">📈 Relative Fitness Level</div>
             <div class="chart-toggle" id="rfToggle">
-                <button class="active" data-range="90">90d</button>
+                <button data-range="90">90d</button>
                 <button data-range="180">6m</button>
                 <button data-range="365">1yr</button>
                 <button data-range="730">2yr</button>
                 <button data-range="1095">3yr</button>
                 <button data-range="1825">5yr</button>
+                <button class="active" data-range="all">All</button>
             </div>
         </div>
         <div class="chart-desc">Blue dots = training, red dots = races, green dashed = easy-run signal.</div>
@@ -1978,15 +1988,6 @@ def generate_html(stats, rf_data, volume_data, ctl_atl_data, ctl_atl_lookup, rfl
         <div class="chart-desc">Current fitness as % of personal best. Trendline projects 7 days ahead with 95% confidence interval.</div>
         <div class="chart-wrapper" style="height: 180px;">
             <canvas id="rflTrendChart"></canvas>
-        </div>
-    </div>
-    
-    <!-- All-time Weekly RFL Chart -->
-    <div class="chart-container">
-        <div class="chart-title">📊 Relative Fitness Level (all time)</div>
-        <div class="chart-desc">Weekly peak RFL since 2013. Shows long-term fitness progression and seasonal patterns.</div>
-        <div class="chart-wrapper">
-            <canvas id="alltimeRflChart"></canvas>
         </div>
     </div>
     
@@ -2063,7 +2064,7 @@ def generate_html(stats, rf_data, volume_data, ctl_atl_data, ctl_atl_lookup, rfl
         <div style="display: flex; justify-content: space-between; align-items: center;">
             <div class="chart-desc">Blue = predicted. <span style="color:#ef4444">●</span> race <span style="color:#fca5a5">●</span> parkrun.</div>
             <label style="font-size: 0.75em; color: var(--text-dim); white-space: nowrap; cursor: pointer;">
-                <input type="checkbox" id="predParkrunToggle" checked style="margin-right: 3px;">parkruns
+                <input type="checkbox" id="predParkrunToggle" style="margin-right: 3px;">parkruns
             </label>
         </div>
         <div class="chart-wrapper" style="height: 220px;">
@@ -2143,23 +2144,23 @@ def generate_html(stats, rf_data, volume_data, ctl_atl_data, ctl_atl_lookup, rfl
         <div class="table-wrapper">
         <table id="topRacesTable">
             <colgroup>
-                <col style="width: 5%;">
-                <col style="width: 15%;">
-                <col style="width: 32%;">
-                <col style="width: 12%;">
+                <col style="width: 13%;">
+                <col style="width: 30%;">
+                <col style="width: 11%;">
                 <col style="width: 14%;">
                 <col style="width: 11%;">
                 <col style="width: 11%;">
+                <col style="width: 10%;">
             </colgroup>
             <thead>
                 <tr>
-                    <th>#</th>
                     <th>Date</th>
                     <th>Race</th>
                     <th>Dist</th>
                     <th>Time</th>
                     <th>PS</th>
                     <th>AG%</th>
+                    <th>RFL%</th>
                 </tr>
             </thead>
             <tbody id="topRacesBody">
@@ -2282,7 +2283,8 @@ def generate_html(stats, rf_data, volume_data, ctl_atl_data, ctl_atl_lookup, rfl
             '365': {{ dates: {json.dumps(rf_dates_365)}, values: {json.dumps(rf_values_365)}, trend: {json.dumps(rf_trend_365)}, easy: {json.dumps(rf_easy_365)}, races: {json.dumps(rf_races_365)} }},
             '730': {{ dates: {json.dumps(rf_dates_730)}, values: {json.dumps(rf_values_730)}, trend: {json.dumps(rf_trend_730)}, easy: {json.dumps(rf_easy_730)}, races: {json.dumps(rf_races_730)} }},
             '1095': {{ dates: {json.dumps(rf_dates_1095)}, values: {json.dumps(rf_values_1095)}, trend: {json.dumps(rf_trend_1095)}, easy: {json.dumps(rf_easy_1095)}, races: {json.dumps(rf_races_1095)} }},
-            '1825': {{ dates: {json.dumps(rf_dates_1825)}, values: {json.dumps(rf_values_1825)}, trend: {json.dumps(rf_trend_1825)}, easy: {json.dumps(rf_easy_1825)}, races: {json.dumps(rf_races_1825)} }}
+            '1825': {{ dates: {json.dumps(rf_dates_1825)}, values: {json.dumps(rf_values_1825)}, trend: {json.dumps(rf_trend_1825)}, easy: {json.dumps(rf_easy_1825)}, races: {json.dumps(rf_races_1825)} }},
+            'all': {{ dates: {json.dumps(rf_dates_all)}, values: {json.dumps(rf_values_all)}, trend: {json.dumps(rf_trend_all)}, easy: {json.dumps(rf_easy_all)}, races: {json.dumps(rf_races_all)} }}
         }};
         
         // v51: Generate per-point colours (red for races, blue for training)
@@ -2294,22 +2296,22 @@ def generate_html(stats, rf_data, volume_data, ctl_atl_data, ctl_atl_lookup, rfl
         let rfChart = new Chart(rfCtx, {{
             type: 'line',
             data: {{
-                labels: rfData['90'].dates,
+                labels: rfData['all'].dates,
                 datasets: [{{
                     label: 'RFL',
-                    data: rfData['90'].values,
-                    borderColor: 'rgba(129, 140, 248, 0.3)',
+                    data: rfData['all'].values,
+                    borderColor: 'rgba(129, 140, 248, 0.1)',
                     backgroundColor: 'rgba(129, 140, 248, 0.1)',
                     borderWidth: 1,
-                    pointRadius: 3,
-                    pointBackgroundColor: racePointColors(rfData['90'].races, 'rgba(129, 140, 248, 0.5)', 'rgba(239, 68, 68, 0.9)'),
-                    pointBorderColor: racePointColors(rfData['90'].races, 'rgba(129, 140, 248, 0.3)', 'rgba(239, 68, 68, 0.7)'),
+                    pointRadius: 0,
+                    pointBackgroundColor: 'rgba(129, 140, 248, 0.15)',
+                    pointBorderColor: 'rgba(129, 140, 248, 0.1)',
                     pointBorderWidth: 1,
                     fill: false,
-                    tension: 0,
+                    tension: 0.2,
                 }}, {{
                     label: 'RFL Trend',
-                    data: rfData['90'].trend,
+                    data: rfData['all'].trend,
                     borderColor: 'rgba(129, 140, 248, 1)',
                     borderWidth: 2,
                     pointRadius: 0,
@@ -2317,7 +2319,7 @@ def generate_html(stats, rf_data, volume_data, ctl_atl_data, ctl_atl_lookup, rfl
                     tension: 0.3,
                 }}, {{
                     label: 'Easy RF',
-                    data: rfData['90'].easy,
+                    data: rfData['all'].easy,
                     borderColor: 'rgba(34, 197, 94, 0.8)',
                     borderWidth: 1.5,
                     borderDash: [4, 3],
@@ -2338,14 +2340,14 @@ def generate_html(stats, rf_data, volume_data, ctl_atl_data, ctl_atl_lookup, rfl
                     }}
                 }},
                 scales: {{
-                    x: {{ display: true, ticks: {{ maxTicksLimit: 5, maxRotation: 0, font: {{ size: 10 }} }} }},
+                    x: {{ display: true, ticks: {{ maxTicksLimit: 12, maxRotation: 0, font: {{ size: 10 }} }} }},
                     y: {{ 
                         display: true, 
                         ticks: {{ 
                             font: {{ size: 10 }},
                             callback: function(value) {{ return value + '%'; }}
                         }},
-                        suggestedMin: 70,
+                        min: 50,
                         suggestedMax: 100
                     }}
                 }}
@@ -2362,21 +2364,27 @@ def generate_html(stats, rf_data, volume_data, ctl_atl_data, ctl_atl_lookup, rfl
                 rfChart.data.datasets[1].data = rfData[range].trend;
                 rfChart.data.datasets[2].data = rfData[range].easy;
                 
-                // Adjust point size and opacity based on data density
+                // Adjust display based on range
                 const pointSettings = {{
-                    '90': {{ radius: 3, borderColor: 'rgba(129, 140, 248, 0.3)', pointColor: 'rgba(129, 140, 248, 0.5)' }},
-                    '180': {{ radius: 2, borderColor: 'rgba(129, 140, 248, 0.25)', pointColor: 'rgba(129, 140, 248, 0.4)' }},
-                    '365': {{ radius: 1.5, borderColor: 'rgba(129, 140, 248, 0.2)', pointColor: 'rgba(129, 140, 248, 0.3)' }},
-                    '730': {{ radius: 1, borderColor: 'rgba(129, 140, 248, 0.15)', pointColor: 'rgba(129, 140, 248, 0.25)' }},
-                    '1095': {{ radius: 0.5, borderColor: 'rgba(129, 140, 248, 0.1)', pointColor: 'rgba(129, 140, 248, 0.2)' }},
-                    '1825': {{ radius: 0, borderColor: 'rgba(129, 140, 248, 0.1)', pointColor: 'rgba(129, 140, 248, 0.15)' }}
+                    '90': {{ radius: 3, borderColor: 'rgba(129, 140, 248, 0.3)', pointColor: 'rgba(129, 140, 248, 0.5)', fill: false, tension: 0, lineWidth: 1, yMin: 70, ticks: 5 }},
+                    '180': {{ radius: 2, borderColor: 'rgba(129, 140, 248, 0.25)', pointColor: 'rgba(129, 140, 248, 0.4)', fill: false, tension: 0, lineWidth: 1, yMin: 70, ticks: 5 }},
+                    '365': {{ radius: 1.5, borderColor: 'rgba(129, 140, 248, 0.2)', pointColor: 'rgba(129, 140, 248, 0.3)', fill: false, tension: 0, lineWidth: 1, yMin: 70, ticks: 8 }},
+                    '730': {{ radius: 1, borderColor: 'rgba(129, 140, 248, 0.15)', pointColor: 'rgba(129, 140, 248, 0.25)', fill: false, tension: 0.1, lineWidth: 1, yMin: 60, ticks: 10 }},
+                    '1095': {{ radius: 0.5, borderColor: 'rgba(129, 140, 248, 0.1)', pointColor: 'rgba(129, 140, 248, 0.2)', fill: false, tension: 0.1, lineWidth: 1, yMin: 50, ticks: 10 }},
+                    '1825': {{ radius: 0, borderColor: 'rgba(129, 140, 248, 0.1)', pointColor: 'rgba(129, 140, 248, 0.15)', fill: false, tension: 0.2, lineWidth: 1, yMin: 50, ticks: 10 }},
+                    'all': {{ radius: 0, borderColor: 'rgba(129, 140, 248, 0.1)', pointColor: 'rgba(129, 140, 248, 0.15)', fill: false, tension: 0.2, lineWidth: 1, yMin: 50, ticks: 12 }}
                 }};
                 const settings = pointSettings[range];
                 const races = rfData[range].races;
                 rfChart.data.datasets[0].pointRadius = settings.radius;
-                rfChart.data.datasets[0].pointBackgroundColor = racePointColors(races, settings.pointColor, 'rgba(239, 68, 68, 0.9)');
-                rfChart.data.datasets[0].pointBorderColor = racePointColors(races, settings.borderColor, 'rgba(239, 68, 68, 0.7)');
+                rfChart.data.datasets[0].pointBackgroundColor = races.length ? racePointColors(races, settings.pointColor, 'rgba(239, 68, 68, 0.9)') : settings.pointColor;
+                rfChart.data.datasets[0].pointBorderColor = races.length ? racePointColors(races, settings.borderColor, 'rgba(239, 68, 68, 0.7)') : settings.borderColor;
                 rfChart.data.datasets[0].borderColor = settings.borderColor;
+                rfChart.data.datasets[0].borderWidth = settings.lineWidth;
+                rfChart.data.datasets[0].fill = settings.fill;
+                rfChart.data.datasets[0].tension = settings.tension;
+                rfChart.options.scales.y.min = settings.yMin;
+                rfChart.options.scales.x.ticks.maxTicksLimit = settings.ticks;
                 
                 rfChart.update();
             }}
@@ -2588,58 +2596,6 @@ def generate_html(stats, rf_data, volume_data, ctl_atl_data, ctl_atl_lookup, rfl
         }});
         
         // All-time Weekly RFL Chart
-        const alltimeRflCtx = document.getElementById('alltimeRflChart').getContext('2d');
-        new Chart(alltimeRflCtx, {{
-            type: 'line',
-            data: {{
-                labels: {json.dumps(alltime_rfl_dates)},
-                datasets: [{{
-                    label: 'RFL vs peak',
-                    data: {json.dumps(alltime_rfl_values)},
-                    borderColor: 'rgba(129, 140, 248, 1)',
-                    backgroundColor: 'rgba(129, 140, 248, 0.1)',
-                    borderWidth: 1.5,
-                    pointRadius: 0,
-                    fill: true,
-                    tension: 0.3,
-                }}]
-            }},
-            options: {{
-                responsive: true,
-                maintainAspectRatio: false,
-                plugins: {{
-                    legend: {{
-                        display: true,
-                        position: 'bottom',
-                        labels: {{
-                            boxWidth: 10,
-                            padding: 4,
-                            font: {{ size: 10 }},
-                            usePointStyle: true
-                        }}
-                    }}
-                }},
-                scales: {{
-                    x: {{
-                        display: true,
-                        ticks: {{
-                            maxTicksLimit: 12,
-                            font: {{ size: 10 }}
-                        }}
-                    }},
-                    y: {{
-                        display: true,
-                        min: 50,
-                        max: 100,
-                        ticks: {{
-                            font: {{ size: 10 }},
-                            callback: function(value) {{ return value + '%'; }}
-                        }}
-                    }}
-                }}
-            }}
-        }});
-        
         // CTL/ATL/TSB live update based on current date
         const ctlAtlLookup = {json.dumps(ctl_atl_lookup)};
         
@@ -2672,13 +2628,13 @@ def generate_html(stats, rf_data, volume_data, ctl_atl_data, ctl_atl_lookup, rfl
             
             tbody.innerHTML = races.map((race, idx) => `
                 <tr>
-                    <td>${{idx + 1}}</td>
                     <td>${{race.date}}</td>
                     <td>${{race.name}}</td>
                     <td>${{race.dist ? race.dist + ' km' : '-'}}</td>
                     <td>${{race.time}}</td>
                     <td>${{race.ps || '-'}}</td>
                     <td>${{race.ag ? race.ag + '%' : '-'}}</td>
+                    <td>${{race.rfl ? race.rfl : '-'}}</td>
                 </tr>
             `).join('');
         }}
@@ -2758,7 +2714,7 @@ def generate_html(stats, rf_data, volume_data, ctl_atl_data, ctl_atl_lookup, rfl
         // --- v51: Race Prediction Trend Chart ---
         const predData = {json.dumps(prediction_data if prediction_data else {})};
         let currentPredDist = '5k';
-        let showParkruns = true;
+        let showParkruns = false;
         
         function formatPredTime(seconds) {{
             if (!seconds) return '-';
@@ -2894,7 +2850,7 @@ def generate_html(stats, rf_data, volume_data, ctl_atl_data, ctl_atl_lookup, rfl
         }}
         
         if (predCtx && predData && predData['5k'] && predData['5k'].dates.length > 0) {{
-            renderPredChart('5k', true);
+            renderPredChart('5k', showParkruns);
             
             document.getElementById('predToggle').addEventListener('click', function(e) {{
                 if (e.target.tagName === 'BUTTON') {{
@@ -3117,6 +3073,7 @@ def main():
         '730': get_rfl_trend_data(df, days=730),
         '1095': get_rfl_trend_data(df, days=1095),
         '1825': get_rfl_trend_data(df, days=1825),
+        'all': get_rfl_trend_data(df, days=99999),
     }
     
     print("Processing volume data (weeks/months/years)...")
