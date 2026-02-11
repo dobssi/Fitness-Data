@@ -913,7 +913,7 @@ def get_prediction_trend_data(df):
         pred_col = info['pred_col']
         dist_km = info['official_km']
         tolerance = dist_km * 0.05
-        empty = {'dates': [], 'dates_iso': [], 'predicted': [], 'actual': [], 'is_parkrun': [], 'names': [], 'temps': [], 'surfaces': []}
+        empty = {'dates': [], 'dates_iso': [], 'predicted': [], 'actual': [], 'is_parkrun': [], 'names': [], 'temps': [], 'surfaces': [], 'temp_adjs': [], 'surface_adjs': []}
         
         if pred_col not in df.columns:
             result[dist_key] = empty
@@ -969,6 +969,15 @@ def get_prediction_trend_data(df):
             surface = str(race_row.get('surface', '')).strip()
             race_surfaces.append(surface if surface and surface != 'nan' else None)
         
+        # Condition adjustment factors for "adjust for conditions" toggle
+        race_temp_adjs = []
+        race_surface_adjs = []
+        for _, race_row in dist_match.iterrows():
+            ta = race_row.get('Temp_Adj')
+            race_temp_adjs.append(round(float(ta), 4) if pd.notna(ta) else 1.0)
+            sa = race_row.get('surface_adj')
+            race_surface_adjs.append(round(float(sa), 4) if pd.notna(sa) else 1.0)
+        
         is_parkrun = []
         for _, race_row in dist_match.iterrows():
             is_pr = bool(race_row.get('parkrun', 0)) or bool(race_row.get('hf_parkrun', 0))
@@ -983,6 +992,8 @@ def get_prediction_trend_data(df):
             'names': race_names,
             'temps': race_temps,
             'surfaces': race_surfaces,
+            'temp_adjs': race_temp_adjs,
+            'surface_adjs': race_surface_adjs,
         }
     
     return result
@@ -2062,10 +2073,15 @@ def generate_html(stats, rf_data, volume_data, ctl_atl_data, ctl_atl_lookup, rfl
             </div>
         </div>
         <div style="display: flex; justify-content: space-between; align-items: center;">
-            <div class="chart-desc">Blue = predicted. <span style="color:#ef4444">●</span> race <span style="color:#fca5a5">●</span> parkrun.</div>
-            <label style="font-size: 0.75em; color: var(--text-dim); white-space: nowrap; cursor: pointer;">
-                <input type="checkbox" id="predParkrunToggle" style="margin-right: 3px;">parkruns
-            </label>
+            <div class="chart-desc">Blue = predicted. <span style="color:#4ade80">Green</span> = adjusted for temp &amp; surface. <span style="color:#ef4444">●</span> race <span style="color:#fca5a5">●</span> parkrun.</div>
+            <div style="display: flex; gap: 10px; align-items: center;">
+                <label style="font-size: 0.75em; color: var(--text-dim); white-space: nowrap; cursor: pointer;">
+                    <input type="checkbox" id="predConditionsToggle" style="margin-right: 3px;">adjust for conditions
+                </label>
+                <label style="font-size: 0.75em; color: var(--text-dim); white-space: nowrap; cursor: pointer;">
+                    <input type="checkbox" id="predParkrunToggle" style="margin-right: 3px;">parkruns
+                </label>
+            </div>
         </div>
         <div class="chart-wrapper" style="height: 220px;">
             <canvas id="predChart"></canvas>
@@ -2336,7 +2352,17 @@ def generate_html(stats, rf_data, volume_data, ctl_atl_data, ctl_atl_lookup, rfl
                     legend: {{
                         display: true,
                         position: 'bottom',
-                        labels: {{ boxWidth: 12, padding: 8, font: {{ size: 10 }}, usePointStyle: true }}
+                        labels: {{ 
+                            boxWidth: 12, padding: 8, font: {{ size: 10 }}, usePointStyle: true,
+                            generateLabels: function(chart) {{
+                                const ds = chart.data.datasets;
+                                return [
+                                    {{ text: 'RFL', fillStyle: 'rgba(129, 140, 248, 0.4)', strokeStyle: 'rgba(129, 140, 248, 0.3)', pointStyle: 'circle', hidden: !chart.isDatasetVisible(0), datasetIndex: 0, fontColor: '#8b90a0' }},
+                                    {{ text: 'RFL Trend', fillStyle: 'rgba(129, 140, 248, 1)', strokeStyle: 'rgba(129, 140, 248, 1)', pointStyle: 'circle', hidden: !chart.isDatasetVisible(1), datasetIndex: 1, fontColor: '#8b90a0' }},
+                                    {{ text: 'Easy RF', fillStyle: 'rgba(34, 197, 94, 0.8)', strokeStyle: 'rgba(34, 197, 94, 0.8)', pointStyle: 'circle', hidden: !chart.isDatasetVisible(2), datasetIndex: 2, fontColor: '#8b90a0' }}
+                                ];
+                            }}
+                        }}
                     }}
                 }},
                 scales: {{
@@ -2715,6 +2741,11 @@ def generate_html(stats, rf_data, volume_data, ctl_atl_data, ctl_atl_lookup, rfl
         const predData = {json.dumps(prediction_data if prediction_data else {})};
         let currentPredDist = '5k';
         let showParkruns = false;
+        let adjustConditions = false;
+        
+        // Heat scaling constants (match StepB)
+        const HEAT_REF_MINS = 90.0;
+        const HEAT_MAX_MULT = 1.5;
         
         function formatPredTime(seconds) {{
             if (!seconds) return '-';
@@ -2747,13 +2778,55 @@ def generate_html(stats, rf_data, volume_data, ctl_atl_data, ctl_atl_lookup, rfl
             const temps = indices.map(i => d.temps[i]);
             const surfaces = indices.map(i => d.surfaces[i]);
             const isParkrun = indices.map(i => d.is_parkrun[i]);
+            const tempAdjs = indices.map(i => (d.temp_adjs || [])[i] || 1.0);
+            const surfaceAdjs = indices.map(i => (d.surface_adjs || [])[i] || 1.0);
+            
+            // Apply conditions adjustment to predictions if toggled
+            let displayPredicted = predicted;
+            if (adjustConditions) {{
+                displayPredicted = predicted.map((p, i) => {{
+                    if (p === null) return null;
+                    // Duration-scaled heat: use predicted time as duration estimate
+                    const estMins = p / 60.0;
+                    const heatMult = Math.min(HEAT_MAX_MULT, estMins / HEAT_REF_MINS);
+                    const tempFactor = 1.0 + (tempAdjs[i] - 1.0) * heatMult;
+                    const surfFactor = surfaceAdjs[i];
+                    return Math.round(p * tempFactor * surfFactor);
+                }});
+            }}
             
             // Colour actual dots: parkruns lighter, non-parkrun races darker
             const dotColors = isParkrun.map(p => p === 1 ? 'rgba(252, 165, 165, 0.8)' : 'rgba(239, 68, 68, 0.9)');
             
             // Build data points for time axis
-            const predPoints = datesISO.map((dt, i) => predicted[i] !== null ? ({{ x: dt, y: predicted[i] }}) : null).filter(p => p !== null);
+            const predPoints = datesISO.map((dt, i) => displayPredicted[i] !== null ? ({{ x: dt, y: displayPredicted[i] }}) : null).filter(p => p !== null);
             const actualPoints = datesISO.map((dt, i) => ({{ x: dt, y: actual[i] }}));
+            
+            // Compute stable y-axis range covering both adjusted and unadjusted data
+            const allYVals = [];
+            for (let i = 0; i < actual.length; i++) {{ if (actual[i]) allYVals.push(actual[i]); }}
+            for (let i = 0; i < predicted.length; i++) {{ if (predicted[i]) allYVals.push(predicted[i]); }}
+            // Also include worst-case adjusted predictions
+            for (let i = 0; i < predicted.length; i++) {{
+                if (predicted[i] === null) continue;
+                const estMins = predicted[i] / 60.0;
+                const hm = Math.min(HEAT_MAX_MULT, estMins / HEAT_REF_MINS);
+                const tf = 1.0 + (tempAdjs[i] - 1.0) * hm;
+                const sf = surfaceAdjs[i];
+                allYVals.push(Math.round(predicted[i] * tf * sf));
+            }}
+            const yDataMin = Math.min(...allYVals);
+            const yDataMax = Math.max(...allYVals);
+            // Pick a nice round tick interval in seconds
+            const ySpan = yDataMax - yDataMin;
+            const niceSteps = [15, 30, 60, 120, 300, 600, 900, 1800, 3600];  // 15s to 1h
+            let tickStep = 60;
+            for (const s of niceSteps) {{
+                if (ySpan / s >= 3 && ySpan / s <= 8) {{ tickStep = s; break; }}
+            }}
+            // Round min down and max up to tick boundaries, then pad one tick
+            const yMin = Math.floor(yDataMin / tickStep) * tickStep - tickStep;
+            const yMax = Math.ceil(yDataMax / tickStep) * tickStep + tickStep;
             
             if (predChart) predChart.destroy();
             
@@ -2761,10 +2834,10 @@ def generate_html(stats, rf_data, volume_data, ctl_atl_data, ctl_atl_lookup, rfl
                 type: 'line',
                 data: {{
                     datasets: [{{
-                        label: 'Predicted',
+                        label: adjustConditions ? 'Predicted (adj)' : 'Predicted',
                         data: predPoints,
-                        borderColor: 'rgba(129, 140, 248, 0.7)',
-                        backgroundColor: 'rgba(129, 140, 248, 0.05)',
+                        borderColor: adjustConditions ? 'rgba(74, 222, 128, 0.7)' : 'rgba(129, 140, 248, 0.7)',
+                        backgroundColor: adjustConditions ? 'rgba(74, 222, 128, 0.05)' : 'rgba(129, 140, 248, 0.05)',
                         borderWidth: 2,
                         pointRadius: 0,
                         fill: true,
@@ -2803,11 +2876,29 @@ def generate_html(stats, rf_data, volume_data, ctl_atl_data, ctl_atl_lookup, rfl
                                     const i = datesISO.indexOf(isoDate);
                                     if (i < 0) return [];
                                     const lines = [];
-                                    // Gap
-                                    if (predicted[i] && actual[i]) {{
-                                        const gap = actual[i] - predicted[i];
-                                        const sign = gap > 0 ? '+' : '';
-                                        lines.push('Gap: ' + sign + formatPredTime(Math.abs(gap)) + (gap > 0 ? ' slower' : ' faster'));
+                                    // Gap (use displayPredicted for adjusted comparison)
+                                    if (displayPredicted[i] && actual[i]) {{
+                                        const gap = actual[i] - displayPredicted[i];
+                                        if (Math.abs(gap) < 2) {{
+                                            lines.push('Hit prediction exactly');
+                                        }} else {{
+                                            lines.push(formatPredTime(Math.abs(gap)) + (gap > 0 ? ' slower than prediction' : ' faster than prediction'));
+                                        }}
+                                    }}
+                                    // Condition adjustments breakdown
+                                    if (adjustConditions && (tempAdjs[i] !== 1.0 || surfaceAdjs[i] !== 1.0)) {{
+                                        const parts = [];
+                                        if (tempAdjs[i] !== 1.0 && predicted[i]) {{
+                                            const estMins = predicted[i] / 60.0;
+                                            const heatMult = Math.min(HEAT_MAX_MULT, estMins / HEAT_REF_MINS);
+                                            const tempPct = ((tempAdjs[i] - 1.0) * heatMult * 100).toFixed(1);
+                                            parts.push('temp +' + tempPct + '%');
+                                        }}
+                                        if (surfaceAdjs[i] !== 1.0) {{
+                                            const surfPct = ((surfaceAdjs[i] - 1.0) * 100).toFixed(1);
+                                            parts.push('surface +' + surfPct + '%');
+                                        }}
+                                        if (parts.length > 0) lines.push('Adj: ' + parts.join(', '));
                                     }}
                                     // Temperature
                                     if (temps[i] !== null) {{
@@ -2838,10 +2929,12 @@ def generate_html(stats, rf_data, volume_data, ctl_atl_data, ctl_atl_lookup, rfl
                         y: {{
                             display: true,
                             reverse: true,
+                            min: yMin,
+                            max: yMax,
                             ticks: {{
+                                stepSize: tickStep,
                                 callback: function(v) {{ return formatPredTime(v); }},
-                                font: {{ size: 10 }},
-                                maxTicksLimit: 6
+                                font: {{ size: 10 }}
                             }}
                         }}
                     }}
@@ -2863,6 +2956,11 @@ def generate_html(stats, rf_data, volume_data, ctl_atl_data, ctl_atl_lookup, rfl
             
             document.getElementById('predParkrunToggle').addEventListener('change', function() {{
                 showParkruns = this.checked;
+                renderPredChart(currentPredDist, showParkruns);
+            }});
+            
+            document.getElementById('predConditionsToggle').addEventListener('change', function() {{
+                adjustConditions = this.checked;
                 renderPredChart(currentPredDist, showParkruns);
             }});
         }}
