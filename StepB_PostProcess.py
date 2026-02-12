@@ -258,6 +258,7 @@ import argparse
 import bisect
 import hashlib
 import os
+from collections import deque
 from pathlib import Path
 from typing import List, Tuple, Optional, Dict
 
@@ -390,6 +391,14 @@ RF_CONSTANTS = {
     'heat_reference_mins': 90.0,  # Duration at which heat has full effect
     'heat_max_multiplier': 1.5,   # Cap on heat multiplier (150% of full effect)
     
+    # Recovery jog HR-lag filter (v51: removes seconds where HR stays elevated after power drops)
+    'recovery_gate_power_frac': 0.85,     # Fraction of current CP defining hard work (bottom of Z4)
+    'recovery_gate_min_hard_s': 300,      # Min seconds above hard threshold to activate
+    'recovery_gate_min_bouts': 3,         # Min distinct hard bouts (>=30s each) to activate
+    'recovery_gate_max_dead_frac': 0.05,  # Skip if Swiss cheese already active
+    'recovery_filter_drop_ratio': 0.80,   # Power < this × rolling_max = recovery
+    'recovery_filter_window_s': 90,       # Rolling max lookback window (seconds)
+
     # RF measurement window
     'rf_window_duration_s': RF_WINDOW_DURATION_S,  # From config.py (40 mins)
     'rf_window_pause_threshold_s': 10.0,  # Gaps longer than this are pauses
@@ -1810,7 +1819,8 @@ def _calc_re_active(t: np.ndarray, v: np.ndarray, p: np.ndarray, mass_kg: float,
     return (float(re_avg), float(re_norm), float(speed_mps), float(active_time_s))
 
 
-def _rf_metrics(t: np.ndarray, v: np.ndarray, p: np.ndarray, hr: np.ndarray, mass_kg: float) -> Dict[str, float | str | bool]:
+def _rf_metrics(t: np.ndarray, v: np.ndarray, p: np.ndarray, hr: np.ndarray, mass_kg: float,
+                race_flag: bool = False, cp_watts: float = 0.0) -> Dict[str, float | str | bool]:
     out: Dict[str, float | str | bool] = {
         "RF_window_start_s": np.nan,
         "RF_window_end_s": np.nan,
@@ -1822,6 +1832,9 @@ def _rf_metrics(t: np.ndarray, v: np.ndarray, p: np.ndarray, hr: np.ndarray, mas
         "RF_drift_pct_per_min": np.nan,
         "RF_drift_r2": np.nan,
         "RF_r2": np.nan,
+        "rf_recovery_filter": False,
+        "rf_recovery_secs_removed": 0,
+        "rf_recovery_pct_removed": 0.0,
     }
 
     t = np.asarray(t, float).reshape(-1)
@@ -1941,6 +1954,79 @@ def _rf_metrics(t: np.ndarray, v: np.ndarray, p: np.ndarray, hr: np.ndarray, mas
     out["RF_window_start_s"] = float(np.min(win_times))
     out["RF_window_end_s"] = float(np.max(win_times))
     out["RF_dead_frac"] = float(np.mean(dead))
+
+    # --- Recovery jog HR-lag filter ---
+    # During interval sessions with jog recovery, HR stays elevated after power drops,
+    # creating seconds with low power but high HR that drag down mean RF.
+    # This filter detects and excludes those HR-lagged recovery seconds.
+    #
+    # Gate: only activate for structured interval sessions (not races, not already
+    # handled by Swiss cheese, enough sustained hard work in distinct bouts).
+    # Filter: exclude seconds where power dropped >20% from recent peak.
+    dead_frac_val = out["RF_dead_frac"]
+    rf_gate = RF_CONSTANTS
+    hard_threshold = rf_gate['recovery_gate_power_frac'] * cp_watts if cp_watts > 0 else 0.0
+
+    if (not race_flag
+            and cp_watts > 0
+            and np.isfinite(dead_frac_val)
+            and dead_frac_val < rf_gate['recovery_gate_max_dead_frac']
+            and hard_threshold > 0):
+
+        # Count hard seconds and bouts within the RF window
+        p_win = p[win]
+        hard_secs = int((p_win > hard_threshold).sum())
+
+        if hard_secs >= rf_gate['recovery_gate_min_hard_s']:
+            # Count distinct hard bouts (consecutive runs of >=30s above threshold)
+            in_bout = p_win > hard_threshold
+            bout_count = 0
+            bout_len = 0
+            for val in in_bout:
+                if val:
+                    bout_len += 1
+                else:
+                    if bout_len >= 30:
+                        bout_count += 1
+                    bout_len = 0
+            if bout_len >= 30:
+                bout_count += 1
+
+            if bout_count >= rf_gate['recovery_gate_min_bouts']:
+                # Gate passed — apply the recovery filter
+                # Build rolling max of power over the lookback window
+                win_s = rf_gate['recovery_filter_window_s']
+                dt_med = float(np.nanmedian(np.diff(t))) if n > 1 else 1.0
+                dt_med = max(0.5, min(dt_med, 5.0))
+                win_samples = max(1, int(round(win_s / dt_med)))
+
+                # Rolling max on full power array (efficient deque-based)
+                p_rolling_max = np.zeros(n, dtype=float)
+                dq = deque()
+                for idx in range(n):
+                    while dq and dq[0] < idx - win_samples:
+                        dq.popleft()
+                    while dq and p[dq[-1]] <= p[idx]:
+                        dq.pop()
+                    dq.append(idx)
+                    p_rolling_max[idx] = p[dq[0]]
+
+                # Mark recovery seconds: power dropped >20% from recent hard peak
+                drop_ratio = rf_gate['recovery_filter_drop_ratio']
+                pm_win = p_rolling_max[win]
+                recovery_mask = (p_win < drop_ratio * pm_win) & (pm_win > hard_threshold)
+                n_removed = int(recovery_mask.sum())
+
+                if n_removed > 0 and (win.sum() - n_removed) >= 120:
+                    # Apply: narrow the win mask to exclude recovery seconds
+                    win_indices = np.where(win)[0]
+                    for j, wi in enumerate(win_indices):
+                        if recovery_mask[j]:
+                            win[wi] = False
+
+                    out["rf_recovery_filter"] = True
+                    out["rf_recovery_secs_removed"] = n_removed
+                    out["rf_recovery_pct_removed"] = float(n_removed / (n_removed + win.sum())) * 100.0
 
     hr_win = win & np.isfinite(hr) & (hr > 30)
     if hr_win.sum() < 120:
@@ -3239,6 +3325,7 @@ def main() -> int:
         "RF_window_start_s", "RF_window_end_s",
         "RF_adjusted_mean_W_per_bpm", "RF_adjusted_median_W_per_bpm",
         "RF_dead_frac", "RF_drift_pct_per_min", "RF_drift_r2", "RF_r2",
+        "rf_recovery_secs_removed", "rf_recovery_pct_removed",
         "full_run_drift_pct_per_min", "full_run_drift_r2", "full_run_drift_duration_min",
         "official_distance_km", "surface_adj", "gps_distance_error_m",
     ]
@@ -3246,7 +3333,7 @@ def main() -> int:
         if c in dfm.columns:
             dfm[c] = pd.to_numeric(dfm[c], errors="coerce").astype("float64")
 
-    bool_cols = ["hr_corrected", "RF_window_shifted", "distance_corrected"]
+    bool_cols = ["hr_corrected", "RF_window_shifted", "distance_corrected", "rf_recovery_filter"]
     for c in bool_cols:
         if c in dfm.columns:
             dfm[c] = dfm[c].fillna(False).astype(bool)
@@ -3454,7 +3541,18 @@ def main() -> int:
                 dfm.at[i, "avg_power_w"] = float(np.nanmean(p_run))
                 dfm.at[i, "nPower_HR"] = float(npw / float(np.nanmean(hrun)))
 
-            rf = _rf_metrics(t, v, p, hr_used, mass_kg=float(args.mass_kg))
+            # Recovery filter needs era-local CP estimate from prior run
+            _rfl_t = pd.to_numeric(row.get('RFL_Trend', np.nan), errors='coerce')
+            _era_adj = pd.to_numeric(row.get('Era_Adj', 1.0), errors='coerce')
+            if not (np.isfinite(_rfl_t) and _rfl_t > 0):
+                _rfl_t = 0.85  # conservative default for early runs
+            if not (np.isfinite(_era_adj) and _era_adj > 0):
+                _era_adj = 1.0
+            _local_cp = _rfl_t * float(PEAK_CP_WATTS) / _era_adj
+
+            rf = _rf_metrics(t, v, p, hr_used, mass_kg=float(args.mass_kg),
+                             race_flag=bool(row.get('race_flag', False)),
+                             cp_watts=_local_cp)
             for k, val in rf.items():
                 if k in dfm.columns:
                     dfm.at[i, k] = val
@@ -3596,7 +3694,7 @@ def main() -> int:
     for c in ("avg_power_w", "npower_w"):
         if c in dfm.columns:
             dfm[c] = pd.to_numeric(dfm[c], errors="coerce").round(0)
-    for c in ("nPower_HR", "RE_avg", "RE_normalised", "RF_adjusted_mean_W_per_bpm", "RF_adjusted_median_W_per_bpm", "RF_dead_frac", "RF_drift_pct_per_min", "RF_drift_r2", "RF_r2", "full_run_drift_pct_per_min", "full_run_drift_r2", "full_run_drift_duration_min"):
+    for c in ("nPower_HR", "RE_avg", "RE_normalised", "RF_adjusted_mean_W_per_bpm", "RF_adjusted_median_W_per_bpm", "RF_dead_frac", "RF_drift_pct_per_min", "RF_drift_r2", "RF_r2", "rf_recovery_pct_removed", "full_run_drift_pct_per_min", "full_run_drift_r2", "full_run_drift_duration_min"):
         if c in dfm.columns:
             dfm[c] = pd.to_numeric(dfm[c], errors="coerce").round(3)
     for c in ("hr_cv_pct",):
@@ -4215,6 +4313,7 @@ def main() -> int:
         "RF_window_start_s", "RF_window_end_s", "RF_window_shifted", "RF_select_code",
         "RF_adjusted_mean_W_per_bpm", "RF_adjusted_median_W_per_bpm",
         "RF_dead_frac", "RF_drift_pct_per_min", "RF_drift_r2", "RF_r2",
+        "rf_recovery_filter", "rf_recovery_secs_removed", "rf_recovery_pct_removed",
         "full_run_drift_pct_per_min", "full_run_drift_r2", "full_run_drift_duration_min",
         # Weather
         "avg_temp_c", "avg_humidity_pct", "avg_wind_ms", "avg_wind_dir_deg",
