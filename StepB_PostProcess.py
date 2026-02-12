@@ -394,9 +394,11 @@ RF_CONSTANTS = {
     # Recovery jog HR-lag filter (v51: removes seconds where HR stays elevated after power drops)
     'recovery_gate_power_frac': 0.85,     # Fraction of current CP defining hard work (bottom of Z4)
     'recovery_gate_min_hard_s': 300,      # Min seconds above hard threshold to activate
-    'recovery_gate_min_bouts': 3,         # Min distinct hard bouts (>=30s each) to activate
+    'recovery_gate_min_bouts': 3,         # Min distinct hard bouts to activate
+    'recovery_gate_min_bout_s': 30,       # Min duration of a single hard bout (seconds)
     'recovery_gate_max_dead_frac': 0.05,  # Skip if Swiss cheese already active
     'recovery_filter_drop_ratio': 0.80,   # Power < this × rolling_max = recovery
+    'recovery_filter_speed_ratio': 0.85,  # Speed must also drop vs recent max (excludes downhills)
     'recovery_filter_window_s': 90,       # Rolling max lookback window (seconds)
 
     # RF measurement window
@@ -1978,7 +1980,8 @@ def _rf_metrics(t: np.ndarray, v: np.ndarray, p: np.ndarray, hr: np.ndarray, mas
         hard_secs = int((p_win > hard_threshold).sum())
 
         if hard_secs >= rf_gate['recovery_gate_min_hard_s']:
-            # Count distinct hard bouts (consecutive runs of >=30s above threshold)
+            # Count distinct hard bouts (consecutive runs of >=90s above threshold)
+            min_bout_s = rf_gate['recovery_gate_min_bout_s']
             in_bout = p_win > hard_threshold
             bout_count = 0
             bout_len = 0
@@ -1986,15 +1989,15 @@ def _rf_metrics(t: np.ndarray, v: np.ndarray, p: np.ndarray, hr: np.ndarray, mas
                 if val:
                     bout_len += 1
                 else:
-                    if bout_len >= 30:
+                    if bout_len >= min_bout_s:
                         bout_count += 1
                     bout_len = 0
-            if bout_len >= 30:
+            if bout_len >= min_bout_s:
                 bout_count += 1
 
             if bout_count >= rf_gate['recovery_gate_min_bouts']:
                 # Gate passed — apply the recovery filter
-                # Build rolling max of power over the lookback window
+                # Build rolling max of power AND speed over the lookback window
                 win_s = rf_gate['recovery_filter_window_s']
                 dt_med = float(np.nanmedian(np.diff(t))) if n > 1 else 1.0
                 dt_med = max(0.5, min(dt_med, 5.0))
@@ -2011,10 +2014,32 @@ def _rf_metrics(t: np.ndarray, v: np.ndarray, p: np.ndarray, hr: np.ndarray, mas
                     dq.append(idx)
                     p_rolling_max[idx] = p[dq[0]]
 
-                # Mark recovery seconds: power dropped >20% from recent hard peak
+                # Rolling max on speed array (same window)
+                v_smooth = np.convolve(np.nan_to_num(v, nan=0.0),
+                                       np.ones(max(3, int(round(15 / dt_med)))) /
+                                       max(3, int(round(15 / dt_med))),
+                                       mode='same')
+                v_rolling_max = np.zeros(n, dtype=float)
+                dq2 = deque()
+                for idx in range(n):
+                    while dq2 and dq2[0] < idx - win_samples:
+                        dq2.popleft()
+                    while dq2 and v_smooth[dq2[-1]] <= v_smooth[idx]:
+                        dq2.pop()
+                    dq2.append(idx)
+                    v_rolling_max[idx] = v_smooth[dq2[0]]
+
+                # Mark recovery seconds: power AND speed both dropped from recent peak
+                # Power drop alone could be downhill (high speed); requiring speed drop
+                # ensures we only catch jog recovery where the athlete actually slowed down
                 drop_ratio = rf_gate['recovery_filter_drop_ratio']
+                speed_ratio = rf_gate['recovery_filter_speed_ratio']
                 pm_win = p_rolling_max[win]
-                recovery_mask = (p_win < drop_ratio * pm_win) & (pm_win > hard_threshold)
+                vm_win = v_rolling_max[win]
+                v_win = v_smooth[win]
+                recovery_mask = ((p_win < drop_ratio * pm_win)
+                                 & (pm_win > hard_threshold)
+                                 & (v_win < speed_ratio * vm_win))
                 n_removed = int(recovery_mask.sum())
 
                 if n_removed > 0 and (win.sum() - n_removed) >= 120:
