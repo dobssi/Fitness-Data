@@ -1281,6 +1281,7 @@ def get_zone_data(df):
             'npower': round(float(npower)),
             'duration_min': round(duration_min, 1),
             'distance_km': round(float(dist), 1) if pd.notna(dist) else 0,
+            'avg_pace_skm': round(moving_s / float(dist)) if pd.notna(dist) and float(dist) > 0 else 0,
             'race': is_race,
         }
         
@@ -1322,7 +1323,18 @@ def get_zone_data(df):
         runs.append(run_entry)
     
     print(f"  Zone data: {len(runs)} runs, {npz_hits} with NPZ, CP={current_cp}W (RFL={current_rfl:.4f}), RE_p90={re_p90}")
-    return {'runs': runs, 'current_cp': current_cp, 'current_rfl': round(current_rfl, 4), 're_p90': re_p90}
+    
+    # Compute GAP target paces (sec/km) from latest predictions
+    gap_target_paces = {}
+    latest = df.iloc[-1] if len(df) > 0 else None
+    if latest is not None:
+        pace_dists = {'5k': 5.0, '10k': 10.0, 'hm': 21.097, 'marathon': 42.195}
+        for dist_key, dist_km in pace_dists.items():
+            col = f'pred_{dist_key}_s_gap'
+            if col in df.columns and pd.notna(latest.get(col)):
+                gap_target_paces[dist_key] = round(latest[col] / dist_km)
+    
+    return {'runs': runs, 'current_cp': current_cp, 'current_rfl': round(current_rfl, 4), 're_p90': re_p90, 'gap_target_paces': gap_target_paces}
 
 
 # ============================================================================
@@ -1335,6 +1347,12 @@ def _generate_zone_html(zone_data):
     
     cp = zone_data['current_cp']
     re_p90 = zone_data['re_p90']
+    gap_paces = zone_data.get('gap_target_paces', {})
+    # Default paces if not available (sec/km)
+    pace_5k = gap_paces.get('5k', 240)
+    pace_10k = gap_paces.get('10k', 252)
+    pace_hm = gap_paces.get('hm', 265)
+    pace_mara = gap_paces.get('marathon', 282)
     
     # Combined zone table rows (single table, 5 columns)
     combined_rows = ''
@@ -1411,6 +1429,7 @@ def _generate_zone_html(zone_data):
                 <button class="active" onclick="setWM('hr',this)">HR Zone</button>
                 <button class="power-only" onclick="setWM('power',this)">Power Zone</button>
                 <button class="power-only" onclick="setWM('race',this)">Race (W)</button>
+                <button class="gap-only" onclick="setWM('race',this)">Race (Pace)</button>
                 <button onclick="setWM('racehr',this)">Race (HR)</button>
             </div>
             <div class="chart-toggle" id="wk-period">
@@ -1430,6 +1449,7 @@ def _generate_zone_html(zone_data):
                 <button class="active" onclick="setPR('hr',this)">HR Zone</button>
                 <button class="power-only" onclick="setPR('power',this)">Power Zone</button>
                 <button class="power-only" onclick="setPR('race',this)">Race (W)</button>
+                <button class="gap-only" onclick="setPR('race',this)">Race (Pace)</button>
                 <button onclick="setPR('racehr',this)">Race (HR)</button>
             </div>
         </div>
@@ -1440,7 +1460,7 @@ def _generate_zone_html(zone_data):
 
     <script>
     const ZONE_RUNS=''' + zone_runs_json + f''';
-    const ZONE_CP={cp};const ZONE_PEAK_CP={PEAK_CP_WATTS_DASH};const ZONE_MASS={ATHLETE_MASS_KG_DASH};const ZONE_RE={re_p90};
+    const ZONE_CP={cp};const ZONE_PEAK_CP={PEAK_CP_WATTS_DASH};const ZONE_MASS={ATHLETE_MASS_KG_DASH};const ZONE_RE={re_p90};const ZONE_LTHR={LTHR_DASH};const ZONE_MAXHR={MAX_HR_DASH};
     const HR_Z=[
       {{id:'Z1',name:'Easy',lo:0,hi:140,c:'#3b82f6'}},
       {{id:'Z2',name:'Aerobic',lo:140,hi:157,c:'#22c55e'}},
@@ -1468,9 +1488,10 @@ def _generate_zone_html(zone_data):
     }});
     function makeRacePwZones(){{const pw=RACE_CFG,m=pw['Mara'].pw,h=pw['HM'].pw,t=pw['10K'].pw,f=pw['5K'].pw;const mh=Math.round((m+h)/2),ht=Math.round((h+t)/2),tf=Math.round((t+f)/2),above=Math.round(f*1.05);return[{{id:'Sub-5K',name:'Sub-5K',lo:above,hi:9999,c:'#4ade80'}},{{id:'5K',name:'5K',lo:tf,hi:above,c:'#f472b6'}},{{id:'10K',name:'10K',lo:ht,hi:tf,c:'#fb923c'}},{{id:'HM',name:'HM',lo:mh,hi:ht,c:'#a78bfa'}},{{id:'Mara',name:'Mara',lo:Math.round(m*0.93),hi:mh,c:'#38bdf8'}},{{id:'Other',name:'Other',lo:0,hi:Math.round(m*0.93),c:'#4b5563'}}];}}
     function makeRaceHrZones(){{return[{{id:'Sub-5K',name:'Sub-5K',lo:184,hi:9999,c:'#4ade80'}},{{id:'5K',name:'5K',lo:180,hi:184,c:'#f472b6'}},{{id:'10K',name:'10K',lo:175,hi:180,c:'#fb923c'}},{{id:'HM',name:'HM',lo:170,hi:175,c:'#a78bfa'}},{{id:'Mara',name:'Mara',lo:163,hi:170,c:'#38bdf8'}},{{id:'Other',name:'Other',lo:0,hi:163,c:'#4b5563'}}];}}
-    const RACE_PW_Z=makeRacePwZones(),RACE_HR_Z=makeRaceHrZones();
-    function zonesFor(m){{if(m==='hr')return HR_Z;if(m==='power')return PW_Z;if(m==='race'){{if(typeof currentMode!=='undefined'&&currentMode==='gap')return RACE_HR_Z;return RACE_PW_Z;}}return RACE_HR_Z;}}
-    function valFor(r,m){{if(m==='hr'||m==='racehr')return r.avg_hr;if(typeof currentMode!=='undefined'&&currentMode==='gap')return r.avg_hr;return r.npower;}}
+    function makeRacePaceZones(){{const p5={pace_5k},p10={pace_10k},ph={pace_hm},pm={pace_mara};const s5=Math.round(p5*0.97),m5=Math.round((p5+p10)/2),mt=Math.round((p10+ph)/2),mh=Math.round((ph+pm)/2),slow=Math.round(pm*1.07);return[{{id:'Sub-5K',name:'Sub-5K',lo:0,hi:s5,c:'#4ade80'}},{{id:'5K',name:'5K',lo:s5,hi:m5,c:'#f472b6'}},{{id:'10K',name:'10K',lo:m5,hi:mt,c:'#fb923c'}},{{id:'HM',name:'HM',lo:mt,hi:mh,c:'#a78bfa'}},{{id:'Mara',name:'Mara',lo:mh,hi:slow,c:'#38bdf8'}},{{id:'Other',name:'Other',lo:slow,hi:9999,c:'#4b5563'}}];}}
+    const RACE_PW_Z=makeRacePwZones(),RACE_HR_Z=makeRaceHrZones(),RACE_PACE_Z=makeRacePaceZones();
+    function zonesFor(m){{if(m==='hr')return HR_Z;if(m==='power')return PW_Z;if(m==='race'){{if(typeof currentMode!=='undefined'&&currentMode==='gap')return RACE_PACE_Z;return RACE_PW_Z;}}if(m==='racehr')return RACE_HR_Z;return HR_Z;}}
+    function valFor(r,m){{if(m==='hr'||m==='racehr')return r.avg_hr;if(m==='race'&&typeof currentMode!=='undefined'&&currentMode==='gap')return r.avg_pace_skm;return r.npower;}}
     function isRaceMode(m){{return m==='race'||m==='racehr';}}
     function assignZ(val,zones,rm){{if(!val||val<=0)return zones[zones.length-1].id;if(rm){{for(const z of zones){{if(z.id==='Other')continue;if(val>=z.lo&&val<=z.hi)return z.id;}}return'Other';}}for(const z of zones){{if(val<z.hi)return z.id;}}return zones[zones.length-1].id;}}
     function assignToZone(val,zones,result,mins){{for(const z of zones){{if(z.id==='Other')continue;if(val>=z.lo){{result[z.id]+=mins;return;}}}}result['Other']+=mins;}}
@@ -1486,7 +1507,7 @@ def _generate_zone_html(zone_data):
       // HR/Power zone fallback: assign all time to primary zone
       const result={{}};zones.forEach(z=>result[z.id]=0);const mins=r.duration_min||0,v=valFor(r,mode),zid=assignZ(v,zones,false);if(result[zid]!==undefined)result[zid]=mins;return result;
     }}
-    function calcSpecificity(){{const today=new Date();const c14=new Date(today);c14.setDate(c14.getDate()-14);const c28=new Date(today);c28.setDate(c28.getDate()-28);const useHR=(typeof currentMode!=='undefined'&&currentMode==='gap');const zones=useHR?RACE_HR_Z:RACE_PW_Z;const modeKey=useHR?'racehr':'race';const targets=[{{key:'5K'}},{{key:'HM'}}];targets.forEach(tgt=>{{let m14=0,m28=0;ZONE_RUNS.forEach(r=>{{const d=new Date(r.date);if(d<c28)return;const est=getZoneMins(r,modeKey,zones);const mins=est[tgt.key]||0;if(d>=c14)m14+=mins;m28+=mins;}});const e14=document.getElementById('spec14_'+tgt.key),e28=document.getElementById('spec28_'+tgt.key);if(e14)e14.innerHTML=Math.round(m14)+'<span style="font-size:0.75rem;color:var(--text-dim)">min</span>';if(e28)e28.innerHTML=Math.round(m28)+'<span style="font-size:0.75rem;color:var(--text-dim)">min</span>';}});}}calcSpecificity();
+    function calcSpecificity(){{const today=new Date();const c14=new Date(today);c14.setDate(c14.getDate()-14);const c28=new Date(today);c28.setDate(c28.getDate()-28);const useGAP=(typeof currentMode!=='undefined'&&currentMode==='gap');const zones=useGAP?RACE_PACE_Z:RACE_PW_Z;const modeKey='race';const targets=[{{key:'5K'}},{{key:'HM'}}];targets.forEach(tgt=>{{let m14=0,m28=0;ZONE_RUNS.forEach(r=>{{const d=new Date(r.date);if(d<c28)return;const est=getZoneMins(r,modeKey,zones);const mins=est[tgt.key]||0;if(d>=c14)m14+=mins;m28+=mins;}});const e14=document.getElementById('spec14_'+tgt.key),e28=document.getElementById('spec28_'+tgt.key);if(e14)e14.innerHTML=Math.round(m14)+'<span style="font-size:0.75rem;color:var(--text-dim)">min</span>';if(e28)e28.innerHTML=Math.round(m28)+'<span style="font-size:0.75rem;color:var(--text-dim)">min</span>';}});}}calcSpecificity();
     // Weekly zone bars
     function weekKey(ds){{const d=new Date(ds),day=d.getDay(),m=new Date(d);m.setDate(d.getDate()-((day+6)%7));return m.toISOString().slice(0,10);}}
     function fmtWk(s){{const d=new Date(s),tmp=new Date(d.valueOf());tmp.setDate(tmp.getDate()+3-(tmp.getDay()+6)%7);const w1=new Date(tmp.getFullYear(),0,4);const wk=1+Math.round(((tmp-w1)/864e5-3+(w1.getDay()+6)%7)/7);return'W'+String(wk).padStart(2,'0')+'/'+String(tmp.getFullYear()).slice(-2);}}
@@ -1959,6 +1980,8 @@ def generate_html(stats, rf_data, volume_data, ctl_atl_data, ctl_atl_lookup, rfl
         .mode-btn.active {{ background:var(--accent); color:#fff; border-color:var(--accent); }}
         body.gap-mode .power-only {{ display:none !important; }}
         body.gap-mode .pace-target {{ display:block !important; }}
+        .gap-only {{ display:none !important; }}
+        body.gap-mode .gap-only {{ display:inline-block !important; }}
     </style>
     
     <!-- v51: Health Check Banner -->
@@ -3320,11 +3343,11 @@ def generate_html(stats, rf_data, volume_data, ctl_atl_data, ctl_atl_lookup, rfl
         const zb = document.getElementById('zone-badge');
         if (zb && typeof ZONE_CP !== 'undefined') {{
             if (isGap) {{
-                zb.textContent = 'LTHR ' + HR_Z[3].hi + ' · Max ~' + HR_Z[4].hi;
+                zb.textContent = 'LTHR ' + ZONE_LTHR + ' · Max ~' + ZONE_MAXHR;
             }} else {{
                 const modeCP = mode === 'sim' ? Math.round(ZONE_PEAK_CP * parseFloat(modeStats.sim.rfl) / 100) : ZONE_CP;
                 const modeLT = Math.round(modeCP * 0.956);
-                zb.textContent = 'LT ' + modeLT + 'W · CP ' + modeCP + 'W · LTHR ' + HR_Z[3].hi + ' · Max ~' + HR_Z[4].hi;
+                zb.textContent = 'LT ' + modeLT + 'W · CP ' + modeCP + 'W · LTHR ' + ZONE_LTHR + ' · Max ~' + ZONE_MAXHR;
             }}
         }}
         
@@ -3332,16 +3355,17 @@ def generate_html(stats, rf_data, volume_data, ctl_atl_data, ctl_atl_lookup, rfl
         const trd = document.getElementById('top-races-desc');
         if (trd) trd.textContent = 'Best races by RFL% (fitness level at race date).';
         
-        // Reset zone views to HR when switching to GAP
+        // Reset zone views when switching to GAP (use Race Pace as default)
         if (isGap) {{
             const wkBtns = document.querySelectorAll('#wk-mode button');
             wkBtns.forEach(b => b.classList.remove('active'));
-            wkBtns[0].classList.add('active');
-            if (typeof setWM === 'function') setWM('hr', wkBtns[0]);
+            // Find the gap-only Race (Pace) button and activate it
+            const gapBtn = document.querySelector('#wk-mode .gap-only');
+            if (gapBtn) {{ gapBtn.classList.add('active'); wkMode='race'; renderWk(); }}
             const prBtns = document.querySelectorAll('#pr-mode button');
             prBtns.forEach(b => b.classList.remove('active'));
-            prBtns[0].classList.add('active');
-            if (typeof setPR === 'function') setPR('hr', prBtns[0]);
+            const gapPrBtn = document.querySelector('#pr-mode .gap-only');
+            if (gapPrBtn) {{ gapPrBtn.classList.add('active'); prMode='race'; renderPR(); }}
         }} else {{
             // Re-render current zone views (zones now mode-aware)
             if (typeof renderWk === 'function') renderWk();
