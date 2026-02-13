@@ -266,6 +266,7 @@ import numpy as np
 import pandas as pd
 
 from sim_power_pipeline import REModel, air_density_kg_m3, simulate_power_series, wind_along_track
+from gap_power import compute_gap_power
 
 # Import age grade calculations
 try:
@@ -302,7 +303,9 @@ try:
                         ALERT1_RFL_DROP, ALERT1_CTL_RISE, ALERT1_WINDOW_DAYS,
                         ALERT1B_RFL_GAP, ALERT1B_PEAK_WINDOW_DAYS, ALERT1B_RACE_WINDOW_DAYS,
                         ALERT2_TSB_THRESHOLD, ALERT2_COUNT, ALERT2_WINDOW,
-                        ALERT3B_Z_THRESHOLD, ALERT5_GAP_THRESHOLD)
+                        ALERT3B_Z_THRESHOLD, ALERT5_GAP_THRESHOLD,
+                        # Phase 2: GAP mode
+                        GAP_RE_CONSTANT)
 except ImportError:
     PEAK_CP_WATTS = 372  # Fallback — must match config.py
     POWER_SCORE_RIEGEL_K = 0.08
@@ -337,6 +340,7 @@ except ImportError:
     ALERT2_WINDOW = 5
     ALERT3B_Z_THRESHOLD = -2.0
     ALERT5_GAP_THRESHOLD = -0.03
+    GAP_RE_CONSTANT = 0.92
 
 RF_CONSTANTS = {
     # Rolling periods
@@ -3239,6 +3243,12 @@ def main() -> int:
         "CTL",
         "ATL",
         "TSB",
+        # Phase 2: GAP RF parallel columns
+        "RF_gap_median",
+        "RF_gap_adj",
+        "RF_gap_Trend",
+        "RFL_gap",
+        "RFL_gap_Trend",
     ]
     for c in needed_cols:
         if c not in dfm.columns:
@@ -3395,6 +3405,7 @@ def main() -> int:
         "rf_recovery_secs_removed", "rf_recovery_pct_removed",
         "full_run_drift_pct_per_min", "full_run_drift_r2", "full_run_drift_duration_min",
         "official_distance_km", "surface_adj", "gps_distance_error_m",
+        "RF_gap_median",
     ]
     for c in float_cols:
         if c in dfm.columns:
@@ -3626,6 +3637,24 @@ def main() -> int:
                 else:
                     dfm[k] = (np.nan if k.endswith("_s") else "")
                     dfm.at[i, k] = val
+            
+            # --- Phase 2: GAP RF (parallel computation) ---
+            # Compute GAP-based power from Minetti cost model, then RF_gap = gap_power / HR
+            # Uses same smoothing as sim power pipeline
+            v_gap = _roll_med(v, 15)
+            g_gap = _roll_med(g, 15)
+            g_gap = np.clip(g_gap, -0.12, 0.12)
+            p_gap = compute_gap_power(v_gap, g_gap, mass_kg=float(args.mass_kg),
+                                      re_constant=GAP_RE_CONSTANT)
+            p_gap = np.where(np.isfinite(p_gap) & (p_gap > 0), p_gap, np.nan)
+            # Scale CP for recovery filter: GAP power ≈ Stryd power / RE_constant
+            # (Stryd RE ≈ 0.92 for S4/S5, so ratio ≈ 1.0/0.92 ≈ 1.087)
+            _gap_local_cp = _local_cp / GAP_RE_CONSTANT if np.isfinite(_local_cp) else _local_cp
+            rf_gap = _rf_metrics(t, v, p_gap, hr_used, mass_kg=float(args.mass_kg),
+                                 race_flag=bool(row.get('race_flag', False)),
+                                 cp_watts=_gap_local_cp, grade=g)
+            gap_median = rf_gap.get('RF_adjusted_median_W_per_bpm', np.nan)
+            dfm.at[i, 'RF_gap_median'] = float(gap_median) if np.isfinite(gap_median) else np.nan
             
             # v45: Calculate terrain metrics for RF window only (not whole run)
             # This ensures terrain_adj reflects conditions where RF was measured
@@ -4123,6 +4152,73 @@ def main() -> int:
                         if np.isfinite(rf_trend_val) and rf_trend_val > peak_rf_trend:
                             peak_rf_trend = rf_trend_val
     
+    # --- Phase 2: GAP RF_adj and RF_gap_Trend (parallel to Stryd RF) ---
+    # Uses same Factor weights but with GAP-based RF, no era adjustment
+    print("  Calculating RF_gap_adj and RF_gap_Trend...")
+    dfm['RF_gap_adj'] = np.nan
+    dfm['RF_gap_Trend'] = np.nan
+    
+    prev_rf_gap_trend = np.nan
+    peak_rf_gap_trend = 0.0
+    
+    for i, row in dfm.iterrows():
+        rf_gap_raw = pd.to_numeric(row.get('RF_gap_median', np.nan), errors='coerce')
+        if not np.isfinite(rf_gap_raw):
+            continue
+        
+        total_adj = pd.to_numeric(row.get('Total_Adj', 1.0), errors='coerce')
+        era_adj = pd.to_numeric(row.get('Era_Adj', 1.0), errors='coerce')
+        if not (np.isfinite(era_adj) and era_adj > 0):
+            era_adj = 1.0
+        # GAP adj = all adjustments except era (which is Stryd-specific)
+        gap_total_adj = total_adj / era_adj if era_adj != 0 else total_adj
+        
+        rf_gap_adj = rf_gap_raw * gap_total_adj
+        
+        # Jump cap relative to GAP trend
+        if np.isfinite(prev_rf_gap_trend) and prev_rf_gap_trend > 0:
+            max_rf_gap = prev_rf_gap_trend * (1 + max_jump_pct / 100)
+            rf_gap_adj = min(rf_gap_adj, max_rf_gap)
+        
+        dfm.at[i, 'RF_gap_adj'] = float(rf_gap_adj)
+        
+        # RF_gap_Trend: same weighted rolling logic with Factor and quadratic decay
+        current_date = row['date']
+        if pd.notna(current_date):
+            cutoff_date = current_date - pd.Timedelta(days=days_back)
+            mask = (dfm['date'] >= cutoff_date) & (dfm['date'] <= current_date) & (dfm.index <= i)
+            window_df = dfm.loc[mask].copy()
+            
+            if len(window_df) > 0:
+                days_ago = (current_date - window_df['date']).dt.total_seconds() / 86400
+                time_decay = (1 - (days_ago.clip(upper=days_back) / days_back) ** 2).clip(lower=0)
+                
+                factors = window_df['Factor'].fillna(0)
+                rf_gap_adjs = window_df['RF_gap_adj'].fillna(0)
+                
+                valid = (factors > 0) & (rf_gap_adjs > 0)
+                if valid.any():
+                    combined_weights = factors[valid] * time_decay[valid]
+                    numerator = (combined_weights * rf_gap_adjs[valid]).sum()
+                    denominator = combined_weights.sum()
+                    if denominator > 0:
+                        rf_gap_trend_val = numerator / denominator
+                        dfm.at[i, 'RF_gap_Trend'] = rf_gap_trend_val
+                        prev_rf_gap_trend = rf_gap_trend_val
+                        if np.isfinite(rf_gap_trend_val) and rf_gap_trend_val > peak_rf_gap_trend:
+                            peak_rf_gap_trend = rf_gap_trend_val
+    
+    # RFL_gap and RFL_gap_Trend
+    if peak_rf_gap_trend > 0:
+        dfm['RFL_gap'] = dfm['RF_gap_adj'] / peak_rf_gap_trend
+        dfm['RFL_gap_Trend'] = dfm['RF_gap_Trend'] / peak_rf_gap_trend
+        print(f"  Peak RF_gap_Trend: {peak_rf_gap_trend:.4f}")
+        latest_rfl_gap = dfm['RFL_gap_Trend'].dropna().iloc[-1] if dfm['RFL_gap_Trend'].notna().any() else np.nan
+        print(f"  Latest RFL_gap_Trend: {latest_rfl_gap:.4f}" if np.isfinite(latest_rfl_gap) else "  Latest RFL_gap_Trend: N/A")
+    else:
+        dfm['RFL_gap'] = np.nan
+        dfm['RFL_gap_Trend'] = np.nan
+    
     print("\n=== v43: Calculating rolling metrics ===")
     dfm = calc_rolling_metrics(dfm)
     
@@ -4317,7 +4413,8 @@ def main() -> int:
     for c in ("Temp_Adj", "Terrain_Adj", "Elevation_Adj", "Era_Adj", "Total_Adj", "Intensity_Adj", "Duration_Adj"):
         if c in dfm.columns:
             dfm[c] = pd.to_numeric(dfm[c], errors="coerce").round(4)
-    for c in ("RF_adj", "RF_Trend", "RFL", "RFL_Trend"):
+    for c in ("RF_adj", "RF_Trend", "RFL", "RFL_Trend",
+              "RF_gap_median", "RF_gap_adj", "RF_gap_Trend", "RFL_gap", "RFL_gap_Trend"):
         if c in dfm.columns:
             dfm[c] = pd.to_numeric(dfm[c], errors="coerce").round(4)
     for c in ("Factor", "TSS", "CTL", "ATL", "TSB"):
@@ -4408,6 +4505,8 @@ def main() -> int:
         "Easy_RF_EMA", "Easy_RF_z", "RFL_Trend_Delta", "Easy_RFL_Gap",
         "Alert_1", "Alert_1b", "Alert_2", "Alert_3b", "Alert_5",
         "parkrun", "surface",
+        # Phase 2: GAP RF parallel columns
+        "RF_gap_median", "RF_gap_adj", "RF_gap_Trend", "RFL_gap", "RFL_gap_Trend",
         # v43 Age grade and race predictions
         "CP", "pred_5k_s", "pred_10k_s", "pred_hm_s", "pred_marathon_s",
         "pred_5k_age_grade", "age_grade_pct",

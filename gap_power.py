@@ -81,15 +81,14 @@ def compute_gap_power(
     re_constant: float = 0.92
 ) -> np.ndarray:
     """
-    Compute simulated power from speed and grade using Minetti cost model.
+    Compute GAP-based 'virtual power' from speed and grade.
     
-    Power (W) = (speed × mass × energy_cost) / RE
+    Power_gap (W) = speed × cost_ratio(grade) × mass / RE
     
-    where:
-    - speed: m/s
-    - mass: kg
-    - energy_cost: J/kg/m (from Minetti model)
-    - RE: running economy constant (dimensionless, ~0.92)
+    where cost_ratio = EC(grade) / EC(flat) adjusts for terrain difficulty.
+    This produces values on a similar scale to Stryd power (~15% higher)
+    but what matters is the RF ratio (power/HR) and its trend over time.
+    RFL normalisation makes the absolute scale irrelevant.
     
     Args:
         speed_mps: Running speed in m/s
@@ -98,18 +97,17 @@ def compute_gap_power(
         re_constant: Running economy constant (0.92 typical male, ~0.94 female)
         
     Returns:
-        Simulated power in watts
+        GAP-based virtual power in watts
     """
-    # Get energy cost from Minetti model (J/kg/m)
-    ec = minetti_energy_cost(speed_mps, grade)
+    # Get energy cost from Minetti model at actual grade and at flat
+    ec_grade = minetti_energy_cost(speed_mps, grade)
+    ec_flat = minetti_energy_cost(speed_mps, np.zeros_like(grade))
     
-    # Power = work rate = (energy per meter) × (meters per second)
-    # P = EC × v  (in J/s = W per kg)
-    power_per_kg = ec * speed_mps
+    # Cost ratio: how much harder (or easier) is this grade vs flat?
+    cost_ratio = ec_grade / np.clip(ec_flat, 1.0, None)
     
-    # Scale by mass and divide by RE
-    # Higher RE = more efficient = less power for same speed
-    power_w = (power_per_kg * mass_kg) / re_constant
+    # Virtual power = speed × cost_ratio × mass / RE
+    power_w = speed_mps * cost_ratio * mass_kg / re_constant
     
     return power_w
 
