@@ -61,6 +61,13 @@ if _ATHLETE_CONFIG:
     ATHLETE_DOB = _ATHLETE_CONFIG.date_of_birth
     ATHLETE_GENDER = _ATHLETE_CONFIG.gender
     ATHLETE_NAME = _ATHLETE_CONFIG.name
+    ATHLETE_TZ = _ATHLETE_CONFIG.timezone
+    ATHLETE_LTHR = _ATHLETE_CONFIG.lthr
+    ATHLETE_MAX_HR = _ATHLETE_CONFIG.max_hr
+    PLANNED_RACES = [
+        {'name': r.name, 'date': r.date, 'distance_km': r.distance_km}
+        for r in _ATHLETE_CONFIG.planned_races
+    ]
     
     # Stryd mass correction history
     # Convert to v51 format: list of (start, end, kg) tuples
@@ -74,6 +81,13 @@ else:
     ATHLETE_DOB = "1969-05-27"
     ATHLETE_GENDER = "male"
     ATHLETE_NAME = "Paul"
+    ATHLETE_TZ = "Europe/Stockholm"
+    ATHLETE_LTHR = 178
+    ATHLETE_MAX_HR = 192
+    PLANNED_RACES = [
+        {'name': '5K London', 'date': '2026-02-27', 'distance_km': 5.0},
+        {'name': 'HM Stockholm', 'date': '2026-04-25', 'distance_km': 21.097},
+    ]
     
     STRYD_MASS_HISTORY = [
         ("2017-07-08", "2017-09-10", 77.0),

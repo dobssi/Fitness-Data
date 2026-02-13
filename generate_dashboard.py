@@ -1083,10 +1083,20 @@ def get_age_grade_data(df):
 # ============================================================================
 # v51.7: ZONE & RACE CONFIGURATION
 # ============================================================================
-PEAK_CP_WATTS_DASH = 372
-ATHLETE_MASS_KG_DASH = 76.0
-LTHR_DASH = 178
-MAX_HR_DASH = 192
+try:
+    from config import PEAK_CP_WATTS as _cfg_cp, ATHLETE_MASS_KG as _cfg_mass
+    from config import ATHLETE_LTHR as _cfg_lthr, ATHLETE_MAX_HR as _cfg_maxhr
+    from config import PLANNED_RACES as _cfg_races
+    PEAK_CP_WATTS_DASH = _cfg_cp
+    ATHLETE_MASS_KG_DASH = _cfg_mass
+    LTHR_DASH = _cfg_lthr
+    MAX_HR_DASH = _cfg_maxhr
+except ImportError:
+    PEAK_CP_WATTS_DASH = 372
+    ATHLETE_MASS_KG_DASH = 76.0
+    LTHR_DASH = 178
+    MAX_HR_DASH = 192
+    _cfg_races = None
 
 RACE_POWER_FACTORS_DASH = {
     'Sub-5K': 1.07, '5K': 1.05, '10K': 1.00, 'HM': 0.95, 'Mara': 0.90,
@@ -1094,10 +1104,24 @@ RACE_POWER_FACTORS_DASH = {
 RACE_DISTANCES_KM_DASH = {
     'Sub-5K': 3.0, '5K': 5.0, '10K': 10.0, 'HM': 21.097, 'Mara': 42.195,
 }
-PLANNED_RACES_DASH = [
-    {'name': '5K London', 'date': '2026-02-27', 'distance_key': '5K'},
-    {'name': 'HM Stockholm', 'date': '2026-04-25', 'distance_key': 'HM'},
-]
+def _distance_km_to_key(km):
+    """Map distance_km to race category key."""
+    if km <= 3.5: return 'Sub-5K'
+    if km <= 7.5: return '5K'
+    if km <= 15.0: return '10K'
+    if km <= 30.0: return 'HM'
+    return 'Mara'
+
+if _cfg_races is not None:
+    PLANNED_RACES_DASH = [
+        {'name': r['name'], 'date': r['date'], 'distance_key': _distance_km_to_key(r['distance_km'])}
+        for r in _cfg_races
+    ]
+else:
+    PLANNED_RACES_DASH = [
+        {'name': '5K London', 'date': '2026-02-27', 'distance_key': '5K'},
+        {'name': 'HM Stockholm', 'date': '2026-04-25', 'distance_key': 'HM'},
+    ]
 
 
 def get_zone_data(df):

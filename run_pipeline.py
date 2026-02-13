@@ -68,11 +68,18 @@ STRAVA_CSV = "activities.csv"
 OVERRIDE_FILE = "activity_overrides.xlsx"
 ATHLETE_DATA = "athlete_data.csv"
 
-# Pipeline settings
-TZ = "Europe/Stockholm"
-MASS_KG = 76
-DOB = "1969-05-27"
-GENDER = "male"
+# Pipeline settings — loaded from config (athlete.yml or v51 defaults)
+try:
+    from config import ATHLETE_MASS_KG, ATHLETE_DOB, ATHLETE_GENDER, ATHLETE_TZ
+    MASS_KG = int(ATHLETE_MASS_KG)
+    DOB = ATHLETE_DOB
+    GENDER = ATHLETE_GENDER
+    TZ = ATHLETE_TZ
+except ImportError:
+    MASS_KG = 76
+    DOB = "1969-05-27"
+    GENDER = "male"
+    TZ = "Europe/Stockholm"
 
 
 def run(cmd: list, desc: str, critical: bool = True) -> int:

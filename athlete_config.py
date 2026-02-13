@@ -184,6 +184,22 @@ class PipelineConfig:
 
 
 @dataclass
+class PlannedRace:
+    """A planned future race."""
+    name: str
+    date: str
+    distance_km: float
+    
+    @classmethod
+    def from_dict(cls, d: Dict[str, Any]) -> PlannedRace:
+        return cls(
+            name=str(d["name"]),
+            date=str(d["date"]),
+            distance_km=float(d["distance_km"])
+        )
+
+
+@dataclass
 class AthleteConfig:
     """Complete athlete configuration."""
     name: str
@@ -193,6 +209,10 @@ class AthleteConfig:
     power: PowerConfig
     data: DataSourceConfig
     pipeline: PipelineConfig
+    timezone: str = "Europe/Stockholm"
+    lthr: int = 178
+    max_hr: int = 192
+    planned_races: List[PlannedRace] = field(default_factory=list)
     
     # Convenience properties
     @property
@@ -267,6 +287,10 @@ class AthleteConfig:
         
         athlete_data = data.get("athlete", {})
         
+        # Parse planned races
+        raw_races = data.get("planned_races", [])
+        planned_races = [PlannedRace.from_dict(r) for r in raw_races] if raw_races else []
+        
         return cls(
             name=str(athlete_data.get("name", "Unknown")),
             mass_kg=float(athlete_data.get("mass_kg", 76.0)),
@@ -274,7 +298,11 @@ class AthleteConfig:
             gender=str(athlete_data.get("gender", "male")),
             power=PowerConfig.from_dict(data.get("power", {})),
             data=DataSourceConfig.from_dict(data.get("data", {})),
-            pipeline=PipelineConfig.from_dict(data.get("pipeline", {}))
+            pipeline=PipelineConfig.from_dict(data.get("pipeline", {})),
+            timezone=str(athlete_data.get("timezone", "Europe/Stockholm")),
+            lthr=int(athlete_data.get("lthr", 178)),
+            max_hr=int(athlete_data.get("max_hr", 192)),
+            planned_races=planned_races,
         )
     
     @classmethod
@@ -313,7 +341,14 @@ class AthleteConfig:
                 intervals_athlete_id=os.getenv("INTERVALS_ATHLETE_ID"),
                 intervals_api_key=os.getenv("INTERVALS_API_KEY")
             ),
-            pipeline=PipelineConfig()
+            pipeline=PipelineConfig(),
+            timezone="Europe/Stockholm",
+            lthr=178,
+            max_hr=192,
+            planned_races=[
+                PlannedRace("5K London", "2026-02-27", 5.0),
+                PlannedRace("HM Stockholm", "2026-04-25", 21.097),
+            ],
         )
 
 

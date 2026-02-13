@@ -9,6 +9,20 @@ athlete:
   mass_kg: 76.0           # Body mass for ALL pipeline calculations (constant, not daily weight)
   date_of_birth: "1969-05-27"
   gender: "male"          # Options: "male", "female"
+  timezone: "Europe/Stockholm"
+
+  # HR thresholds (for zone calculations)
+  lthr: 178               # Lactate Threshold Heart Rate
+  max_hr: 192             # Maximum Heart Rate
+
+# Planned races (for dashboard race readiness section)
+planned_races:
+  - name: "5K London"
+    date: "2026-02-27"
+    distance_km: 5.0
+  - name: "HM Stockholm"
+    date: "2026-04-25"
+    distance_km: 21.097
 
 # Power mode configuration
 power:
