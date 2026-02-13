@@ -396,9 +396,11 @@ RF_CONSTANTS = {
     'recovery_gate_min_hard_s': 300,      # Min seconds above hard threshold to activate
     'recovery_gate_min_bouts': 3,         # Min distinct hard bouts to activate
     'recovery_gate_min_bout_s': 30,       # Min duration of a single hard bout (seconds)
-    'recovery_gate_max_dead_frac': 0.05,  # Skip if Swiss cheese already active
+    'recovery_gate_max_dead_frac': 0.20,  # Skip if heavy Swiss cheese (standing rest >20%)
     'recovery_filter_drop_ratio': 0.80,   # Power < this × rolling_max = recovery
     'recovery_filter_speed_ratio': 0.85,  # Speed must also drop vs recent max (excludes downhills)
+    'recovery_filter_grade_smooth_s': 45, # Smooth grade over this window before descent check
+    'recovery_filter_grade_threshold': -0.04,  # Steeper than this = descent (bypasses speed check)
     'recovery_filter_window_s': 90,       # Rolling max lookback window (seconds)
 
     # RF measurement window
@@ -1822,7 +1824,8 @@ def _calc_re_active(t: np.ndarray, v: np.ndarray, p: np.ndarray, mass_kg: float,
 
 
 def _rf_metrics(t: np.ndarray, v: np.ndarray, p: np.ndarray, hr: np.ndarray, mass_kg: float,
-                race_flag: bool = False, cp_watts: float = 0.0) -> Dict[str, float | str | bool]:
+                race_flag: bool = False, cp_watts: float = 0.0,
+                grade: np.ndarray | None = None) -> Dict[str, float | str | bool]:
     out: Dict[str, float | str | bool] = {
         "RF_window_start_s": np.nan,
         "RF_window_end_s": np.nan,
@@ -2014,32 +2017,62 @@ def _rf_metrics(t: np.ndarray, v: np.ndarray, p: np.ndarray, hr: np.ndarray, mas
                     dq.append(idx)
                     p_rolling_max[idx] = p[dq[0]]
 
-                # Rolling max on speed array (same window)
-                v_smooth = np.convolve(np.nan_to_num(v, nan=0.0),
-                                       np.ones(max(3, int(round(15 / dt_med)))) /
-                                       max(3, int(round(15 / dt_med))),
-                                       mode='same')
+                # Rolling max on GAP (Grade Adjusted Speed) array (same window)
+                # Using Minetti 2002 cost model: GAP = speed × cost(grade) / cost(0)
+                # This makes downhill jog recovery look slow (like flat jog)
+                # while hard downhill running still registers as fast.
+                flat_cost = 3.6  # Minetti cost at 0% grade (J/kg/m)
+                if grade is not None and len(grade) >= n:
+                    g_arr = np.clip(np.nan_to_num(grade[:n], nan=0.0), -0.12, 0.12)
+                    g_cost = (155.4*g_arr**5 - 30.4*g_arr**4 - 43.3*g_arr**3
+                              + 46.3*g_arr**2 + 19.5*g_arr + 3.6)
+                    gap_factor = g_cost / flat_cost
+                else:
+                    gap_factor = np.ones(n, dtype=float)
+
+                v_gap = np.nan_to_num(v, nan=0.0) * gap_factor
+                v_gap_smooth = np.convolve(v_gap,
+                                           np.ones(max(3, int(round(15 / dt_med)))) /
+                                           max(3, int(round(15 / dt_med))),
+                                           mode='same')
                 v_rolling_max = np.zeros(n, dtype=float)
                 dq2 = deque()
                 for idx in range(n):
                     while dq2 and dq2[0] < idx - win_samples:
                         dq2.popleft()
-                    while dq2 and v_smooth[dq2[-1]] <= v_smooth[idx]:
+                    while dq2 and v_gap_smooth[dq2[-1]] <= v_gap_smooth[idx]:
                         dq2.pop()
                     dq2.append(idx)
-                    v_rolling_max[idx] = v_smooth[dq2[0]]
+                    v_rolling_max[idx] = v_gap_smooth[dq2[0]]
 
-                # Mark recovery seconds: power AND speed both dropped from recent peak
-                # Power drop alone could be downhill (high speed); requiring speed drop
-                # ensures we only catch jog recovery where the athlete actually slowed down
+                # Mark recovery seconds: power AND GAP-speed both dropped from recent peak
+                # Power drop alone could be downhill (high raw speed but low GAP);
+                # requiring GAP-speed drop catches both flat jog and downhill jog recovery
+                # while excluding hard downhill running (where GAP stays high).
+                # Exception: on steep descents (smoothed grade < -4%), accept power drop
+                # without speed check — catches hill repeat jog-down recovery where
+                # gravity keeps speed up even during genuine recovery.
                 drop_ratio = rf_gate['recovery_filter_drop_ratio']
                 speed_ratio = rf_gate['recovery_filter_speed_ratio']
                 pm_win = p_rolling_max[win]
                 vm_win = v_rolling_max[win]
-                v_win = v_smooth[win]
-                recovery_mask = ((p_win < drop_ratio * pm_win)
-                                 & (pm_win > hard_threshold)
-                                 & (v_win < speed_ratio * vm_win))
+                v_win = v_gap_smooth[win]
+
+                # Smoothed grade for descent detection (eliminates GPS noise)
+                grade_smooth_s = rf_gate['recovery_filter_grade_smooth_s']
+                grade_thr = rf_gate['recovery_filter_grade_threshold']
+                if grade is not None and len(grade) >= n:
+                    g_clean = np.clip(np.nan_to_num(grade[:n], nan=0.0), -0.15, 0.15)
+                    g_kern_w = max(1, int(round(grade_smooth_s / dt_med)))
+                    g_kern = np.ones(g_kern_w) / g_kern_w
+                    g_smoothed = np.convolve(g_clean, g_kern, mode='same')
+                    steep_descent_win = g_smoothed[win] < grade_thr
+                else:
+                    steep_descent_win = np.zeros(win.sum(), dtype=bool)
+
+                power_dropped = (p_win < drop_ratio * pm_win) & (pm_win > hard_threshold)
+                speed_dropped = v_win < speed_ratio * vm_win
+                recovery_mask = power_dropped & (speed_dropped | steep_descent_win)
                 n_removed = int(recovery_mask.sum())
 
                 if n_removed > 0 and (win.sum() - n_removed) >= 120:
@@ -3577,7 +3610,7 @@ def main() -> int:
 
             rf = _rf_metrics(t, v, p, hr_used, mass_kg=float(args.mass_kg),
                              race_flag=bool(row.get('race_flag', False)),
-                             cp_watts=_local_cp)
+                             cp_watts=_local_cp, grade=g)
             for k, val in rf.items():
                 if k in dfm.columns:
                     dfm.at[i, k] = val

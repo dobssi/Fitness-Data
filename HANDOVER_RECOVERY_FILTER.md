@@ -212,32 +212,78 @@ This correctly handles:
 
 | Metric | Value |
 |---|---|
-| Sessions filtered | 70 of 258 (27%) |
+| Sessions filtered | 69 of 258 (27%) |
 | Races filtered | 0 (race gate) |
-| S4 era sessions filtered | 62 of 208 |
-| S5 era sessions filtered | 8 of 50 |
-| Avg RF change (filtered) | +0.9% |
-| Max RF change | +6.8% (12×60/60 VO2/Jog) |
-| Today's session (5×3' 5kE) | RF 1.742 → 1.828 (+5.0%), RFL 0.860 → 0.903 |
+| Easy runs that pass gate | 13 (max RF impact: +0.3%) |
+| Avg RF change (true intervals) | +2.5% |
+| Max RF change | +7.0% (12×60/60 VO2/Jog) |
+| Today's session (5×3' 5kE) | RF +4.7%, RFL 0.860 → 0.894 |
+| RFL_Trend impact | +0.002 (0.2% — from corrected intervals feeding trend) |
 
-The era-aware threshold correctly catches more S4 sessions (where CP was lower and the fixed threshold was too high) while keeping S5 behaviour identical to the prototype.
+Full rebuild (3101 runs): 1134 sessions flagged (37%). The high rate is expected — any run with power variation (strides, hills + speed work, fartlek) passes the gate. The **speed check** prevents RF inflation on non-interval runs: easy runs with 30/30 strides get ≤0.3% change. The flag simply means "this session had power-on/off patterns and some HR-lagged seconds were excluded."
+
+### Speed check: the key innovation from full-rebuild debugging
+
+The first FROM_STEPB revealed the power-only filter caught 1167 sessions including hundreds of easy runs on hills. Adding the speed requirement to the recovery mask (`speed < 0.85 × rolling_max_speed`) correctly distinguishes:
+- **Jog recovery**: power drops AND speed drops → filtered ✓
+- **Downhill terrain**: power drops BUT speed increases → not filtered ✓
 
 ---
 
-## TODOs
+## LL30 / TRAIL surface_adj investigation (complete)
 
-### LL30 / TRAIL surface_adj investigation
+### Three-level analysis
 
-The Lidingöloppet 30km races currently receive a 5% `surface_adj` for TRAIL, added because nothing else in the pipeline adequately captured the RF penalty from hilly trail running. The recovery filter prototype (without the race gate) gave LL30 2025 a +4.1% correction — strikingly close to the 5% TRAIL adjuster.
+**Level 1: Speed check blocks race downhills (correct)**
+LL30 race with filter (bypassing race gate): only +0.1% correction. The GAP-speed check correctly identifies downhill racing as NOT recovery because Grade Adjusted Pace stays high even on descents.
 
-The hypothesis: the TRAIL surface penalty is actually the same power-drop phenomenon (power collapses on descents after hard uphills, but HR stays elevated) that the recovery filter catches for intervals. If so, the recovery filter could replace the somewhat clumsy blanket TRAIL 5% with a mechanistic per-second correction.
+**Level 2: Terrain decomposition of LL30 2025 race**
+| Terrain | Seconds | Power | Speed | HR | P/HR |
+|---|---|---|---|---|---|
+| Uphill (>2%) | 2857 | 281W | 2.61 m/s | 169 | 1.663 |
+| Flat (±2%) | 3865 | 279W | 3.35 m/s | 168 | 1.662 |
+| Downhill (<-2%) | 2932 | 253W | 3.55 m/s | 168 | 1.506 |
 
-To test:
-1. Run LL30 races through the recovery filter (bypass the race gate)
-2. Compare the correction to the current 5% TRAIL surface_adj
-3. Check whether terrain_adj + recovery_filter together explain LL's RF suppression without needing surface_adj
-4. If yes, surface_adj for TRAIL could be dropped or reduced
-5. Need to verify on other hilly races too (Hampstead Heath parkruns, etc.)
+Downhill P/HR is 9.4% lower than flat. Weighted across the race: 2.9% RF drag. Current surface_adj = 5% covers this plus ~2% technical terrain RE penalty.
+
+**Level 3: Grade-aware descent detection added**
+Added smoothed-grade check to recovery mask: on steep descents (45s-smoothed grade < −4%), accept power drop as recovery signal without requiring speed drop.
+
+Tested on 258 sessions:
+| Undulation band | Sessions changed | Avg extra correction |
+|---|---|---|
+| und 0-2 (flat) | 18 | +0.3% |
+| und 2-5 | 5 | +0.4% |
+| und 5-10 | 9 | +0.6% |
+| und 10-30 | 4 | +0.8% |
+
+Training run examples:
+- B3 "brutal" (und=21): +0.6% extra (total: +3.3% with filter)
+- B1 yellow trail (und=18): +0.5% extra (total: +2.9%)
+- LL training nasty (und=11): +0.8% extra (total: +2.2%)
+- LL30 tune up intervals (und=4): +0.8% extra (total: +5.2%)
+
+**Level 4: 200m hill repeats — ROOT CAUSE FOUND**
+30 sessions of 12×200m hill sprints scored −2.0% avg below trend. NPZ analysis of 2024-02-01 revealed the cause:
+
+Walking downhill between reps produces power < 190W (the `dead` threshold = 2.5 × mass). The Swiss cheese detector counts these as "dead" seconds, pushing `dead_frac` to 0.111 — above the 0.05 gate limit. The recovery filter gate was blocked before it could even run.
+
+Fix: raised `recovery_gate_max_dead_frac` from 0.05 to 0.20. Sessions with genuine standing rest (indoor intervals: dead_frac 0.21-0.27) are still excluded.
+
+Result on the 200m hills NPZ:
+- Gate now passes (dead_frac 0.111 < 0.20)
+- 529 seconds removed (35% — the walk-back-down recovery)
+- RF change: **+5.4%** (1.796 → 1.893)
+- RFL gap: −3.0% → +1.4% (from underscored to on-trend)
+
+10 additional sessions now pass the raised gate on the 258-run test set — all track/interval sessions with partial standing or walking rest that were previously blocked.
+
+### Conclusion
+- Race gate protects all LL30 races ✓
+- GAP-speed check handles most downhill/recovery distinction ✓  
+- Grade-aware descent adds modest targeted improvement on hilly training (+0.3-0.8%) ✓
+- `surface_adj` for TRAIL stays — it covers genuine terrain RE penalty
+- Could potentially be reduced from 1.035/1.050 to ~1.025/1.040 after full rebuild validation
 
 This would also make the pipeline more portable for v60 — a mechanistic filter is better than a manual surface classification per venue.
 
