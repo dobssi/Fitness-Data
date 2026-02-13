@@ -124,7 +124,7 @@ else:
 POWER_SCORE_RIEGEL_K = 0.08             # Riegel exponent for distance adjustment
 POWER_SCORE_REFERENCE_DIST_KM = 5.0     # 5K baseline (where distance_factor = 1.0)
 POWER_SCORE_THRESHOLD = 310             # Minimum score to boost Factor
-POWER_SCORE_RF_DIVISOR = 180            # RF_adj floor = Power_Score / this value
+POWER_SCORE_RF_DIVISOR = 184            # RF_adj floor = Power_Score / this value
 POWER_SCORE_FACTOR_BOOST = 0.5          # Factor multiplier for high Power Score runs
 POWER_SCORE_AIR_THRESHOLD = 0.04        # Air power as fraction of total above which diminishing returns apply (4%)
 POWER_SCORE_AIR_EXCESS_FACTOR = 0.5     # Fraction of excess air power retained above threshold (50% = cut in half)
