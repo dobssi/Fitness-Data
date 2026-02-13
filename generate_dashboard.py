@@ -149,10 +149,12 @@ def load_and_process_data():
         
         if pd.notna(pred_5k):
             race_predictions['5k'] = format_seconds(pred_5k)
+            race_predictions['5k_raw'] = int(pred_5k)
         if pd.notna(pred_10k):
             race_predictions['10k'] = format_seconds(pred_10k)
         if pd.notna(pred_hm):
             race_predictions['Half Marathon'] = format_seconds(pred_hm)
+            race_predictions['hm_raw'] = int(pred_hm)
         if pd.notna(pred_mara):
             race_predictions['Marathon'] = format_seconds(pred_mara)
         
@@ -167,6 +169,10 @@ def load_and_process_data():
                 val = latest.get(col)
                 if pd.notna(val):
                     mode_preds[dist] = format_seconds(val)
+                    if dist == '5k':
+                        mode_preds['5k_raw'] = int(val)
+                    elif dist == 'Half Marathon':
+                        mode_preds['hm_raw'] = int(val)
             race_predictions[f'_mode_{mode}'] = mode_preds
             
             cp_mode = latest.get(f'CP_{mode}')
@@ -2424,24 +2430,24 @@ def generate_html(stats, rf_data, volume_data, ctl_atl_data, ctl_atl_lookup, rfl
                 pred10k: '{format_race_time(stats["race_predictions"].get("10k", "-"))}',
                 predHm: '{format_race_time(stats["race_predictions"].get("Half Marathon", "-"))}',
                 predMara: '{format_race_time(stats["race_predictions"].get("Marathon", "-"))}',
-                pred5k_s: {stats["race_predictions"].get("5k", 0) or 0},
-                predHm_s: {stats["race_predictions"].get("Half Marathon", 0) or 0} }},
+                pred5k_s: {stats["race_predictions"].get("5k_raw", 0)},
+                predHm_s: {stats["race_predictions"].get("hm_raw", 0)} }},
             gap: {{ rfl: '{stats.get("latest_rfl_gap", "-")}', ag: '{stats["race_predictions"].get("_ag_gap") or "-"}',
                 cp: {round(PEAK_CP_WATTS_DASH * float(stats.get("latest_rfl_gap", 0)) / 100) if stats.get("latest_rfl_gap", "-") != "-" else 0},
                 pred5k: '{format_race_time(stats["race_predictions"].get("_mode_gap", dict()).get("5k", "-"))}',
                 pred10k: '{format_race_time(stats["race_predictions"].get("_mode_gap", dict()).get("10k", "-"))}',
                 predHm: '{format_race_time(stats["race_predictions"].get("_mode_gap", dict()).get("Half Marathon", "-"))}',
                 predMara: '{format_race_time(stats["race_predictions"].get("_mode_gap", dict()).get("Marathon", "-"))}',
-                pred5k_s: {stats["race_predictions"].get("_mode_gap", dict()).get("5k", 0) or 0},
-                predHm_s: {stats["race_predictions"].get("_mode_gap", dict()).get("Half Marathon", 0) or 0} }},
+                pred5k_s: {stats["race_predictions"].get("_mode_gap", dict()).get("5k_raw", 0)},
+                predHm_s: {stats["race_predictions"].get("_mode_gap", dict()).get("hm_raw", 0)} }},
             sim: {{ rfl: '{stats.get("latest_rfl_sim", "-")}', ag: '{stats["race_predictions"].get("_ag_sim") or "-"}',
                 cp: {round(PEAK_CP_WATTS_DASH * float(stats.get("latest_rfl_sim", 0)) / 100) if stats.get("latest_rfl_sim", "-") != "-" else 0},
                 pred5k: '{format_race_time(stats["race_predictions"].get("_mode_sim", dict()).get("5k", "-"))}',
                 pred10k: '{format_race_time(stats["race_predictions"].get("_mode_sim", dict()).get("10k", "-"))}',
                 predHm: '{format_race_time(stats["race_predictions"].get("_mode_sim", dict()).get("Half Marathon", "-"))}',
                 predMara: '{format_race_time(stats["race_predictions"].get("_mode_sim", dict()).get("Marathon", "-"))}',
-                pred5k_s: {stats["race_predictions"].get("_mode_sim", dict()).get("5k", 0) or 0},
-                predHm_s: {stats["race_predictions"].get("_mode_sim", dict()).get("Half Marathon", 0) or 0} }}
+                pred5k_s: {stats["race_predictions"].get("_mode_sim", dict()).get("5k_raw", 0)},
+                predHm_s: {stats["race_predictions"].get("_mode_sim", dict()).get("hm_raw", 0)} }}
         }};
         
         // v51: Generate per-point colours (red for races, blue for training)
