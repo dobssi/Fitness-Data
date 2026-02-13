@@ -292,3 +292,42 @@ This would also make the pipeline more portable for v60 — a mechanistic filter
 ## No changes to v51 pipeline
 
 v51 is unchanged. No checkpoint needed. This handover documents the analysis and specification for implementation.
+
+---
+
+## Additional changes this session (2026-02-13)
+
+### 1. Extreme heat non-linear temperature adjustment
+
+Added quadratic penalty term `k × max(0, temp − 25)²` with k=0.0015 to `calc_temp_adj()`.
+
+The existing linear formula (0.3%/°C below 20°C, 1.0%/°C above) under-adjusts above 28°C where thermoregulatory strain goes non-linear:
+
+| Temp | Old Temp_Adj | New Temp_Adj | Extra |
+|---|---|---|---|
+| 25°C | 1.062 | 1.062 | 0.000 |
+| 28°C | 1.092 | 1.106 | +1.3% |
+| 30°C | 1.112 | 1.150 | +3.7% |
+| 33°C | 1.142 | 1.238 | +9.6% |
+
+Validation on 17 runs above 28°C: residual gap improves from −5.7% to −0.5% in the 31-35°C band. Constants: `temp_extreme_threshold=25`, `temp_extreme_k=0.0015`.
+
+### 2. PS Floor bias (noted, not fixed)
+
+PS Floor races score +1.9% above trend vs +1.2% for non-floor races. Höstrusket 10k 2021 example: PS floor boosted RFL from 0.845 to 0.901 (+6.7%) — without it, gap would be −1.0% (correct). The floor is systematically generous by ~0.7%. TODO for future session.
+
+### 3. 200m hill repeats — dead_frac gate fix
+
+Raised `recovery_gate_max_dead_frac` from 0.05 to 0.20. Walking downhill between reps produces power < 190W (dead threshold = 2.5 × mass), pushing dead_frac to 11% and blocking the recovery filter gate. With the raised threshold: 21 of 28 hill sessions now filter, avg RFL gap reverses from −2.0% to +2.3%.
+
+### 4. Grade-aware descent detection
+
+Added smoothed-grade check (45s window, −4% threshold) to recovery mask: `power_dropped & (speed_dropped | steep_descent)`. On steep descents, accepts power drop as recovery without requiring GAP-speed drop. Adds +0.3-0.8% on hilly training sessions. Constants: `recovery_filter_grade_smooth_s=45`, `recovery_filter_grade_threshold=-0.04`.
+
+### 5. PS Floor divisor raised (180 → 184)
+
+PS Floor races scored +1.9% above trend vs +1.2% for non-floor races — a systematic +0.7% excess bias. 64% of races (204/321) triggered the floor.
+
+Fix: raised `POWER_SCORE_RF_DIVISOR` from 180 to 184. This reduces floor magnitude by ~2.2% across the board.
+
+Result: all-race avg gap drops from +1.5% to +0.8%. Key races preserve their character — VLM 2018 PB still at +5.4%, while mediocre efforts like Höstrusket drop from +4.6% to +2.6%. 78 of 204 previously floored races no longer trigger the floor.

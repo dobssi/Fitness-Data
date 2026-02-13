@@ -307,7 +307,7 @@ except ImportError:
     PEAK_CP_WATTS = 372  # Fallback — must match config.py
     POWER_SCORE_RIEGEL_K = 0.08
     POWER_SCORE_REFERENCE_DIST_KM = 5.0
-    POWER_SCORE_RF_DIVISOR = 180
+    POWER_SCORE_RF_DIVISOR = 184  # v51: raised from 180 to reduce PS floor bias (+0.7% excess)
     POWER_SCORE_FACTOR_BOOST = 0.5
     POWER_SCORE_AIR_THRESHOLD = 0.04
     POWER_SCORE_AIR_EXCESS_FACTOR = 0.5
@@ -347,6 +347,8 @@ RF_CONSTANTS = {
     'temp_baseline': 10,  # °C - no adjustment below this
     'temp_factor_1': 0.003,  # Penalty per °C (10-20°C range)
     'temp_factor_2': 0.01,  # Penalty per °C (above 20°C)
+    'temp_extreme_threshold': 25,  # °C above which quadratic term kicks in
+    'temp_extreme_k': 0.0015,  # Quadratic coefficient: k × (temp - threshold)²
     'min_acclimatized_temp': 16,
     
     # Humidity adjustment  
@@ -614,7 +616,14 @@ def calc_temp_adj(temp_c: float, humidity_pct: float, acclimatized_temp: float =
             humid_penalty = max(0, (humidity_pct - RF_CONSTANTS['humidity_baseline']) / 10 * 
                               RF_CONSTANTS['humidity_factor'])
     
-    return 1.0 + temp_penalty + humid_penalty
+    # Extreme heat: non-linear thermoregulatory penalty above 25°C
+    # The body's cooling capacity saturates — HR rises disproportionately
+    # as core temperature regulation becomes compromised.
+    extreme_thr = RF_CONSTANTS['temp_extreme_threshold']
+    extreme_k = RF_CONSTANTS['temp_extreme_k']
+    extreme_penalty = extreme_k * max(0, temp_c - extreme_thr) ** 2
+    
+    return 1.0 + temp_penalty + humid_penalty + extreme_penalty
 
 
 def calc_terrain_adj(undulation_score: float) -> float:
