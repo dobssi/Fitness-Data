@@ -4453,6 +4453,34 @@ def main() -> int:
             n_pred = rfl_valid.sum()
             print(f"  Populated predictions on {n_pred} runs (all with RFL_Trend)")
             
+            # Phase 2: GAP and Sim parallel predictions
+            # GAP and Sim use the same PEAK_CP and formula — only RFL source differs
+            # This works because PEAK_CP_GAP ≈ PEAK_CP_STRYD when calibrated from race results
+            for mode, rfl_col in [('gap', 'RFL_gap_Trend'), ('sim', 'RFL_sim_Trend')]:
+                if rfl_col not in dfm.columns:
+                    continue
+                rfl_mode_valid = dfm[rfl_col].notna() & (dfm[rfl_col] > 0)
+                dfm.loc[rfl_mode_valid, f'CP_{mode}'] = (dfm.loc[rfl_mode_valid, rfl_col] * PEAK_CP_WATTS).round(0)
+                for dist_key, col_suffix in [('5k', 'pred_5k_s'), ('10k', 'pred_10k_s'),
+                                              ('hm', 'pred_hm_s'), ('marathon', 'pred_marathon_s')]:
+                    col_name = f'{col_suffix}_{mode}'
+                    dfm.loc[rfl_mode_valid, col_name] = dfm.loc[rfl_mode_valid, rfl_col].apply(
+                        lambda rfl: round(calc_race_prediction(rfl, dist_key, re_p90, PEAK_CP_WATTS, mass_kg), 0)
+                    )
+                n_mode = rfl_mode_valid.sum()
+                print(f"  {mode.upper()} predictions on {n_mode} runs")
+            
+            # Phase 2: GAP/Sim predicted age grades (latest row)
+            for mode, rfl_col in [('gap', 'RFL_gap_Trend'), ('sim', 'RFL_sim_Trend')]:
+                if rfl_col not in dfm.columns:
+                    continue
+                mode_rfl = dfm.iloc[-1].get(rfl_col)
+                if pd.notna(mode_rfl) and mode_rfl > 0:
+                    mode_pred_5k = calc_race_prediction(mode_rfl, '5k', re_p90, PEAK_CP_WATTS, mass_kg)
+                    mode_ag = calc_age_grade(mode_pred_5k, 5.0, runner_age, runner_gender, 'road')
+                    if mode_ag:
+                        dfm.at[dfm.index[-1], f'pred_5k_age_grade_{mode}'] = round(mode_ag, 1)
+            
             # Predicted 5K age grade (calculate age from DOB if available)
             runner_gender = getattr(args, 'runner_gender', 'male')
             runner_dob = getattr(args, 'runner_dob', None)
@@ -4549,10 +4577,12 @@ def main() -> int:
     for c in ("Factor", "TSS", "CTL", "ATL", "TSB"):
         if c in dfm.columns:
             dfm[c] = pd.to_numeric(dfm[c], errors="coerce").round(1)
-    for c in ("CP", "pred_5k_s", "pred_10k_s", "pred_hm_s", "pred_marathon_s"):
+    for c in ("CP", "pred_5k_s", "pred_10k_s", "pred_hm_s", "pred_marathon_s",
+              "CP_gap", "pred_5k_s_gap", "pred_10k_s_gap", "pred_hm_s_gap", "pred_marathon_s_gap",
+              "CP_sim", "pred_5k_s_sim", "pred_10k_s_sim", "pred_hm_s_sim", "pred_marathon_s_sim"):
         if c in dfm.columns:
             dfm[c] = pd.to_numeric(dfm[c], errors="coerce").round(0)
-    for c in ("pred_5k_age_grade", "age_grade_pct"):
+    for c in ("pred_5k_age_grade", "age_grade_pct", "pred_5k_age_grade_gap", "pred_5k_age_grade_sim"):
         if c in dfm.columns:
             dfm[c] = pd.to_numeric(dfm[c], errors="coerce").round(2)
     # v51: Round Easy RF metrics
@@ -4637,9 +4667,15 @@ def main() -> int:
         # Phase 2: GAP RF parallel columns
         "RF_gap_median", "RF_gap_adj", "RF_gap_Trend", "RFL_gap", "RFL_gap_Trend", "PS_gap",
         "RF_sim_median", "RF_sim_adj", "RF_sim_Trend", "RFL_sim", "RFL_sim_Trend",
-        # v43 Age grade and race predictions
+        # v43 Age grade and race predictions (Stryd)
         "CP", "pred_5k_s", "pred_10k_s", "pred_hm_s", "pred_marathon_s",
         "pred_5k_age_grade", "age_grade_pct",
+        # Phase 2: GAP predictions
+        "CP_gap", "pred_5k_s_gap", "pred_10k_s_gap", "pred_hm_s_gap", "pred_marathon_s_gap",
+        "pred_5k_age_grade_gap",
+        # Phase 2: Sim predictions
+        "CP_sim", "pred_5k_s_sim", "pred_10k_s_sim", "pred_hm_s_sim", "pred_marathon_s_sim",
+        "pred_5k_age_grade_sim",
     ]
     
     # Reorder: canonical columns first (in order), then any extras at the end

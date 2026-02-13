@@ -339,7 +339,22 @@ def get_rfl_trend_data(df, days=90):
     if has_race:
         race_flags = [int(v) if pd.notna(v) and v == 1 else 0 for v in recent['race_flag'].tolist()]
     
-    return dates, rfl_values, rfl_trend, easy_rfl, race_flags
+    # Phase 2: Extract GAP and Sim RFL_Trend for mode toggle
+    gap_trend = [None] * len(dates)
+    sim_trend = [None] * len(dates)
+    if 'RFL_gap_Trend' in recent.columns:
+        gap_trend = [round(v * 100, 1) if pd.notna(v) else None for v in recent['RFL_gap_Trend'].tolist()]
+    if 'RFL_sim_Trend' in recent.columns:
+        sim_trend = [round(v * 100, 1) if pd.notna(v) else None for v in recent['RFL_sim_Trend'].tolist()]
+    # Per-run RFL for GAP and Sim
+    gap_values = [None] * len(dates)
+    sim_values = [None] * len(dates)
+    if 'RFL_gap' in recent.columns:
+        gap_values = [round(v * 100, 1) if pd.notna(v) else None for v in recent['RFL_gap'].tolist()]
+    if 'RFL_sim' in recent.columns:
+        sim_values = [round(v * 100, 1) if pd.notna(v) else None for v in recent['RFL_sim'].tolist()]
+    
+    return dates, rfl_values, rfl_trend, easy_rfl, race_flags, gap_trend, sim_trend, gap_values, sim_values
 
 def get_weekly_volume(df, weeks=12):
     """Get weekly volume data for chart. Returns exactly 'weeks' worth of data, rolling from today."""
@@ -1478,13 +1493,13 @@ def generate_html(stats, rf_data, volume_data, ctl_atl_data, ctl_atl_lookup, rfl
     """Generate the HTML dashboard."""
     
     # Extract data for each time range - RF (v51: now includes easy_rfl and race_flags)
-    rf_dates_90, rf_values_90, rf_trend_90, rf_easy_90, rf_races_90 = rf_data['90']
-    rf_dates_180, rf_values_180, rf_trend_180, rf_easy_180, rf_races_180 = rf_data['180']
-    rf_dates_365, rf_values_365, rf_trend_365, rf_easy_365, rf_races_365 = rf_data['365']
-    rf_dates_730, rf_values_730, rf_trend_730, rf_easy_730, rf_races_730 = rf_data['730']
-    rf_dates_1095, rf_values_1095, rf_trend_1095, rf_easy_1095, rf_races_1095 = rf_data['1095']
-    rf_dates_1825, rf_values_1825, rf_trend_1825, rf_easy_1825, rf_races_1825 = rf_data['1825']
-    rf_dates_all, rf_values_all, rf_trend_all, rf_easy_all, rf_races_all = rf_data['all']
+    rf_dates_90, rf_values_90, rf_trend_90, rf_easy_90, rf_races_90, rf_gap_trend_90, rf_sim_trend_90, rf_gap_values_90, rf_sim_values_90 = rf_data['90']
+    rf_dates_180, rf_values_180, rf_trend_180, rf_easy_180, rf_races_180, rf_gap_trend_180, rf_sim_trend_180, rf_gap_values_180, rf_sim_values_180 = rf_data['180']
+    rf_dates_365, rf_values_365, rf_trend_365, rf_easy_365, rf_races_365, rf_gap_trend_365, rf_sim_trend_365, rf_gap_values_365, rf_sim_values_365 = rf_data['365']
+    rf_dates_730, rf_values_730, rf_trend_730, rf_easy_730, rf_races_730, rf_gap_trend_730, rf_sim_trend_730, rf_gap_values_730, rf_sim_values_730 = rf_data['730']
+    rf_dates_1095, rf_values_1095, rf_trend_1095, rf_easy_1095, rf_races_1095, rf_gap_trend_1095, rf_sim_trend_1095, rf_gap_values_1095, rf_sim_values_1095 = rf_data['1095']
+    rf_dates_1825, rf_values_1825, rf_trend_1825, rf_easy_1825, rf_races_1825, rf_gap_trend_1825, rf_sim_trend_1825, rf_gap_values_1825, rf_sim_values_1825 = rf_data['1825']
+    rf_dates_all, rf_values_all, rf_trend_all, rf_easy_all, rf_races_all, rf_gap_trend_all, rf_sim_trend_all, rf_gap_values_all, rf_sim_values_all = rf_data['all']
     
     # Volume data - weeks
     week_labels_12, week_distances_12, week_runs_12 = volume_data['W']['12']
