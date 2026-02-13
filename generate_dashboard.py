@@ -1501,14 +1501,16 @@ def _generate_zone_html(zone_data):
     function isRaceMode(m){{return m==='race'||m==='racehr';}}
     function assignZ(val,zones,rm){{if(!val||val<=0)return zones[zones.length-1].id;if(rm){{for(const z of zones){{if(z.id==='Other')continue;if(val>=z.lo&&val<=z.hi)return z.id;}}return'Other';}}for(const z of zones){{if(val<z.hi)return z.id;}}return zones[zones.length-1].id;}}
     function assignToZone(val,zones,result,mins){{for(const z of zones){{if(z.id==='Other')continue;if(val>=z.lo){{result[z.id]+=mins;return;}}}}result['Other']+=mins;}}
+    function assignToZonePace(val,zones,result,mins){{for(const z of zones){{if(z.id==='Other')continue;if(val>=z.lo&&val<z.hi){{result[z.id]+=mins;return;}}}}result['Other']+=mins;}}
     function estimateRaceEffortMins(r,zones){{const result={{}};zones.forEach(z=>result[z.id]=0);const mins=r.duration_min||0,pw=r.npower||0;if(!pw||!mins){{result['Other']=mins;return result;}}assignToZone(pw*1.10,zones,result,mins*0.15);assignToZone(pw,zones,result,mins*0.60);assignToZone(pw*0.88,zones,result,mins*0.25);return result;}}
+    function estimateRaceEffortMinsPace(r,zones){{const result={{}};zones.forEach(z=>result[z.id]=0);const mins=r.duration_min||0,p=r.avg_pace_skm||0;if(!p||!mins){{result['Other']=mins;return result;}}assignToZonePace(Math.round(p*0.92),zones,result,mins*0.15);assignToZonePace(p,zones,result,mins*0.60);assignToZonePace(Math.round(p*1.10),zones,result,mins*0.25);return result;}}
     function estimateRaceEffortMinsHR(r,zones){{const result={{}};zones.forEach(z=>result[z.id]=0);const mins=r.duration_min||0,hr=r.avg_hr||0;if(!hr||!mins){{result['Other']=mins;return result;}}assignToZone(hr*1.06,zones,result,mins*0.15);assignToZone(hr,zones,result,mins*0.60);assignToZone(hr*0.92,zones,result,mins*0.25);return result;}}
     function getZoneMins(r,mode,zones){{
       // Use pre-computed NPZ zone data if available
       const key={{hr:'hz',power:'pz',race:'rpz',racehr:'rhz'}}[mode];
       if(r[key]){{const result={{}};zones.forEach(z=>result[z.id]=0);Object.keys(r[key]).forEach(k=>{{if(result[k]!==undefined)result[k]=r[key][k];}});return result;}}
       // Fallback to heuristic
-      if(mode==='race')return estimateRaceEffortMins(r,zones);
+      if(mode==='race'){{if(typeof currentMode!=='undefined'&&currentMode==='gap')return estimateRaceEffortMinsPace(r,zones);return estimateRaceEffortMins(r,zones);}}
       if(mode==='racehr')return estimateRaceEffortMinsHR(r,zones);
       // HR/Power zone fallback: assign all time to primary zone
       const result={{}};zones.forEach(z=>result[z.id]=0);const mins=r.duration_min||0,v=valFor(r,mode),zid=assignZ(v,zones,false);if(result[zid]!==undefined)result[zid]=mins;return result;
