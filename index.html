@@ -368,7 +368,7 @@
 <body>
 <script>Chart.defaults.color="#8b90a0";Chart.defaults.borderColor="rgba(255,255,255,0.04)";Chart.defaults.font.family="'DM Sans',sans-serif";Chart.defaults.plugins.legend.labels.padding=10;</script>
     <h1>🏃 Paul Collyer</h1>
-    <div class="dash-sub">Friday 13 February 2026, 20:51</div>
+    <div class="dash-sub">Friday 13 February 2026, 21:32</div>
     
     <!-- Phase 2: Mode Toggle -->
     <div class="mode-toggle" style="display:flex;gap:6px;margin:10px 0 8px;align-items:center;">
@@ -424,7 +424,7 @@
             <div class="stat-label">RFL 14d</div>
             <div class="stat-sub">change</div>
         </div>
-        <div class="stat-card">
+        <div class="stat-card power-only">
             <div class="stat-value">-1.1%</div>
             <div class="stat-label">Easy RF Gap</div>
             <div class="stat-sub">vs trend</div>
@@ -579,8 +579,8 @@
     function makeRacePwZones(){const pw=RACE_CFG,m=pw['Mara'].pw,h=pw['HM'].pw,t=pw['10K'].pw,f=pw['5K'].pw;const mh=Math.round((m+h)/2),ht=Math.round((h+t)/2),tf=Math.round((t+f)/2),above=Math.round(f*1.05);return[{id:'Sub-5K',name:'Sub-5K',lo:above,hi:9999,c:'#4ade80'},{id:'5K',name:'5K',lo:tf,hi:above,c:'#f472b6'},{id:'10K',name:'10K',lo:ht,hi:tf,c:'#fb923c'},{id:'HM',name:'HM',lo:mh,hi:ht,c:'#a78bfa'},{id:'Mara',name:'Mara',lo:Math.round(m*0.93),hi:mh,c:'#38bdf8'},{id:'Other',name:'Other',lo:0,hi:Math.round(m*0.93),c:'#4b5563'}];}
     function makeRaceHrZones(){return[{id:'Sub-5K',name:'Sub-5K',lo:184,hi:9999,c:'#4ade80'},{id:'5K',name:'5K',lo:180,hi:184,c:'#f472b6'},{id:'10K',name:'10K',lo:175,hi:180,c:'#fb923c'},{id:'HM',name:'HM',lo:170,hi:175,c:'#a78bfa'},{id:'Mara',name:'Mara',lo:163,hi:170,c:'#38bdf8'},{id:'Other',name:'Other',lo:0,hi:163,c:'#4b5563'}];}
     const RACE_PW_Z=makeRacePwZones(),RACE_HR_Z=makeRaceHrZones();
-    function zonesFor(m){if(m==='hr')return HR_Z;if(m==='power')return PW_Z;if(m==='race')return RACE_PW_Z;return RACE_HR_Z;}
-    function valFor(r,m){if(m==='hr'||m==='racehr')return r.avg_hr;return r.npower;}
+    function zonesFor(m){if(m==='hr')return HR_Z;if(m==='power')return PW_Z;if(m==='race'){if(typeof currentMode!=='undefined'&&currentMode==='gap')return RACE_HR_Z;return RACE_PW_Z;}return RACE_HR_Z;}
+    function valFor(r,m){if(m==='hr'||m==='racehr')return r.avg_hr;if(typeof currentMode!=='undefined'&&currentMode==='gap')return r.avg_hr;return r.npower;}
     function isRaceMode(m){return m==='race'||m==='racehr';}
     function assignZ(val,zones,rm){if(!val||val<=0)return zones[zones.length-1].id;if(rm){for(const z of zones){if(z.id==='Other')continue;if(val>=z.lo&&val<=z.hi)return z.id;}return'Other';}for(const z of zones){if(val<z.hi)return z.id;}return zones[zones.length-1].id;}
     function assignToZone(val,zones,result,mins){for(const z of zones){if(z.id==='Other')continue;if(val>=z.lo){result[z.id]+=mins;return;}}result['Other']+=mins;}
@@ -596,7 +596,7 @@
       // HR/Power zone fallback: assign all time to primary zone
       const result={};zones.forEach(z=>result[z.id]=0);const mins=r.duration_min||0,v=valFor(r,mode),zid=assignZ(v,zones,false);if(result[zid]!==undefined)result[zid]=mins;return result;
     }
-    function calcSpecificity(){const today=new Date();const c14=new Date(today);c14.setDate(c14.getDate()-14);const c28=new Date(today);c28.setDate(c28.getDate()-28);const targets=[{key:'5K'},{key:'HM'}];targets.forEach(tgt=>{let m14=0,m28=0;ZONE_RUNS.forEach(r=>{const d=new Date(r.date);if(d<c28)return;const est=getZoneMins(r,'race',RACE_PW_Z);const mins=est[tgt.key]||0;if(d>=c14)m14+=mins;m28+=mins;});const e14=document.getElementById('spec14_'+tgt.key),e28=document.getElementById('spec28_'+tgt.key);if(e14)e14.innerHTML=Math.round(m14)+'<span style="font-size:0.75rem;color:var(--text-dim)">min</span>';if(e28)e28.innerHTML=Math.round(m28)+'<span style="font-size:0.75rem;color:var(--text-dim)">min</span>';});}calcSpecificity();
+    function calcSpecificity(){const today=new Date();const c14=new Date(today);c14.setDate(c14.getDate()-14);const c28=new Date(today);c28.setDate(c28.getDate()-28);const useHR=(typeof currentMode!=='undefined'&&currentMode==='gap');const zones=useHR?RACE_HR_Z:RACE_PW_Z;const modeKey=useHR?'racehr':'race';const targets=[{key:'5K'},{key:'HM'}];targets.forEach(tgt=>{let m14=0,m28=0;ZONE_RUNS.forEach(r=>{const d=new Date(r.date);if(d<c28)return;const est=getZoneMins(r,modeKey,zones);const mins=est[tgt.key]||0;if(d>=c14)m14+=mins;m28+=mins;});const e14=document.getElementById('spec14_'+tgt.key),e28=document.getElementById('spec28_'+tgt.key);if(e14)e14.innerHTML=Math.round(m14)+'<span style="font-size:0.75rem;color:var(--text-dim)">min</span>';if(e28)e28.innerHTML=Math.round(m28)+'<span style="font-size:0.75rem;color:var(--text-dim)">min</span>';});}calcSpecificity();
     // Weekly zone bars
     function weekKey(ds){const d=new Date(ds),day=d.getDay(),m=new Date(d);m.setDate(d.getDate()-((day+6)%7));return m.toISOString().slice(0,10);}
     function fmtWk(s){const d=new Date(s),tmp=new Date(d.valueOf());tmp.setDate(tmp.getDate()+3-(tmp.getDay()+6)%7);const w1=new Date(tmp.getFullYear(),0,4);const wk=1+Math.round(((tmp-w1)/864e5-3+(w1.getDay()+6)%7)/7);return'W'+String(wk).padStart(2,'0')+'/'+String(tmp.getFullYear()).slice(-2);}
@@ -825,7 +825,7 @@
     </div>
     
     <div class="footer">
-        Updated: 2026-02-13 20:51<br>
+        Updated: 2026-02-13 21:32<br>
         Data through: 2026-02-13
     </div>
     
@@ -1051,7 +1051,7 @@
             rfChart.data.labels = d.dates;
             rfChart.data.datasets[0].data = d[valKey] || d.values;
             rfChart.data.datasets[1].data = d[trendKey] || d.trend;
-            rfChart.data.datasets[2].data = d.easy;
+            rfChart.data.datasets[2].data = currentMode === 'stryd' ? d.easy : d.easy.map(() => null);
             
             // Adjust display based on range
             const pointSettings = {
@@ -1867,13 +1867,15 @@
             cpBanner.textContent = '⚡ CP ' + Math.round(372 * parseFloat(cpVal.rfl) / 100) + 'W';
         }
         
-        // Update zone badge (hide power info in GAP mode)
+        // Update zone badge (hide power info in GAP mode, use mode CP for Sim)
         const zb = document.getElementById('zone-badge');
         if (zb && typeof ZONE_CP !== 'undefined') {
             if (isGap) {
-                zb.textContent = 'LTHR ' + HR_Z[3].max + ' · Max ~' + HR_Z[4].max;
+                zb.textContent = 'LTHR ' + HR_Z[3].hi + ' · Max ~' + HR_Z[4].hi;
             } else {
-                zb.textContent = 'LT ' + Math.round(ZONE_CP * 0.90) + 'W · CP ' + ZONE_CP + 'W · LTHR ' + HR_Z[3].max + ' · Max ~' + HR_Z[4].max;
+                const modeCP = mode === 'sim' ? Math.round(ZONE_PEAK_CP * parseFloat(modeStats.sim.rfl) / 100) : ZONE_CP;
+                const modeLT = Math.round(modeCP * 0.956);
+                zb.textContent = 'LT ' + modeLT + 'W · CP ' + modeCP + 'W · LTHR ' + HR_Z[3].hi + ' · Max ~' + HR_Z[4].hi;
             }
         }
         
@@ -1891,7 +1893,14 @@
             prBtns.forEach(b => b.classList.remove('active'));
             prBtns[0].classList.add('active');
             if (typeof setPR === 'function') setPR('hr', prBtns[0]);
+        } else {
+            // Re-render current zone views (zones now mode-aware)
+            if (typeof renderWk === 'function') renderWk();
+            if (typeof renderPR === 'function') renderPR();
         }
+        
+        // Recalculate race readiness specificity (HR-based for GAP, power for others)
+        if (typeof calcSpecificity === 'function') calcSpecificity();
         
         // Re-render recent runs and top races to apply power-only visibility
         if (typeof updateRecentRunsTable === 'function') {
