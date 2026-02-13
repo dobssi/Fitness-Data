@@ -1399,9 +1399,9 @@ def _generate_zone_html(zone_data):
         race_cards += f'''<div class="rc">
             <div class="rh"><span class="rn">{race['name']}</span><span class="rd">{race['date']} · {days_str}</span></div>
             <div class="rs">
-                <div class="power-only"><div class="rv" style="color:var(--accent)">{pw}W</div><div class="rl">Target</div><div class="rx">±{band}W</div></div>
-                <div class="pace-target" style="display:none"><div class="rv" style="color:#4ade80">{pace_str}</div><div class="rl">Target pace</div></div>
-                <div><div class="rv">{t_str}</div><div class="rl">Predicted</div><div class="rx power-only">{pace_str}</div></div>
+                <div class="power-only"><div class="rv" style="color:var(--accent)" id="race-pw-{key}">{pw}W</div><div class="rl">Target</div><div class="rx">±{band}W</div></div>
+                <div class="pace-target" style="display:none"><div class="rv" style="color:#4ade80" id="race-pace-{key}">{pace_str}</div><div class="rl">Target pace</div></div>
+                <div><div class="rv" id="race-pred-{key}">{t_str}</div><div class="rl">Predicted</div><div class="rx power-only">{pace_str}</div></div>
                 <div><div class="rv" id="spec14_{key}">—</div><div class="rl">14-day</div><div class="rx">at effort</div></div>
                 <div><div class="rv" id="spec28_{key}">—</div><div class="rl">28-day</div><div class="rx">at effort</div></div>
             </div>
@@ -2419,20 +2419,29 @@ def generate_html(stats, rf_data, volume_data, ctl_atl_data, ctl_atl_lookup, rfl
         // Phase 2: Mode data for stats switching
         const modeStats = {{
             stryd: {{ rfl: '{stats["latest_rfl"]}', ag: '{stats["age_grade"] or "-"}',
+                cp: {round(PEAK_CP_WATTS_DASH * float(stats["latest_rfl"]) / 100) if stats["latest_rfl"] != "-" else 0},
                 pred5k: '{format_race_time(stats["race_predictions"].get("5k", "-"))}',
                 pred10k: '{format_race_time(stats["race_predictions"].get("10k", "-"))}',
                 predHm: '{format_race_time(stats["race_predictions"].get("Half Marathon", "-"))}',
-                predMara: '{format_race_time(stats["race_predictions"].get("Marathon", "-"))}' }},
+                predMara: '{format_race_time(stats["race_predictions"].get("Marathon", "-"))}',
+                pred5k_s: {stats["race_predictions"].get("5k", 0) or 0},
+                predHm_s: {stats["race_predictions"].get("Half Marathon", 0) or 0} }},
             gap: {{ rfl: '{stats.get("latest_rfl_gap", "-")}', ag: '{stats["race_predictions"].get("_ag_gap") or "-"}',
+                cp: {round(PEAK_CP_WATTS_DASH * float(stats.get("latest_rfl_gap", 0)) / 100) if stats.get("latest_rfl_gap", "-") != "-" else 0},
                 pred5k: '{format_race_time(stats["race_predictions"].get("_mode_gap", dict()).get("5k", "-"))}',
                 pred10k: '{format_race_time(stats["race_predictions"].get("_mode_gap", dict()).get("10k", "-"))}',
                 predHm: '{format_race_time(stats["race_predictions"].get("_mode_gap", dict()).get("Half Marathon", "-"))}',
-                predMara: '{format_race_time(stats["race_predictions"].get("_mode_gap", dict()).get("Marathon", "-"))}' }},
+                predMara: '{format_race_time(stats["race_predictions"].get("_mode_gap", dict()).get("Marathon", "-"))}',
+                pred5k_s: {stats["race_predictions"].get("_mode_gap", dict()).get("5k", 0) or 0},
+                predHm_s: {stats["race_predictions"].get("_mode_gap", dict()).get("Half Marathon", 0) or 0} }},
             sim: {{ rfl: '{stats.get("latest_rfl_sim", "-")}', ag: '{stats["race_predictions"].get("_ag_sim") or "-"}',
+                cp: {round(PEAK_CP_WATTS_DASH * float(stats.get("latest_rfl_sim", 0)) / 100) if stats.get("latest_rfl_sim", "-") != "-" else 0},
                 pred5k: '{format_race_time(stats["race_predictions"].get("_mode_sim", dict()).get("5k", "-"))}',
                 pred10k: '{format_race_time(stats["race_predictions"].get("_mode_sim", dict()).get("10k", "-"))}',
                 predHm: '{format_race_time(stats["race_predictions"].get("_mode_sim", dict()).get("Half Marathon", "-"))}',
-                predMara: '{format_race_time(stats["race_predictions"].get("_mode_sim", dict()).get("Marathon", "-"))}' }}
+                predMara: '{format_race_time(stats["race_predictions"].get("_mode_sim", dict()).get("Marathon", "-"))}',
+                pred5k_s: {stats["race_predictions"].get("_mode_sim", dict()).get("5k", 0) or 0},
+                predHm_s: {stats["race_predictions"].get("_mode_sim", dict()).get("Half Marathon", 0) or 0} }}
         }};
         
         // v51: Generate per-point colours (red for races, blue for training)
@@ -3372,7 +3381,39 @@ def generate_html(stats, rf_data, volume_data, ctl_atl_data, ctl_atl_lookup, rfl
             if (typeof renderPR === 'function') renderPR();
         }}
         
-        // Recalculate race readiness specificity (HR-based for GAP, power for others)
+        // Update race readiness cards (predicted time, target power/pace)
+        const raceCfg = {{
+            '5K': {{ factor: 1.05, dist: 5.0 }},
+            'HM': {{ factor: 0.95, dist: 21.097 }}
+        }};
+        ['5K', 'HM'].forEach(key => {{
+            const cfg = raceCfg[key];
+            const mcp = ms.cp;
+            const pw = Math.round(mcp * cfg.factor);
+            // Update power target
+            const pwEl = document.getElementById('race-pw-' + key);
+            if (pwEl) pwEl.textContent = pw + 'W';
+            // Update predicted time
+            const predKey = key === '5K' ? 'pred5k_s' : 'predHm_s';
+            const predEl = document.getElementById('race-pred-' + key);
+            if (predEl && ms[predKey]) {{
+                const t = Math.round(ms[predKey]);
+                const hrs = Math.floor(t / 3600);
+                const mins = Math.floor((t % 3600) / 60);
+                const secs = t % 60;
+                predEl.textContent = hrs > 0 ? hrs + ':' + String(mins).padStart(2,'0') + ':' + String(secs).padStart(2,'0') : mins + ':' + String(secs).padStart(2,'0');
+            }}
+            // Update pace target
+            const paceEl = document.getElementById('race-pace-' + key);
+            if (paceEl && ms[predKey]) {{
+                const pace = ms[predKey] / cfg.dist;
+                const pm = Math.floor(pace / 60);
+                const ps = Math.round(pace % 60);
+                paceEl.textContent = pm + ':' + String(ps).padStart(2,'0') + '/km';
+            }}
+        }});
+        
+        // Recalculate race readiness specificity (pace for GAP, power for others)
         if (typeof calcSpecificity === 'function') calcSpecificity();
         
         // Re-render recent runs and top races to apply power-only visibility
