@@ -4471,15 +4471,7 @@ def main() -> int:
                 print(f"  {mode.upper()} predictions on {n_mode} runs")
             
             # Phase 2: GAP/Sim predicted age grades (latest row)
-            for mode, rfl_col in [('gap', 'RFL_gap_Trend'), ('sim', 'RFL_sim_Trend')]:
-                if rfl_col not in dfm.columns:
-                    continue
-                mode_rfl = dfm.iloc[-1].get(rfl_col)
-                if pd.notna(mode_rfl) and mode_rfl > 0:
-                    mode_pred_5k = calc_race_prediction(mode_rfl, '5k', re_p90, PEAK_CP_WATTS, mass_kg)
-                    mode_ag = calc_age_grade(mode_pred_5k, 5.0, runner_age, runner_gender, 'road')
-                    if mode_ag:
-                        dfm.at[dfm.index[-1], f'pred_5k_age_grade_{mode}'] = round(mode_ag, 1)
+            # (moved after runner_age computation below)
             
             # Predicted 5K age grade (calculate age from DOB if available)
             runner_gender = getattr(args, 'runner_gender', 'male')
@@ -4500,6 +4492,17 @@ def main() -> int:
             if pred_5k_ag:
                 dfm.at[dfm.index[-1], 'pred_5k_age_grade'] = round(pred_5k_ag, 1)
                 print(f"  Predicted 5K Age Grade: {pred_5k_ag:.1f}% (age {runner_age})")
+            
+            # Phase 2: GAP/Sim predicted age grades (latest row)
+            for mode, rfl_col in [('gap', 'RFL_gap_Trend'), ('sim', 'RFL_sim_Trend')]:
+                if rfl_col not in dfm.columns:
+                    continue
+                mode_rfl = dfm.iloc[-1].get(rfl_col)
+                if pd.notna(mode_rfl) and mode_rfl > 0:
+                    mode_pred_5k = calc_race_prediction(mode_rfl, '5k', re_p90, PEAK_CP_WATTS, mass_kg)
+                    mode_ag = calc_age_grade(mode_pred_5k, 5.0, runner_age, runner_gender, 'road')
+                    if mode_ag:
+                        dfm.at[dfm.index[-1], f'pred_5k_age_grade_{mode}'] = round(mode_ag, 1)
         
         # Calculate age grades for races and parkruns
         print("  Calculating age grades for races/parkruns...")
