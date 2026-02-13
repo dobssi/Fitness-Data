@@ -368,7 +368,7 @@
 <body>
 <script>Chart.defaults.color="#8b90a0";Chart.defaults.borderColor="rgba(255,255,255,0.04)";Chart.defaults.font.family="'DM Sans',sans-serif";Chart.defaults.plugins.legend.labels.padding=10;</script>
     <h1>🏃 Paul Collyer</h1>
-    <div class="dash-sub">Friday 13 February 2026, 21:49</div>
+    <div class="dash-sub">Friday 13 February 2026, 22:00</div>
     
     <!-- Phase 2: Mode Toggle -->
     <div class="mode-toggle" style="display:flex;gap:6px;margin:10px 0 8px;align-items:center;">
@@ -498,18 +498,18 @@
         <div class="rc">
             <div class="rh"><span class="rn">5K London</span><span class="rd">2026-02-27 · 14d</span></div>
             <div class="rs">
-                <div class="power-only"><div class="rv" style="color:var(--accent)">354W</div><div class="rl">Target</div><div class="rx">±11W</div></div>
-                <div class="pace-target" style="display:none"><div class="rv" style="color:#4ade80">3:54/km</div><div class="rl">Target pace</div></div>
-                <div><div class="rv">19:34</div><div class="rl">Predicted</div><div class="rx power-only">3:54/km</div></div>
+                <div class="power-only"><div class="rv" style="color:var(--accent)" id="race-pw-5K">354W</div><div class="rl">Target</div><div class="rx">±11W</div></div>
+                <div class="pace-target" style="display:none"><div class="rv" style="color:#4ade80" id="race-pace-5K">3:54/km</div><div class="rl">Target pace</div></div>
+                <div><div class="rv" id="race-pred-5K">19:34</div><div class="rl">Predicted</div><div class="rx power-only">3:54/km</div></div>
                 <div><div class="rv" id="spec14_5K">—</div><div class="rl">14-day</div><div class="rx">at effort</div></div>
                 <div><div class="rv" id="spec28_5K">—</div><div class="rl">28-day</div><div class="rx">at effort</div></div>
             </div>
         </div><div class="rc">
             <div class="rh"><span class="rn">HM Stockholm</span><span class="rd">2026-04-25 · 71d</span></div>
             <div class="rs">
-                <div class="power-only"><div class="rv" style="color:var(--accent)">320W</div><div class="rl">Target</div><div class="rx">±10W</div></div>
-                <div class="pace-target" style="display:none"><div class="rv" style="color:#4ade80">4:19/km</div><div class="rl">Target pace</div></div>
-                <div><div class="rv">1:31:20</div><div class="rl">Predicted</div><div class="rx power-only">4:19/km</div></div>
+                <div class="power-only"><div class="rv" style="color:var(--accent)" id="race-pw-HM">320W</div><div class="rl">Target</div><div class="rx">±10W</div></div>
+                <div class="pace-target" style="display:none"><div class="rv" style="color:#4ade80" id="race-pace-HM">4:19/km</div><div class="rl">Target pace</div></div>
+                <div><div class="rv" id="race-pred-HM">1:31:20</div><div class="rl">Predicted</div><div class="rx power-only">4:19/km</div></div>
                 <div><div class="rv" id="spec14_HM">—</div><div class="rl">14-day</div><div class="rx">at effort</div></div>
                 <div><div class="rv" id="spec28_HM">—</div><div class="rl">28-day</div><div class="rx">at effort</div></div>
             </div>
@@ -830,7 +830,7 @@
     </div>
     
     <div class="footer">
-        Updated: 2026-02-13 21:49<br>
+        Updated: 2026-02-13 22:00<br>
         Data through: 2026-02-13
     </div>
     
@@ -952,20 +952,29 @@
         // Phase 2: Mode data for stats switching
         const modeStats = {
             stryd: { rfl: '90.6', ag: '78.6',
+                cp: 337,
                 pred5k: '19:32',
                 pred10k: '41:00',
                 predHm: '1:31:04',
-                predMara: '3:14:24' },
+                predMara: '3:14:24',
+                pred5k_s: 19:32,
+                predHm_s: 1:31:04 },
             gap: { rfl: '89.4', ag: '77.6',
+                cp: 333,
                 pred5k: '19:47',
                 pred10k: '41:32',
                 predHm: '1:32:15',
-                predMara: '3:16:57' },
+                predMara: '3:16:57',
+                pred5k_s: 19:47,
+                predHm_s: 1:32:15 },
             sim: { rfl: '90.8', ag: '78.8',
+                cp: 338,
                 pred5k: '19:28',
                 pred10k: '40:54',
                 predHm: '1:30:49',
-                predMara: '3:13:53' }
+                predMara: '3:13:53',
+                pred5k_s: 19:28,
+                predHm_s: 1:30:49 }
         };
         
         // v51: Generate per-point colours (red for races, blue for training)
@@ -1905,7 +1914,39 @@
             if (typeof renderPR === 'function') renderPR();
         }
         
-        // Recalculate race readiness specificity (HR-based for GAP, power for others)
+        // Update race readiness cards (predicted time, target power/pace)
+        const raceCfg = {
+            '5K': { factor: 1.05, dist: 5.0 },
+            'HM': { factor: 0.95, dist: 21.097 }
+        };
+        ['5K', 'HM'].forEach(key => {
+            const cfg = raceCfg[key];
+            const mcp = ms.cp;
+            const pw = Math.round(mcp * cfg.factor);
+            // Update power target
+            const pwEl = document.getElementById('race-pw-' + key);
+            if (pwEl) pwEl.textContent = pw + 'W';
+            // Update predicted time
+            const predKey = key === '5K' ? 'pred5k_s' : 'predHm_s';
+            const predEl = document.getElementById('race-pred-' + key);
+            if (predEl && ms[predKey]) {
+                const t = Math.round(ms[predKey]);
+                const hrs = Math.floor(t / 3600);
+                const mins = Math.floor((t % 3600) / 60);
+                const secs = t % 60;
+                predEl.textContent = hrs > 0 ? hrs + ':' + String(mins).padStart(2,'0') + ':' + String(secs).padStart(2,'0') : mins + ':' + String(secs).padStart(2,'0');
+            }
+            // Update pace target
+            const paceEl = document.getElementById('race-pace-' + key);
+            if (paceEl && ms[predKey]) {
+                const pace = ms[predKey] / cfg.dist;
+                const pm = Math.floor(pace / 60);
+                const ps = Math.round(pace % 60);
+                paceEl.textContent = pm + ':' + String(ps).padStart(2,'0') + '/km';
+            }
+        });
+        
+        // Recalculate race readiness specificity (pace for GAP, power for others)
         if (typeof calcSpecificity === 'function') calcSpecificity();
         
         // Re-render recent runs and top races to apply power-only visibility
