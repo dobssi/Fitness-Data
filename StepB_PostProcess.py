@@ -3249,6 +3249,12 @@ def main() -> int:
         "RF_gap_Trend",
         "RFL_gap",
         "RFL_gap_Trend",
+        "PS_gap",
+        "RF_sim_median",
+        "RF_sim_adj",
+        "RF_sim_Trend",
+        "RFL_sim",
+        "RFL_sim_Trend",
     ]
     for c in needed_cols:
         if c not in dfm.columns:
@@ -3406,6 +3412,7 @@ def main() -> int:
         "full_run_drift_pct_per_min", "full_run_drift_r2", "full_run_drift_duration_min",
         "official_distance_km", "surface_adj", "gps_distance_error_m",
         "RF_gap_median",
+        "RF_sim_median",
     ]
     for c in float_cols:
         if c in dfm.columns:
@@ -3655,6 +3662,30 @@ def main() -> int:
                                  cp_watts=_gap_local_cp, grade=g)
             gap_median = rf_gap.get('RF_adjusted_median_W_per_bpm', np.nan)
             dfm.at[i, 'RF_gap_median'] = float(gap_median) if np.isfinite(gap_median) else np.nan
+            
+            # --- Phase 2: Sim Power RF (parallel computation) ---
+            # Always compute simulated power using RE model (even for Stryd runs)
+            # This gives a third curve: what if all runs used the athlete-specific sim model?
+            _sim_temp_c = pd.to_numeric(row.get("avg_temp_c", np.nan), errors="coerce")
+            _sim_rh_pct = pd.to_numeric(row.get("avg_humidity_pct", np.nan), errors="coerce")
+            if not np.isfinite(_sim_temp_c): _sim_temp_c = 10.0
+            if not np.isfinite(_sim_rh_pct): _sim_rh_pct = 70.0
+            _sim_rho = air_density_kg_m3(float(_sim_temp_c), 1013.25, float(_sim_rh_pct) / 100.0)
+            _sim_rho_arr = np.full_like(v, _sim_rho, dtype=float)
+            _sim_wa = np.zeros_like(v, dtype=float)
+            v_sim = _roll_med(v, 15)
+            g_sim = _roll_med(g, 15)
+            g_sim = np.clip(g_sim, -0.12, 0.12)
+            p_sim = _ensure_1d(simulate_power_series(model, v_sim, g_sim, _sim_wa, _sim_rho_arr,
+                                                      mass_kg=float(args.mass_kg), smooth_win=15))
+            if len(p_sim) != len(v):
+                p_sim = p_sim[:len(v)]
+            p_sim = np.where(np.isfinite(p_sim) & (p_sim > 0), p_sim, np.nan)
+            rf_sim = _rf_metrics(t, v, p_sim, hr_used, mass_kg=float(args.mass_kg),
+                                 race_flag=bool(row.get('race_flag', False)),
+                                 cp_watts=_local_cp, grade=g)
+            sim_median = rf_sim.get('RF_adjusted_median_W_per_bpm', np.nan)
+            dfm.at[i, 'RF_sim_median'] = float(sim_median) if np.isfinite(sim_median) else np.nan
             
             # v45: Calculate terrain metrics for RF window only (not whole run)
             # This ensures terrain_adj reflects conditions where RF was measured
@@ -4013,6 +4044,14 @@ def main() -> int:
             
             power_score = adj_power * distance_factor * ps_heat_adj
             dfm.at[i, 'Power_Score'] = power_score
+            
+            # Phase 2: GAP Power Score (same formula but using speed-based power, no era adj)
+            avg_speed_mps = (distance_km * 1000) / moving_time_s if moving_time_s > 0 else 0
+            gap_avg_power = avg_speed_mps * float(args.mass_kg) / GAP_RE_CONSTANT
+            # No air power adjustment needed (GAP power doesn't include air resistance)
+            # No era adjustment (GAP is hardware-independent)
+            gap_power_score = gap_avg_power * distance_factor * ps_heat_adj
+            dfm.at[i, 'PS_gap'] = gap_power_score
         
         if pd.notna(rf_raw) and rf_raw > 0 and np.isfinite(total_adj):
             # Get previous RF_Trend (from row i-1) for intensity calculation
@@ -4180,6 +4219,13 @@ def main() -> int:
             max_rf_gap = prev_rf_gap_trend * (1 + max_jump_pct / 100)
             rf_gap_adj = min(rf_gap_adj, max_rf_gap)
         
+        # PS floor: GAP Power Score / divisor (same logic as Stryd PS floor)
+        ps_gap = pd.to_numeric(row.get('PS_gap', np.nan), errors='coerce')
+        if pd.notna(ps_gap) and ps_gap > 0:
+            rf_gap_floor = ps_gap / ps_rf_divisor
+            if rf_gap_adj < rf_gap_floor:
+                rf_gap_adj = rf_gap_floor
+        
         dfm.at[i, 'RF_gap_adj'] = float(rf_gap_adj)
         
         # RF_gap_Trend: same weighted rolling logic with Factor and quadratic decay
@@ -4218,6 +4264,75 @@ def main() -> int:
     else:
         dfm['RFL_gap'] = np.nan
         dfm['RFL_gap_Trend'] = np.nan
+    
+    # --- Phase 2: Sim Power RF_adj and RF_sim_Trend ---
+    # Same logic as GAP but using RE-model simulated power for all runs
+    print("  Calculating RF_sim_adj and RF_sim_Trend...")
+    dfm['RF_sim_adj'] = np.nan
+    dfm['RF_sim_Trend'] = np.nan
+    
+    prev_rf_sim_trend = np.nan
+    peak_rf_sim_trend = 0.0
+    
+    for i, row in dfm.iterrows():
+        rf_sim_raw = pd.to_numeric(row.get('RF_sim_median', np.nan), errors='coerce')
+        if not np.isfinite(rf_sim_raw):
+            continue
+        
+        # Sim power uses the RE model calibrated to S4 era, so era_adj applies
+        total_adj = pd.to_numeric(row.get('Total_Adj', 1.0), errors='coerce')
+        rf_sim_adj = rf_sim_raw * total_adj if np.isfinite(total_adj) else rf_sim_raw
+        
+        # Jump cap
+        if np.isfinite(prev_rf_sim_trend) and prev_rf_sim_trend > 0:
+            max_rf_sim = prev_rf_sim_trend * (1 + max_jump_pct / 100)
+            rf_sim_adj = min(rf_sim_adj, max_rf_sim)
+        
+        # PS floor using Stryd Power Score (sim power is on the same scale as Stryd)
+        ps_val = pd.to_numeric(row.get('Power_Score', np.nan), errors='coerce')
+        if pd.notna(ps_val) and ps_val > 0:
+            rf_sim_floor = ps_val / ps_rf_divisor
+            if rf_sim_adj < rf_sim_floor:
+                rf_sim_adj = rf_sim_floor
+        
+        dfm.at[i, 'RF_sim_adj'] = float(rf_sim_adj)
+        
+        # RF_sim_Trend
+        current_date = row['date']
+        if pd.notna(current_date):
+            cutoff_date = current_date - pd.Timedelta(days=days_back)
+            mask = (dfm['date'] >= cutoff_date) & (dfm['date'] <= current_date) & (dfm.index <= i)
+            window_df = dfm.loc[mask].copy()
+            
+            if len(window_df) > 0:
+                days_ago = (current_date - window_df['date']).dt.total_seconds() / 86400
+                time_decay = (1 - (days_ago.clip(upper=days_back) / days_back) ** 2).clip(lower=0)
+                
+                factors = window_df['Factor'].fillna(0)
+                rf_sim_adjs = window_df['RF_sim_adj'].fillna(0)
+                
+                valid = (factors > 0) & (rf_sim_adjs > 0)
+                if valid.any():
+                    combined_weights = factors[valid] * time_decay[valid]
+                    numerator = (combined_weights * rf_sim_adjs[valid]).sum()
+                    denominator = combined_weights.sum()
+                    if denominator > 0:
+                        rf_sim_trend_val = numerator / denominator
+                        dfm.at[i, 'RF_sim_Trend'] = rf_sim_trend_val
+                        prev_rf_sim_trend = rf_sim_trend_val
+                        if np.isfinite(rf_sim_trend_val) and rf_sim_trend_val > peak_rf_sim_trend:
+                            peak_rf_sim_trend = rf_sim_trend_val
+    
+    # RFL_sim and RFL_sim_Trend
+    if peak_rf_sim_trend > 0:
+        dfm['RFL_sim'] = dfm['RF_sim_adj'] / peak_rf_sim_trend
+        dfm['RFL_sim_Trend'] = dfm['RF_sim_Trend'] / peak_rf_sim_trend
+        print(f"  Peak RF_sim_Trend: {peak_rf_sim_trend:.4f}")
+        latest_rfl_sim = dfm['RFL_sim_Trend'].dropna().iloc[-1] if dfm['RFL_sim_Trend'].notna().any() else np.nan
+        print(f"  Latest RFL_sim_Trend: {latest_rfl_sim:.4f}" if np.isfinite(latest_rfl_sim) else "  Latest RFL_sim_Trend: N/A")
+    else:
+        dfm['RFL_sim'] = np.nan
+        dfm['RFL_sim_Trend'] = np.nan
     
     print("\n=== v43: Calculating rolling metrics ===")
     dfm = calc_rolling_metrics(dfm)
@@ -4414,7 +4529,8 @@ def main() -> int:
         if c in dfm.columns:
             dfm[c] = pd.to_numeric(dfm[c], errors="coerce").round(4)
     for c in ("RF_adj", "RF_Trend", "RFL", "RFL_Trend",
-              "RF_gap_median", "RF_gap_adj", "RF_gap_Trend", "RFL_gap", "RFL_gap_Trend"):
+              "RF_gap_median", "RF_gap_adj", "RF_gap_Trend", "RFL_gap", "RFL_gap_Trend",
+              "RF_sim_median", "RF_sim_adj", "RF_sim_Trend", "RFL_sim", "RFL_sim_Trend"):
         if c in dfm.columns:
             dfm[c] = pd.to_numeric(dfm[c], errors="coerce").round(4)
     for c in ("Factor", "TSS", "CTL", "ATL", "TSB"):
@@ -4506,7 +4622,8 @@ def main() -> int:
         "Alert_1", "Alert_1b", "Alert_2", "Alert_3b", "Alert_5",
         "parkrun", "surface",
         # Phase 2: GAP RF parallel columns
-        "RF_gap_median", "RF_gap_adj", "RF_gap_Trend", "RFL_gap", "RFL_gap_Trend",
+        "RF_gap_median", "RF_gap_adj", "RF_gap_Trend", "RFL_gap", "RFL_gap_Trend", "PS_gap",
+        "RF_sim_median", "RF_sim_adj", "RF_sim_Trend", "RFL_sim", "RFL_sim_Trend",
         # v43 Age grade and race predictions
         "CP", "pred_5k_s", "pred_10k_s", "pred_hm_s", "pred_marathon_s",
         "pred_5k_age_grade", "age_grade_pct",
