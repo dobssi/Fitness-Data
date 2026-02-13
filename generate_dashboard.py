@@ -1507,10 +1507,12 @@ def _generate_zone_html(zone_data):
     function estimateRaceEffortMinsHR(r,zones){{const result={{}};zones.forEach(z=>result[z.id]=0);const mins=r.duration_min||0,hr=r.avg_hr||0;if(!hr||!mins){{result['Other']=mins;return result;}}assignToZone(hr*1.06,zones,result,mins*0.15);assignToZone(hr,zones,result,mins*0.60);assignToZone(hr*0.92,zones,result,mins*0.25);return result;}}
     function getZoneMins(r,mode,zones){{
       // Use pre-computed NPZ zone data if available
+      // Skip power-based race zones (rpz/pz) in GAP mode — use pace heuristic instead
+      const isGapMode=(typeof currentMode!=='undefined'&&currentMode==='gap');
       const key={{hr:'hz',power:'pz',race:'rpz',racehr:'rhz'}}[mode];
-      if(r[key]){{const result={{}};zones.forEach(z=>result[z.id]=0);Object.keys(r[key]).forEach(k=>{{if(result[k]!==undefined)result[k]=r[key][k];}});return result;}}
+      if(r[key]&&!(isGapMode&&(key==='rpz'||key==='pz'))){{const result={{}};zones.forEach(z=>result[z.id]=0);Object.keys(r[key]).forEach(k=>{{if(result[k]!==undefined)result[k]=r[key][k];}});return result;}}
       // Fallback to heuristic
-      if(mode==='race'){{if(typeof currentMode!=='undefined'&&currentMode==='gap')return estimateRaceEffortMinsPace(r,zones);return estimateRaceEffortMins(r,zones);}}
+      if(mode==='race'){{if(isGapMode)return estimateRaceEffortMinsPace(r,zones);return estimateRaceEffortMins(r,zones);}}
       if(mode==='racehr')return estimateRaceEffortMinsHR(r,zones);
       // HR/Power zone fallback: assign all time to primary zone
       const result={{}};zones.forEach(z=>result[z.id]=0);const mins=r.duration_min||0,v=valFor(r,mode),zid=assignZ(v,zones,false);if(result[zid]!==undefined)result[zid]=mins;return result;
@@ -1519,13 +1521,13 @@ def _generate_zone_html(zone_data):
     // Weekly zone bars
     function weekKey(ds){{const d=new Date(ds),day=d.getDay(),m=new Date(d);m.setDate(d.getDate()-((day+6)%7));return m.toISOString().slice(0,10);}}
     function fmtWk(s){{const d=new Date(s),tmp=new Date(d.valueOf());tmp.setDate(tmp.getDate()+3-(tmp.getDay()+6)%7);const w1=new Date(tmp.getFullYear(),0,4);const wk=1+Math.round(((tmp-w1)/864e5-3+(w1.getDay()+6)%7)/7);return'W'+String(wk).padStart(2,'0')+'/'+String(tmp.getFullYear()).slice(-2);}}
-    let wkMode='hr',wkN=8;
+    var wkMode='hr',wkN=8;
     function renderWk(){{const el=document.getElementById('wk-bars');el.innerHTML='';const zones=zonesFor(wkMode),rm=isRaceMode(wkMode);const weeks={{}};ZONE_RUNS.forEach(r=>{{const w=weekKey(r.date);if(!weeks[w])weeks[w]=[];weeks[w].push(r);}});const sorted=Object.keys(weeks).sort().slice(-wkN);let maxT=0;const wd=sorted.map(wk=>{{const zm={{}};zones.forEach(z=>zm[z.id]=0);let t=0;weeks[wk].forEach(r=>{{const mins=r.duration_min||0;const est=getZoneMins(r,wkMode,zones);Object.keys(est).forEach(zid=>{{if(zm[zid]!==undefined)zm[zid]+=est[zid];}});t+=mins;}});if(t>maxT)maxT=t;return{{week:wk,zm,t}};}});wd.forEach(w=>{{const row=document.createElement('div');row.className='wr';const lbl=document.createElement('div');lbl.className='wl';lbl.textContent=fmtWk(w.week);row.appendChild(lbl);const bar=document.createElement('div');bar.className='wb';zones.forEach(z=>{{if(w.zm[z.id]>0){{const pct=(w.zm[z.id]/maxT)*100,seg=document.createElement('div');seg.className='ws';seg.style.width=pct+'%';seg.style.background=z.c;seg.innerHTML='<div class="tip">'+z.name+': '+Math.round(w.zm[z.id])+' min</div>';bar.appendChild(seg);}}}});row.appendChild(bar);const tot=document.createElement('div');tot.className='wt';tot.textContent=Math.round(w.t)+' min';row.appendChild(tot);el.appendChild(row);}});document.getElementById('wk-leg').innerHTML=zones.map(z=>'<div class="lg"><div class="lsw" style="background:'+z.c+'"></div>'+z.name+'</div>').join('');}}
     function setWM(m,btn){{wkMode=m;document.querySelectorAll('#wk-mode button').forEach(b=>b.classList.remove('active'));btn.classList.add('active');renderWk();}}
     function setWP(n,btn){{wkN=n;document.querySelectorAll('#wk-period button').forEach(b=>b.classList.remove('active'));btn.classList.add('active');renderWk();}}
     renderWk();
     // Per-run chart
-    let prMode='hr',prChart=null;
+    var prMode='hr',prChart=null;
     function renderPR(){{const ctx=document.getElementById('prChart').getContext('2d');const last30=ZONE_RUNS.slice(-30),zones=zonesFor(prMode),rm=isRaceMode(prMode);const labels=last30.map(r=>{{const d=new Date(r.date);return d.getDate()+'/'+(d.getMonth()+1);}});const datasets=zones.map((z,zi)=>({{label:z.name,data:last30.map(r=>{{const mins=r.duration_min||0;const est=getZoneMins(r,prMode,zones);return Math.round(est[z.id]||0);}}),backgroundColor:z.c+'cc',borderWidth:0,borderRadius:2}}));if(prChart)prChart.destroy();prChart=new Chart(ctx,{{type:'bar',data:{{labels,datasets}},options:{{responsive:true,maintainAspectRatio:false,plugins:{{legend:{{display:false}},tooltip:{{callbacks:{{title:items=>{{const i=items[0].dataIndex;return last30[i].name;}},label:item=>item.dataset.label+': '+item.raw+' min'}}}}}},scales:{{x:{{stacked:true,grid:{{color:'rgba(255,255,255,0.04)'}},ticks:{{color:'#8b90a0',font:{{size:10,family:"'JetBrains Mono'"}}}}}},y:{{stacked:true,grid:{{color:'rgba(255,255,255,0.04)'}},ticks:{{color:'#8b90a0',font:{{size:10,family:"'JetBrains Mono'"}},callback:v=>v+' min'}}}}}}}}}});document.getElementById('pr-leg').innerHTML=zones.map(z=>'<div class="lg"><div class="lsw" style="background:'+z.c+'"></div>'+z.name+'</div>').join('');}}
     function setPR(m,btn){{prMode=m;document.querySelectorAll('#pr-mode button').forEach(b=>b.classList.remove('active'));btn.classList.add('active');renderPR();}}
     renderPR();
@@ -3384,7 +3386,14 @@ def generate_html(stats, rf_data, volume_data, ctl_atl_data, ctl_atl_lookup, rfl
             const gapPrBtn = document.querySelector('#pr-mode .gap-only');
             if (gapPrBtn) {{ gapPrBtn.classList.add('active'); prMode='race'; renderPR(); }}
         }} else {{
-            // Re-render current zone views (zones now mode-aware)
+            // Switching back from GAP — reset to HR zone view and re-activate button
+            wkMode='hr'; prMode='hr';
+            document.querySelectorAll('#wk-mode button').forEach(b => b.classList.remove('active'));
+            const wkHrBtn = document.querySelector('#wk-mode button');
+            if (wkHrBtn) wkHrBtn.classList.add('active');
+            document.querySelectorAll('#pr-mode button').forEach(b => b.classList.remove('active'));
+            const prHrBtn = document.querySelector('#pr-mode button');
+            if (prHrBtn) prHrBtn.classList.add('active');
             if (typeof renderWk === 'function') renderWk();
             if (typeof renderPR === 'function') renderPR();
         }}
