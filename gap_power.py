@@ -78,23 +78,31 @@ def compute_gap_power(
     speed_mps: np.ndarray,
     grade: np.ndarray,
     mass_kg: float,
-    re_constant: float = 0.92
+    re_constant: float = 0.92,
+    rho: float = 1.225,
+    cda: float = 0.24,
+    wind_mps: np.ndarray | None = None
 ) -> np.ndarray:
     """
     Compute GAP-based 'virtual power' from speed and grade.
     
-    Power_gap (W) = speed × cost_ratio(grade) × mass / RE
+    Power_gap (W) = speed × cost_ratio(grade) × mass / RE + P_air
     
-    where cost_ratio = EC(grade) / EC(flat) adjusts for terrain difficulty.
-    This produces values on a similar scale to Stryd power (~15% higher)
-    but what matters is the RF ratio (power/HR) and its trend over time.
-    RFL normalisation makes the absolute scale irrelevant.
+    where:
+    - cost_ratio = EC(grade) / EC(flat) adjusts for terrain difficulty
+    - P_air = 0.5 × CdA × rho × (speed + wind)³ adds air resistance
+    
+    Without air resistance, GAP systematically underestimates power vs Stryd
+    by ~2-4% at typical running speeds (5-13W missing).
     
     Args:
         speed_mps: Running speed in m/s
         grade: Gradient as fraction (0.05 = 5% uphill)
         mass_kg: Athlete mass in kg
         re_constant: Running economy constant (0.92 typical male, ~0.94 female)
+        rho: Air density in kg/m³ (default 1.225 at sea level, 15°C)
+        cda: Drag area in m² (default 0.24 for typical runner)
+        wind_mps: Headwind component in m/s (positive = headwind). None = calm.
         
     Returns:
         GAP-based virtual power in watts
@@ -106,8 +114,19 @@ def compute_gap_power(
     # Cost ratio: how much harder (or easier) is this grade vs flat?
     cost_ratio = ec_grade / np.clip(ec_flat, 1.0, None)
     
-    # Virtual power = speed × cost_ratio × mass / RE
-    power_w = speed_mps * cost_ratio * mass_kg / re_constant
+    # Locomotion power = speed × cost_ratio × mass / RE
+    power_locomotion = speed_mps * cost_ratio * mass_kg / re_constant
+    
+    # Air resistance power = 0.5 × CdA × rho × v_effective³
+    # v_effective = running speed + headwind (positive headwind adds resistance)
+    if wind_mps is not None:
+        v_eff = speed_mps + wind_mps
+    else:
+        v_eff = speed_mps
+    v_eff = np.clip(v_eff, 0, None)  # Can't have negative effective speed
+    power_air = 0.5 * cda * rho * v_eff ** 3
+    
+    power_w = power_locomotion + power_air
     
     return power_w
 

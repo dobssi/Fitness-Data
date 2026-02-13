@@ -3646,13 +3646,19 @@ def main() -> int:
                     dfm.at[i, k] = val
             
             # --- Phase 2: GAP RF (parallel computation) ---
-            # Compute GAP-based power from Minetti cost model, then RF_gap = gap_power / HR
+            # Compute GAP-based power from Minetti cost model + air resistance
             # Uses same smoothing as sim power pipeline
             v_gap = _roll_med(v, 15)
             g_gap = _roll_med(g, 15)
             g_gap = np.clip(g_gap, -0.12, 0.12)
+            # Air density for GAP air resistance component
+            _gap_temp_c = pd.to_numeric(row.get("avg_temp_c", np.nan), errors="coerce")
+            _gap_rh_pct = pd.to_numeric(row.get("avg_humidity_pct", np.nan), errors="coerce")
+            if not np.isfinite(_gap_temp_c): _gap_temp_c = 10.0
+            if not np.isfinite(_gap_rh_pct): _gap_rh_pct = 70.0
+            _gap_rho = air_density_kg_m3(float(_gap_temp_c), 1013.25, float(_gap_rh_pct) / 100.0)
             p_gap = compute_gap_power(v_gap, g_gap, mass_kg=float(args.mass_kg),
-                                      re_constant=GAP_RE_CONSTANT)
+                                      re_constant=GAP_RE_CONSTANT, rho=_gap_rho)
             p_gap = np.where(np.isfinite(p_gap) & (p_gap > 0), p_gap, np.nan)
             # Scale CP for recovery filter: GAP power ≈ Stryd power / RE_constant
             # (Stryd RE ≈ 0.92 for S4/S5, so ratio ≈ 1.0/0.92 ≈ 1.087)
@@ -4048,7 +4054,9 @@ def main() -> int:
             # Phase 2: GAP Power Score (same formula but using speed-based power, no era adj)
             avg_speed_mps = (distance_km * 1000) / moving_time_s if moving_time_s > 0 else 0
             gap_avg_power = avg_speed_mps * float(args.mass_kg) / GAP_RE_CONSTANT
-            # No air power adjustment needed (GAP power doesn't include air resistance)
+            # Add air resistance: P_air = 0.5 * CdA * rho * v^3
+            _ps_rho = air_density_kg_m3(float(temp_adj), 1013.25, 0.6)  # approximate
+            gap_avg_power += 0.5 * 0.24 * 1.225 * avg_speed_mps ** 3
             # No era adjustment (GAP is hardware-independent)
             gap_power_score = gap_avg_power * distance_factor * ps_heat_adj
             dfm.at[i, 'PS_gap'] = gap_power_score
