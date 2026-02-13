@@ -4287,9 +4287,14 @@ def main() -> int:
         if not np.isfinite(rf_sim_raw):
             continue
         
-        # Sim power uses the RE model calibrated to S4 era, so era_adj applies
+        # Sim power uses the RE model - hardware-independent like GAP
+        # Remove era_adj (which corrects for Stryd hardware differences)
         total_adj = pd.to_numeric(row.get('Total_Adj', 1.0), errors='coerce')
-        rf_sim_adj = rf_sim_raw * total_adj if np.isfinite(total_adj) else rf_sim_raw
+        era_adj = pd.to_numeric(row.get('Era_Adj', 1.0), errors='coerce')
+        if not (np.isfinite(era_adj) and era_adj > 0):
+            era_adj = 1.0
+        sim_total_adj = total_adj / era_adj if era_adj != 0 else total_adj
+        rf_sim_adj = rf_sim_raw * sim_total_adj if np.isfinite(sim_total_adj) else rf_sim_raw
         
         # Jump cap
         if np.isfinite(prev_rf_sim_trend) and prev_rf_sim_trend > 0:
