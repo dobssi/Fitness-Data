@@ -158,6 +158,22 @@ def load_and_process_data():
         
         print(f"  From Master: CP={critical_power}W, Age Grade={age_grade}%")
         print(f"  Race predictions: {race_predictions}")
+        
+        # Phase 2: GAP and Sim predictions for dashboard mode toggle
+        for mode in ('gap', 'sim'):
+            mode_preds = {}
+            for dist, col in [('5k', f'pred_5k_s_{mode}'), ('10k', f'pred_10k_s_{mode}'),
+                               ('Half Marathon', f'pred_hm_s_{mode}'), ('Marathon', f'pred_marathon_s_{mode}')]:
+                val = latest.get(col)
+                if pd.notna(val):
+                    mode_preds[dist] = format_seconds(val)
+            race_predictions[f'_mode_{mode}'] = mode_preds
+            
+            cp_mode = latest.get(f'CP_{mode}')
+            race_predictions[f'_cp_{mode}'] = int(round(float(cp_mode))) if pd.notna(cp_mode) else None
+            
+            ag_mode = latest.get(f'pred_5k_age_grade_{mode}')
+            race_predictions[f'_ag_{mode}'] = round(float(ag_mode), 2) if pd.notna(ag_mode) else None
     
     return df, ctl, atl, tsb, weight, age_grade, critical_power, race_predictions
 
@@ -271,6 +287,9 @@ def get_summary_stats(df):
         'latest_dist': round(latest[dist_col], 2) if latest is not None and pd.notna(latest.get(dist_col)) else None,
         # v51: Easy RF gap
         'easy_rfl_gap': round(latest.get('Easy_RFL_Gap', 0) * 100, 1) if latest is not None and pd.notna(latest.get('Easy_RFL_Gap')) else None,
+        # Phase 2: GAP and Sim RFL for mode toggle
+        'latest_rfl_gap': round((latest.get('RFL_gap_Trend') or 0) * 100, 1) if latest is not None and pd.notna(latest.get('RFL_gap_Trend')) else None,
+        'latest_rfl_sim': round((latest.get('RFL_sim_Trend') or 0) * 100, 1) if latest is not None and pd.notna(latest.get('RFL_sim_Trend')) else None,
     }
     return stats
 
@@ -289,7 +308,7 @@ def get_rfl_trend_data(df, days=90):
     trend_col = 'RFL_Trend'
     
     if rfl_col not in recent.columns and trend_col not in recent.columns:
-        return [], [], [], [], []
+        return [], [], [], [], [], [], [], [], []
     
     cols_to_keep = ['date']
     if rfl_col in recent.columns:
@@ -303,6 +322,10 @@ def get_rfl_trend_data(df, days=90):
     has_race = 'race_flag' in recent.columns
     if has_race:
         cols_to_keep.append('race_flag')
+    # Phase 2: Include GAP/Sim columns
+    for gc in ['RFL_gap_Trend', 'RFL_sim_Trend', 'RFL_gap', 'RFL_sim']:
+        if gc in recent.columns:
+            cols_to_keep.append(gc)
     
     recent = recent[cols_to_keep].copy()
     
@@ -710,6 +733,8 @@ def get_recent_runs(df, n=10):
                 'hr': hr_val,
                 'tss': tss_val,
                 'rfl': rfl_val,
+                'rfl_gap': round(row['RFL_gap'] * 100, 1) if pd.notna(row.get('RFL_gap')) else None,
+                'rfl_sim': round(row['RFL_sim'] * 100, 1) if pd.notna(row.get('RFL_sim')) else None,
                 'race': is_race,
                 # v51: trend mover
                 'delta': round(row['RFL_Trend_Delta'] * 100, 2) if pd.notna(row.get('RFL_Trend_Delta')) else None,
@@ -809,10 +834,10 @@ def get_weight_chart_data(master_file, months=12):
 
 
 def get_top_races(df, n=10):
-    """Get top race performances by Power Score for different time periods.
+    """Get top race performances by RFL for different time periods.
     
     Returns dict with keys: '1y', '2y', '3y', '5y', 'all'
-    Each value is a list of up to n race dicts sorted by Power_Score descending.
+    Each value is a list of up to n race dicts sorted by RFL descending.
     """
     # Filter to races only
     race_col = 'race_flag' if 'race_flag' in df.columns else 'Race'
@@ -821,17 +846,13 @@ def get_top_races(df, n=10):
     if len(races) == 0:
         return {period: [] for period in ['1y', '2y', '3y', '5y', 'all']}
     
-    # Need Power_Score column
-    if 'Power_Score' not in races.columns:
-        print("  Warning: Power_Score column not found, using RF_adj for top races")
-        score_col = 'RF_adj' if 'RF_adj' in races.columns else None
-        if score_col is None:
-            return {period: [] for period in ['1y', '2y', '3y', '5y', 'all']}
-    else:
-        score_col = 'Power_Score'
+    # Sort by RFL (individual run fitness level)
+    sort_col = 'RFL' if 'RFL' in races.columns else 'RF_adj'
+    if sort_col not in races.columns:
+        return {period: [] for period in ['1y', '2y', '3y', '5y', 'all']}
     
     # Filter out rows without valid scores
-    races = races[races[score_col].notna()].copy()
+    races = races[races[sort_col].notna()].copy()
     
     now = datetime.now()
     periods = {
@@ -875,23 +896,23 @@ def get_top_races(df, n=10):
         # Get activity name
         name_val = row.get('activity_name', row.get('Activity_Name', ''))
         
-        # Power Score
-        ps_val = round(row[score_col], 1) if pd.notna(row.get(score_col)) else None
-        
         # Age grade percentage
         ag_val = round(row['age_grade_pct'], 1) if pd.notna(row.get('age_grade_pct')) else None
         
-        # RFL percentage
+        # RFL percentage (all three modes)
         rfl_val = round(row['RFL'] * 100, 1) if pd.notna(row.get('RFL')) else None
+        rfl_gap_val = round(row['RFL_gap'] * 100, 1) if pd.notna(row.get('RFL_gap')) else None
+        rfl_sim_val = round(row['RFL_sim'] * 100, 1) if pd.notna(row.get('RFL_sim')) else None
         
         return {
             'date': row['date'].strftime('%d %b %y'),
             'name': str(name_val) if name_val else '',
             'dist': round(dist_km, 1) if dist_km > 0 else None,
             'time': time_str,
-            'ps': ps_val,
             'ag': ag_val,
             'rfl': rfl_val,
+            'rfl_gap': rfl_gap_val,
+            'rfl_sim': rfl_sim_val,
         }
     
     result = {}
@@ -902,8 +923,8 @@ def get_top_races(df, n=10):
             cutoff = now - delta
             period_races = races[races['date'] >= cutoff]
         
-        # Sort by Power Score descending, take top n
-        top = period_races.nlargest(n, score_col)
+        # Sort by RFL descending, take top n
+        top = period_races.nlargest(n, sort_col)
         result[period_name] = [format_race(row) for _, row in top.iterrows()]
     
     return result
@@ -1010,6 +1031,18 @@ def get_prediction_trend_data(df):
             'temp_adjs': race_temp_adjs,
             'surface_adjs': race_surface_adjs,
         }
+        
+        # Phase 2: GAP and Sim predicted times at each race date
+        for mode in ('gap', 'sim'):
+            mode_col = f'{pred_col}_{mode}'
+            mode_preds = []
+            for _, race_row in dist_match.iterrows():
+                pv = race_row.get(mode_col)
+                if pd.notna(pv) and float(pv) > 0:
+                    mode_preds.append(round(float(pv), 0))
+                else:
+                    mode_preds.append(None)
+            result[dist_key][f'predicted_{mode}'] = mode_preds
     
     return result
 
@@ -1319,7 +1352,7 @@ def _generate_zone_html(zone_data):
     effort_hints = ['', 'easy–Mara', 'Mara–10K', '10K–5K', '>5K']
     combined_rows = ''
     for i in range(5):
-        combined_rows += f'<tr><td><span class="zd" style="background:{zone_colors[i]}"></span><strong>{zone_names[i]}</strong></td><td style="color:var(--text-dim);font-family:DM Sans">{zone_labels[i]}</td><td>{hr_ranges[i]}</td><td>{pw_strs[i]}W</td><td class="pct-col" style="color:var(--text-dim)">{pct_strs[i]}%</td></tr>'
+        combined_rows += f'<tr><td><span class="zd" style="background:{zone_colors[i]}"></span><strong>{zone_names[i]}</strong></td><td style="color:var(--text-dim);font-family:DM Sans">{zone_labels[i]}</td><td>{hr_ranges[i]}</td><td class="power-only">{pw_strs[i]}W</td><td class="power-only pct-col" style="color:var(--text-dim)">{pct_strs[i]}%</td></tr>'
     
     # Race readiness cards
     race_cards = ''
@@ -1348,8 +1381,9 @@ def _generate_zone_html(zone_data):
         race_cards += f'''<div class="rc">
             <div class="rh"><span class="rn">{race['name']}</span><span class="rd">{race['date']} · {days_str}</span></div>
             <div class="rs">
-                <div><div class="rv" style="color:var(--accent)">{pw}W</div><div class="rl">Target</div><div class="rx">±{band}W</div></div>
-                <div><div class="rv">{t_str}</div><div class="rl">Predicted</div><div class="rx">{pace_str}</div></div>
+                <div class="power-only"><div class="rv" style="color:var(--accent)">{pw}W</div><div class="rl">Target</div><div class="rx">±{band}W</div></div>
+                <div class="pace-target" style="display:none"><div class="rv" style="color:#4ade80">{pace_str}</div><div class="rl">Target pace</div></div>
+                <div><div class="rv">{t_str}</div><div class="rl">Predicted</div><div class="rx power-only">{pace_str}</div></div>
                 <div><div class="rv" id="spec14_{key}">—</div><div class="rl">14-day</div><div class="rx">at effort</div></div>
                 <div><div class="rv" id="spec28_{key}">—</div><div class="rl">28-day</div><div class="rx">at effort</div></div>
             </div>
@@ -1360,12 +1394,12 @@ def _generate_zone_html(zone_data):
     zone_runs_json = _json.dumps(zone_data['runs'])
     
     return f'''
-    <div class="card">
-        <h2>Training Zones <span class="badge">LT {lt_pw}W · CP {cp}W · LTHR {LTHR_DASH} · Max ~{MAX_HR_DASH}</span></h2>
-        <table class="zt"><thead><tr><th>Zone</th><th></th><th>HR</th><th>Power</th><th class="pct-col">%CP</th></tr></thead><tbody>{combined_rows}</tbody></table>
+    <div class="card" id="zone-table-card">
+        <h2>Training Zones <span class="badge" id="zone-badge">LT {lt_pw}W · CP {cp}W · LTHR {LTHR_DASH} · Max ~{MAX_HR_DASH}</span></h2>
+        <table class="zt"><thead><tr><th>Zone</th><th></th><th>HR</th><th class="power-only">Power</th><th class="power-only pct-col">%CP</th></tr></thead><tbody>{combined_rows}</tbody></table>
     </div>
 
-    <div class="card">
+    <div class="card" id="race-readiness-card">
         <h2>🎯 Race Readiness <span class="badge">±3% of target</span></h2>
         {race_cards}
     </div>
@@ -1375,8 +1409,8 @@ def _generate_zone_html(zone_data):
         <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px">
             <div class="chart-toggle" id="wk-mode">
                 <button class="active" onclick="setWM('hr',this)">HR Zone</button>
-                <button onclick="setWM('power',this)">Power Zone</button>
-                <button onclick="setWM('race',this)">Race (W)</button>
+                <button class="power-only" onclick="setWM('power',this)">Power Zone</button>
+                <button class="power-only" onclick="setWM('race',this)">Race (W)</button>
                 <button onclick="setWM('racehr',this)">Race (HR)</button>
             </div>
             <div class="chart-toggle" id="wk-period">
@@ -1394,8 +1428,8 @@ def _generate_zone_html(zone_data):
         <div style="margin-bottom:10px">
             <div class="chart-toggle" id="pr-mode">
                 <button class="active" onclick="setPR('hr',this)">HR Zone</button>
-                <button onclick="setPR('power',this)">Power Zone</button>
-                <button onclick="setPR('race',this)">Race (W)</button>
+                <button class="power-only" onclick="setPR('power',this)">Power Zone</button>
+                <button class="power-only" onclick="setPR('race',this)">Race (W)</button>
                 <button onclick="setPR('racehr',this)">Race (HR)</button>
             </div>
         </div>
@@ -1475,7 +1509,7 @@ def _generate_zone_html(zone_data):
 # ============================================================================
 def _generate_alert_banner(alert_data, critical_power=None):
     """Generate dark-themed alert banner."""
-    cp_html = f'<span style="font-size:0.82em;color:#8b90a0;">⚡ CP {critical_power}W</span>' if critical_power else ''
+    cp_html = f'<span class="power-only" id="banner-cp" style="font-size:0.82em;color:#8b90a0;">⚡ CP {critical_power}W</span>' if critical_power else ''
     if not alert_data:
         return f'<div style="background:rgba(34,197,94,0.08);border:1px solid rgba(34,197,94,0.3);border-radius:10px;padding:10px 16px;margin-bottom:14px;display:flex;justify-content:center;align-items:center;gap:8px;"><span style="font-size:1.1em;">🟢</span> <strong style="color:#4ade80;">All clear</strong> <span style="color:#8b90a0;">— no alerts</span>{cp_html}</div>'
     levels = [a['level'] for a in alert_data]
@@ -1911,6 +1945,22 @@ def generate_html(stats, rf_data, volume_data, ctl_atl_data, ctl_atl_lookup, rfl
     <h1>🏃 Paul Collyer</h1>
     <div class="dash-sub">{datetime.now().strftime("%A %d %B %Y, %H:%M")}</div>
     
+    <!-- Phase 2: Mode Toggle -->
+    <div class="mode-toggle" style="display:flex;gap:6px;margin:10px 0 8px;align-items:center;">
+        <span style="font-size:0.72rem;color:var(--text-dim);margin-right:4px;">Model:</span>
+        <button class="mode-btn active" onclick="setMode('stryd')" id="mode-stryd">⚡ Stryd</button>
+        <button class="mode-btn" onclick="setMode('gap')" id="mode-gap">🏃 GAP</button>
+        <button class="mode-btn" onclick="setMode('sim')" id="mode-sim">🔬 Sim</button>
+    </div>
+    <style>
+        .mode-btn {{ font-family:'DM Sans',sans-serif; font-size:0.75rem; padding:5px 12px; border-radius:16px;
+            border:1px solid var(--border); background:var(--surface); color:var(--text-dim); cursor:pointer; transition:all 0.15s; }}
+        .mode-btn:hover {{ border-color:var(--accent); color:var(--text); }}
+        .mode-btn.active {{ background:var(--accent); color:#fff; border-color:var(--accent); }}
+        body.gap-mode .power-only {{ display:none !important; }}
+        body.gap-mode .pace-target {{ display:block !important; }}
+    </style>
+    
     <!-- v51: Health Check Banner -->
     {_generate_alert_banner(alert_data, critical_power=stats.get('critical_power'))}
     
@@ -1940,12 +1990,12 @@ def generate_html(stats, rf_data, volume_data, ctl_atl_data, ctl_atl_lookup, rfl
     
     <div class="stats-grid">
         <div class="stat-card">
-            <div class="stat-value">{stats['latest_rfl']}%</div>
-            <div class="stat-label">RFL Trend</div>
+            <div class="stat-value" id="rfl-value">{stats['latest_rfl']}%</div>
+            <div class="stat-label" id="rfl-label">RFL Trend</div>
             <div class="stat-sub">vs peak</div>
         </div>
         <div class="stat-card">
-            <div class="stat-value">{f"{'+' if stats['rfl_14d_delta'] > 0 else ''}{stats['rfl_14d_delta']}%" if stats['rfl_14d_delta'] is not None else '-'}</div>
+            <div class="stat-value" id="rfl-delta">{f"{'+' if stats['rfl_14d_delta'] > 0 else ''}{stats['rfl_14d_delta']}%" if stats['rfl_14d_delta'] is not None else '-'}</div>
             <div class="stat-label">RFL 14d</div>
             <div class="stat-sub">change</div>
         </div>
@@ -1955,7 +2005,7 @@ def generate_html(stats, rf_data, volume_data, ctl_atl_data, ctl_atl_lookup, rfl
             <div class="stat-sub">vs trend</div>
         </div>
         <div class="stat-card">
-            <div class="stat-value">{stats['age_grade'] if stats['age_grade'] else '-'}%</div>
+            <div class="stat-value" id="ag-value">{stats['age_grade'] if stats['age_grade'] else '-'}%</div>
             <div class="stat-label">Age Grade</div>
             <div class="stat-sub">5k estimate</div>
         </div>
@@ -1963,22 +2013,22 @@ def generate_html(stats, rf_data, volume_data, ctl_atl_data, ctl_atl_lookup, rfl
     
     <div class="stats-grid">
         <div class="stat-card">
-            <div class="stat-value">{format_race_time(stats['race_predictions'].get('5k', '-'))}</div>
+            <div class="stat-value" id="pred-5k">{format_race_time(stats['race_predictions'].get('5k', '-'))}</div>
             <div class="stat-label">5k</div>
             <div class="stat-sub">predicted</div>
         </div>
         <div class="stat-card">
-            <div class="stat-value">{format_race_time(stats['race_predictions'].get('10k', '-'))}</div>
+            <div class="stat-value" id="pred-10k">{format_race_time(stats['race_predictions'].get('10k', '-'))}</div>
             <div class="stat-label">10k</div>
             <div class="stat-sub">predicted</div>
         </div>
         <div class="stat-card">
-            <div class="stat-value">{format_race_time(stats['race_predictions'].get('Half Marathon', '-'))}</div>
+            <div class="stat-value" id="pred-hm">{format_race_time(stats['race_predictions'].get('Half Marathon', '-'))}</div>
             <div class="stat-label">Half</div>
             <div class="stat-sub">predicted</div>
         </div>
         <div class="stat-card">
-            <div class="stat-value">{format_race_time(stats['race_predictions'].get('Marathon', '-'))}</div>
+            <div class="stat-value" id="pred-mara">{format_race_time(stats['race_predictions'].get('Marathon', '-'))}</div>
             <div class="stat-label">Marathon</div>
             <div class="stat-sub">predicted</div>
         </div>
@@ -2160,9 +2210,9 @@ def generate_html(stats, rf_data, volume_data, ctl_atl_data, ctl_atl_lookup, rfl
                 <col style="width: 28%;">
                 <col style="width: 11%;">
                 <col style="width: 11%;">
-                <col style="width: 10%;">
+                <col class="power-only" style="width: 10%;">
                 <col style="width: 9%;">
-                <col style="width: 9%;">
+                <col class="power-only" style="width: 9%;">
                 <col style="width: 9%;">
             </colgroup>
             <thead>
@@ -2171,9 +2221,9 @@ def generate_html(stats, rf_data, volume_data, ctl_atl_data, ctl_atl_lookup, rfl
                     <th>Activity</th>
                     <th>Dist</th>
                     <th>Pace</th>
-                    <th>nPwr</th>
+                    <th class="power-only">nPwr</th>
                     <th>HR</th>
-                    <th>TSS</th>
+                    <th class="power-only">TSS</th>
                     <th>RFL%</th>
                 </tr>
             </thead>
@@ -2195,17 +2245,16 @@ def generate_html(stats, rf_data, volume_data, ctl_atl_data, ctl_atl_lookup, rfl
                 <button data-period="all">All</button>
             </div>
         </div>
-        <div class="chart-desc">Best races by Power Score (duration-normalised power, heat-adjusted).</div>
+        <div class="chart-desc" id="top-races-desc">Best races by RFL% (fitness level at race date).</div>
         <div class="table-wrapper">
         <table id="topRacesTable">
             <colgroup>
-                <col style="width: 13%;">
-                <col style="width: 30%;">
+                <col style="width: 15%;">
+                <col style="width: 35%;">
+                <col style="width: 12%;">
+                <col style="width: 16%;">
                 <col style="width: 11%;">
-                <col style="width: 14%;">
                 <col style="width: 11%;">
-                <col style="width: 11%;">
-                <col style="width: 10%;">
             </colgroup>
             <thead>
                 <tr>
@@ -2213,7 +2262,6 @@ def generate_html(stats, rf_data, volume_data, ctl_atl_data, ctl_atl_lookup, rfl
                     <th>Race</th>
                     <th>Dist</th>
                     <th>Time</th>
-                    <th>PS</th>
                     <th>AG%</th>
                     <th>RFL%</th>
                 </tr>
@@ -2333,13 +2381,35 @@ def generate_html(stats, rf_data, volume_data, ctl_atl_data, ctl_atl_lookup, rfl
 
         // RF Trend Chart - with toggle (v51: includes Easy RF EMA + race dots)
         const rfData = {{
-            '90': {{ dates: {json.dumps(rf_dates_90)}, values: {json.dumps(rf_values_90)}, trend: {json.dumps(rf_trend_90)}, easy: {json.dumps(rf_easy_90)}, races: {json.dumps(rf_races_90)} }},
-            '180': {{ dates: {json.dumps(rf_dates_180)}, values: {json.dumps(rf_values_180)}, trend: {json.dumps(rf_trend_180)}, easy: {json.dumps(rf_easy_180)}, races: {json.dumps(rf_races_180)} }},
-            '365': {{ dates: {json.dumps(rf_dates_365)}, values: {json.dumps(rf_values_365)}, trend: {json.dumps(rf_trend_365)}, easy: {json.dumps(rf_easy_365)}, races: {json.dumps(rf_races_365)} }},
-            '730': {{ dates: {json.dumps(rf_dates_730)}, values: {json.dumps(rf_values_730)}, trend: {json.dumps(rf_trend_730)}, easy: {json.dumps(rf_easy_730)}, races: {json.dumps(rf_races_730)} }},
-            '1095': {{ dates: {json.dumps(rf_dates_1095)}, values: {json.dumps(rf_values_1095)}, trend: {json.dumps(rf_trend_1095)}, easy: {json.dumps(rf_easy_1095)}, races: {json.dumps(rf_races_1095)} }},
-            '1825': {{ dates: {json.dumps(rf_dates_1825)}, values: {json.dumps(rf_values_1825)}, trend: {json.dumps(rf_trend_1825)}, easy: {json.dumps(rf_easy_1825)}, races: {json.dumps(rf_races_1825)} }},
-            'all': {{ dates: {json.dumps(rf_dates_all)}, values: {json.dumps(rf_values_all)}, trend: {json.dumps(rf_trend_all)}, easy: {json.dumps(rf_easy_all)}, races: {json.dumps(rf_races_all)} }}
+            '90': {{ dates: {json.dumps(rf_dates_90)}, values: {json.dumps(rf_values_90)}, trend: {json.dumps(rf_trend_90)}, easy: {json.dumps(rf_easy_90)}, races: {json.dumps(rf_races_90)}, gap_trend: {json.dumps(rf_gap_trend_90)}, sim_trend: {json.dumps(rf_sim_trend_90)}, gap_values: {json.dumps(rf_gap_values_90)}, sim_values: {json.dumps(rf_sim_values_90)} }},
+            '180': {{ dates: {json.dumps(rf_dates_180)}, values: {json.dumps(rf_values_180)}, trend: {json.dumps(rf_trend_180)}, easy: {json.dumps(rf_easy_180)}, races: {json.dumps(rf_races_180)}, gap_trend: {json.dumps(rf_gap_trend_180)}, sim_trend: {json.dumps(rf_sim_trend_180)}, gap_values: {json.dumps(rf_gap_values_180)}, sim_values: {json.dumps(rf_sim_values_180)} }},
+            '365': {{ dates: {json.dumps(rf_dates_365)}, values: {json.dumps(rf_values_365)}, trend: {json.dumps(rf_trend_365)}, easy: {json.dumps(rf_easy_365)}, races: {json.dumps(rf_races_365)}, gap_trend: {json.dumps(rf_gap_trend_365)}, sim_trend: {json.dumps(rf_sim_trend_365)}, gap_values: {json.dumps(rf_gap_values_365)}, sim_values: {json.dumps(rf_sim_values_365)} }},
+            '730': {{ dates: {json.dumps(rf_dates_730)}, values: {json.dumps(rf_values_730)}, trend: {json.dumps(rf_trend_730)}, easy: {json.dumps(rf_easy_730)}, races: {json.dumps(rf_races_730)}, gap_trend: {json.dumps(rf_gap_trend_730)}, sim_trend: {json.dumps(rf_sim_trend_730)}, gap_values: {json.dumps(rf_gap_values_730)}, sim_values: {json.dumps(rf_sim_values_730)} }},
+            '1095': {{ dates: {json.dumps(rf_dates_1095)}, values: {json.dumps(rf_values_1095)}, trend: {json.dumps(rf_trend_1095)}, easy: {json.dumps(rf_easy_1095)}, races: {json.dumps(rf_races_1095)}, gap_trend: {json.dumps(rf_gap_trend_1095)}, sim_trend: {json.dumps(rf_sim_trend_1095)}, gap_values: {json.dumps(rf_gap_values_1095)}, sim_values: {json.dumps(rf_sim_values_1095)} }},
+            '1825': {{ dates: {json.dumps(rf_dates_1825)}, values: {json.dumps(rf_values_1825)}, trend: {json.dumps(rf_trend_1825)}, easy: {json.dumps(rf_easy_1825)}, races: {json.dumps(rf_races_1825)}, gap_trend: {json.dumps(rf_gap_trend_1825)}, sim_trend: {json.dumps(rf_sim_trend_1825)}, gap_values: {json.dumps(rf_gap_values_1825)}, sim_values: {json.dumps(rf_sim_values_1825)} }},
+            'all': {{ dates: {json.dumps(rf_dates_all)}, values: {json.dumps(rf_values_all)}, trend: {json.dumps(rf_trend_all)}, easy: {json.dumps(rf_easy_all)}, races: {json.dumps(rf_races_all)}, gap_trend: {json.dumps(rf_gap_trend_all)}, sim_trend: {json.dumps(rf_sim_trend_all)}, gap_values: {json.dumps(rf_gap_values_all)}, sim_values: {json.dumps(rf_sim_values_all)} }}
+        }};
+        
+        // Phase 2: Mode state (must be declared before functions that reference it)
+        let currentMode = 'stryd';
+        
+        // Phase 2: Mode data for stats switching
+        const modeStats = {{
+            stryd: {{ rfl: '{stats["latest_rfl"]}', ag: '{stats["age_grade"] or "-"}',
+                pred5k: '{format_race_time(stats["race_predictions"].get("5k", "-"))}',
+                pred10k: '{format_race_time(stats["race_predictions"].get("10k", "-"))}',
+                predHm: '{format_race_time(stats["race_predictions"].get("Half Marathon", "-"))}',
+                predMara: '{format_race_time(stats["race_predictions"].get("Marathon", "-"))}' }},
+            gap: {{ rfl: '{stats.get("latest_rfl_gap", "-")}', ag: '{stats["race_predictions"].get("_ag_gap") or "-"}',
+                pred5k: '{format_race_time(stats["race_predictions"].get("_mode_gap", dict()).get("5k", "-"))}',
+                pred10k: '{format_race_time(stats["race_predictions"].get("_mode_gap", dict()).get("10k", "-"))}',
+                predHm: '{format_race_time(stats["race_predictions"].get("_mode_gap", dict()).get("Half Marathon", "-"))}',
+                predMara: '{format_race_time(stats["race_predictions"].get("_mode_gap", dict()).get("Marathon", "-"))}' }},
+            sim: {{ rfl: '{stats.get("latest_rfl_sim", "-")}', ag: '{stats["race_predictions"].get("_ag_sim") or "-"}',
+                pred5k: '{format_race_time(stats["race_predictions"].get("_mode_sim", dict()).get("5k", "-"))}',
+                pred10k: '{format_race_time(stats["race_predictions"].get("_mode_sim", dict()).get("10k", "-"))}',
+                predHm: '{format_race_time(stats["race_predictions"].get("_mode_sim", dict()).get("Half Marathon", "-"))}',
+                predMara: '{format_race_time(stats["race_predictions"].get("_mode_sim", dict()).get("Marathon", "-"))}' }}
         }};
         
         // v51: Generate per-point colours (red for races, blue for training)
@@ -2419,39 +2489,58 @@ def generate_html(stats, rf_data, volume_data, ctl_atl_data, ctl_atl_lookup, rfl
             }}
         }});
         
+        let currentRfRange = 'all';
+        
+        function updateRfChart(range) {{
+            currentRfRange = range;
+            const d = rfData[range];
+            // Mode-dependent data selection
+            const valKey = currentMode === 'gap' ? 'gap_values' : currentMode === 'sim' ? 'sim_values' : 'values';
+            const trendKey = currentMode === 'gap' ? 'gap_trend' : currentMode === 'sim' ? 'sim_trend' : 'trend';
+            rfChart.data.labels = d.dates;
+            rfChart.data.datasets[0].data = d[valKey] || d.values;
+            rfChart.data.datasets[1].data = d[trendKey] || d.trend;
+            rfChart.data.datasets[2].data = d.easy;
+            
+            // Adjust display based on range
+            const pointSettings = {{
+                '90': {{ radius: 3, borderColor: 'rgba(129, 140, 248, 0.3)', pointColor: 'rgba(129, 140, 248, 0.5)', fill: false, tension: 0, lineWidth: 1, yMin: 70, ticks: 5 }},
+                '180': {{ radius: 2, borderColor: 'rgba(129, 140, 248, 0.25)', pointColor: 'rgba(129, 140, 248, 0.4)', fill: false, tension: 0, lineWidth: 1, yMin: 70, ticks: 5 }},
+                '365': {{ radius: 1.5, borderColor: 'rgba(129, 140, 248, 0.2)', pointColor: 'rgba(129, 140, 248, 0.3)', fill: false, tension: 0, lineWidth: 1, yMin: 70, ticks: 8 }},
+                '730': {{ radius: 1, borderColor: 'rgba(129, 140, 248, 0.15)', pointColor: 'rgba(129, 140, 248, 0.25)', fill: false, tension: 0.1, lineWidth: 1, yMin: 60, ticks: 10 }},
+                '1095': {{ radius: 0.5, borderColor: 'rgba(129, 140, 248, 0.1)', pointColor: 'rgba(129, 140, 248, 0.2)', fill: false, tension: 0.1, lineWidth: 1, yMin: 50, ticks: 10 }},
+                '1825': {{ radius: 0, borderColor: 'rgba(129, 140, 248, 0.1)', pointColor: 'rgba(129, 140, 248, 0.15)', fill: false, tension: 0.2, lineWidth: 1, yMin: 50, ticks: 10 }},
+                'all': {{ radius: 0, borderColor: 'rgba(129, 140, 248, 0.1)', pointColor: 'rgba(129, 140, 248, 0.15)', fill: false, tension: 0.2, lineWidth: 1, yMin: 50, ticks: 12 }}
+            }};
+            const settings = pointSettings[range];
+            const races = d.races;
+            // Mode colors
+            const modeColors = {{
+                stryd: {{ base: 'rgba(129, 140, 248, ', trend: '#818cf8' }},
+                gap: {{ base: 'rgba(74, 222, 128, ', trend: '#4ade80' }},
+                sim: {{ base: 'rgba(249, 115, 22, ', trend: '#f97316' }}
+            }};
+            const mc = modeColors[currentMode];
+            rfChart.data.datasets[0].pointRadius = settings.radius;
+            rfChart.data.datasets[0].pointBackgroundColor = races.length ? racePointColors(races, mc.base + '0.5)', 'rgba(239, 68, 68, 0.9)') : mc.base + '0.5)';
+            rfChart.data.datasets[0].pointBorderColor = races.length ? racePointColors(races, mc.base + '0.3)', 'rgba(239, 68, 68, 0.7)') : mc.base + '0.3)';
+            rfChart.data.datasets[0].borderColor = mc.base + '0.15)';
+            rfChart.data.datasets[0].borderWidth = settings.lineWidth;
+            rfChart.data.datasets[0].fill = settings.fill;
+            rfChart.data.datasets[0].tension = settings.tension;
+            rfChart.data.datasets[1].borderColor = mc.trend;
+            rfChart.options.scales.y.min = settings.yMin;
+            rfChart.options.scales.x.ticks.maxTicksLimit = settings.ticks;
+            
+            rfChart.update();
+        }}
+        
         document.getElementById('rfToggle').addEventListener('click', function(e) {{
             if (e.target.tagName === 'BUTTON') {{
                 const range = e.target.dataset.range;
                 this.querySelectorAll('button').forEach(b => b.classList.remove('active'));
                 e.target.classList.add('active');
-                rfChart.data.labels = rfData[range].dates;
-                rfChart.data.datasets[0].data = rfData[range].values;
-                rfChart.data.datasets[1].data = rfData[range].trend;
-                rfChart.data.datasets[2].data = rfData[range].easy;
-                
-                // Adjust display based on range
-                const pointSettings = {{
-                    '90': {{ radius: 3, borderColor: 'rgba(129, 140, 248, 0.3)', pointColor: 'rgba(129, 140, 248, 0.5)', fill: false, tension: 0, lineWidth: 1, yMin: 70, ticks: 5 }},
-                    '180': {{ radius: 2, borderColor: 'rgba(129, 140, 248, 0.25)', pointColor: 'rgba(129, 140, 248, 0.4)', fill: false, tension: 0, lineWidth: 1, yMin: 70, ticks: 5 }},
-                    '365': {{ radius: 1.5, borderColor: 'rgba(129, 140, 248, 0.2)', pointColor: 'rgba(129, 140, 248, 0.3)', fill: false, tension: 0, lineWidth: 1, yMin: 70, ticks: 8 }},
-                    '730': {{ radius: 1, borderColor: 'rgba(129, 140, 248, 0.15)', pointColor: 'rgba(129, 140, 248, 0.25)', fill: false, tension: 0.1, lineWidth: 1, yMin: 60, ticks: 10 }},
-                    '1095': {{ radius: 0.5, borderColor: 'rgba(129, 140, 248, 0.1)', pointColor: 'rgba(129, 140, 248, 0.2)', fill: false, tension: 0.1, lineWidth: 1, yMin: 50, ticks: 10 }},
-                    '1825': {{ radius: 0, borderColor: 'rgba(129, 140, 248, 0.1)', pointColor: 'rgba(129, 140, 248, 0.15)', fill: false, tension: 0.2, lineWidth: 1, yMin: 50, ticks: 10 }},
-                    'all': {{ radius: 0, borderColor: 'rgba(129, 140, 248, 0.1)', pointColor: 'rgba(129, 140, 248, 0.15)', fill: false, tension: 0.2, lineWidth: 1, yMin: 50, ticks: 12 }}
-                }};
-                const settings = pointSettings[range];
-                const races = rfData[range].races;
-                rfChart.data.datasets[0].pointRadius = settings.radius;
-                rfChart.data.datasets[0].pointBackgroundColor = races.length ? racePointColors(races, settings.pointColor, 'rgba(239, 68, 68, 0.9)') : settings.pointColor;
-                rfChart.data.datasets[0].pointBorderColor = races.length ? racePointColors(races, settings.borderColor, 'rgba(239, 68, 68, 0.7)') : settings.borderColor;
-                rfChart.data.datasets[0].borderColor = settings.borderColor;
-                rfChart.data.datasets[0].borderWidth = settings.lineWidth;
-                rfChart.data.datasets[0].fill = settings.fill;
-                rfChart.data.datasets[0].tension = settings.tension;
-                rfChart.options.scales.y.min = settings.yMin;
-                rfChart.options.scales.x.ticks.maxTicksLimit = settings.ticks;
-                
-                rfChart.update();
+                updateRfChart(range);
             }}
         }});
         
@@ -2684,24 +2773,29 @@ def generate_html(stats, rf_data, volume_data, ctl_atl_data, ctl_atl_lookup, rfl
         
         function updateTopRacesTable(period) {{
             const tbody = document.getElementById('topRacesBody');
-            const races = topRacesData[period] || [];
+            const races = (topRacesData[period] || []).slice();
             
             if (races.length === 0) {{
-                tbody.innerHTML = '<tr><td colspan="7" style="text-align: center; color: var(--text-dim);">No races in this period</td></tr>';
+                tbody.innerHTML = '<tr><td colspan="6" style="text-align: center; color: var(--text-dim);">No races in this period</td></tr>';
                 return;
             }}
             
-            tbody.innerHTML = races.map((race, idx) => `
+            // Sort by mode-appropriate RFL descending
+            const rflKey = currentMode === 'gap' ? 'rfl_gap' : currentMode === 'sim' ? 'rfl_sim' : 'rfl';
+            races.sort((a, b) => (b[rflKey] || 0) - (a[rflKey] || 0));
+            
+            tbody.innerHTML = races.map((race, idx) => {{
+                const rflVal = race[rflKey] || '-';
+                return `
                 <tr>
                     <td>${{race.date}}</td>
                     <td>${{race.name}}</td>
                     <td>${{race.dist ? race.dist + ' km' : '-'}}</td>
                     <td>${{race.time}}</td>
-                    <td>${{race.ps || '-'}}</td>
                     <td>${{race.ag ? race.ag + '%' : '-'}}</td>
-                    <td>${{race.rfl ? race.rfl : '-'}}</td>
-                </tr>
-            `).join('');
+                    <td>${{rflVal}}</td>
+                </tr>`;
+            }}).join('');
         }}
         
         // Initialize with 1 year view
@@ -3149,16 +3243,17 @@ def generate_html(stats, rf_data, volume_data, ctl_atl_data, ctl_atl_lookup, rfl
                     else if (run.delta <= -1.0) deltaHtml = '<span style="color:#dc2626;font-weight:bold;" title="RFL ' + run.delta.toFixed(1) + '%"> ▼▼</span>';
                     else if (run.delta <= -0.3) deltaHtml = '<span style="color:#dc2626;" title="RFL ' + run.delta.toFixed(1) + '%"> ▼</span>';
                 }}
+                const rflVal = currentMode === 'gap' ? (run.rfl_gap || '-') : currentMode === 'sim' ? (run.rfl_sim || '-') : (run.rfl || '-');
                 return `
                 <tr>
                     <td>${{run.date}}</td>
                     <td>${{run.name}} ${{run.race ? '<span class="race-badge">RACE</span>' : ''}}${{deltaHtml}}</td>
                     <td>${{run.dist ? run.dist + ' km' : '-'}}</td>
                     <td>${{run.pace}}</td>
-                    <td>${{run.npower || '-'}}</td>
+                    <td class="power-only">${{run.npower || '-'}}</td>
                     <td>${{run.hr || '-'}}</td>
-                    <td>${{run.tss || '-'}}</td>
-                    <td>${{run.rfl || '-'}}</td>
+                    <td class="power-only">${{run.tss || '-'}}</td>
+                    <td>${{rflVal}}</td>
                 </tr>`;
             }}).join('');
         }}
@@ -3175,6 +3270,89 @@ def generate_html(stats, rf_data, volume_data, ctl_atl_data, ctl_atl_lookup, rfl
                 updateRecentRunsTable(filter);
             }}
         }});
+    
+    // Phase 2: Mode switching
+    function setMode(mode) {{
+        currentMode = mode;
+        // Update toggle buttons
+        document.querySelectorAll('.mode-btn').forEach(b => b.classList.remove('active'));
+        document.getElementById('mode-' + mode).classList.add('active');
+        
+        // Update stats cards
+        const ms = modeStats[mode];
+        const rflEl = document.getElementById('rfl-value');
+        if (rflEl) rflEl.textContent = ms.rfl + '%';
+        const agEl = document.getElementById('ag-value');
+        if (agEl) agEl.textContent = (ms.ag && ms.ag !== 'None') ? ms.ag + '%' : '-';
+        const p5 = document.getElementById('pred-5k');
+        if (p5) p5.textContent = ms.pred5k;
+        const p10 = document.getElementById('pred-10k');
+        if (p10) p10.textContent = ms.pred10k;
+        const ph = document.getElementById('pred-hm');
+        if (ph) ph.textContent = ms.predHm;
+        const pm = document.getElementById('pred-mara');
+        if (pm) pm.textContent = ms.predMara;
+        
+        // Update RFL chart — switch which data series is shown
+        if (typeof rfChart !== 'undefined' && typeof currentRfRange !== 'undefined') {{
+            updateRfChart(currentRfRange);
+        }}
+        
+        // Update RFL label
+        const rflLabel = document.getElementById('rfl-label');
+        if (rflLabel) {{
+            const labels = {{ stryd: 'RFL Trend', gap: 'RFL (GAP)', sim: 'RFL (Sim)' }};
+            rflLabel.textContent = labels[mode];
+        }}
+        
+        // Hide/show power-only elements via body class (CSS handles all hiding)
+        const isGap = mode === 'gap';
+        document.body.classList.toggle('gap-mode', isGap);
+        
+        // Update CP in alert banner for Stryd/Sim modes
+        const cpBanner = document.getElementById('banner-cp');
+        if (cpBanner) {{
+            const cpVal = mode === 'sim' ? modeStats.sim : modeStats.stryd;
+            cpBanner.textContent = '⚡ CP ' + Math.round(372 * parseFloat(cpVal.rfl) / 100) + 'W';
+        }}
+        
+        // Update zone badge (hide power info in GAP mode)
+        const zb = document.getElementById('zone-badge');
+        if (zb && typeof ZONE_CP !== 'undefined') {{
+            if (isGap) {{
+                zb.textContent = 'LTHR ' + HR_Z[3].max + ' · Max ~' + HR_Z[4].max;
+            }} else {{
+                zb.textContent = 'LT ' + Math.round(ZONE_CP * 0.90) + 'W · CP ' + ZONE_CP + 'W · LTHR ' + HR_Z[3].max + ' · Max ~' + HR_Z[4].max;
+            }}
+        }}
+        
+        // Update top races description
+        const trd = document.getElementById('top-races-desc');
+        if (trd) trd.textContent = 'Best races by RFL% (fitness level at race date).';
+        
+        // Reset zone views to HR when switching to GAP
+        if (isGap) {{
+            const wkBtns = document.querySelectorAll('#wk-mode button');
+            wkBtns.forEach(b => b.classList.remove('active'));
+            wkBtns[0].classList.add('active');
+            if (typeof setWM === 'function') setWM('hr', wkBtns[0]);
+            const prBtns = document.querySelectorAll('#pr-mode button');
+            prBtns.forEach(b => b.classList.remove('active'));
+            prBtns[0].classList.add('active');
+            if (typeof setPR === 'function') setPR('hr', prBtns[0]);
+        }}
+        
+        // Re-render recent runs and top races to apply power-only visibility
+        if (typeof updateRecentRunsTable === 'function') {{
+            const activeFilter = document.querySelector('#recentRunsToggle button.active');
+            updateRecentRunsTable(activeFilter ? activeFilter.getAttribute('data-filter') : 'all');
+        }}
+        if (typeof updateTopRacesTable === 'function') {{
+            const activePeriod = document.querySelector('#topRacesToggle button.active');
+            updateTopRacesTable(activePeriod ? activePeriod.getAttribute('data-period') : '1y');
+        }}
+    }}
+    
     </script>
 </body>
 </html>
