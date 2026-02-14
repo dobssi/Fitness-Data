@@ -1393,13 +1393,24 @@ def calc_ctl_atl(df: pd.DataFrame, athlete_data_path: str = None) -> tuple:
     df['_date_str'] = df['date'].dt.strftime('%Y-%m-%d')
     
     # Aggregate multiple runs on same day
-    daily_agg = df.groupby('_date_str').agg({
+    _daily_agg_dict = {
         'TSS': 'sum',
         'distance_km': 'sum',
         'RF_Trend': 'last',  # Take the latest RF_Trend for that day
         'RFL_Trend': 'last',
-    }).reset_index()
-    daily_agg.columns = ['date_str', 'tss_running', 'distance_km', 'RF_Trend', 'RFL_Trend']
+    }
+    # Add GAP/SIM trends if available
+    if 'RFL_gap_Trend' in df.columns:
+        _daily_agg_dict['RFL_gap_Trend'] = 'last'
+    if 'RFL_sim_Trend' in df.columns:
+        _daily_agg_dict['RFL_sim_Trend'] = 'last'
+    daily_agg = df.groupby('_date_str').agg(_daily_agg_dict).reset_index()
+    _daily_cols = ['date_str', 'tss_running', 'distance_km', 'RF_Trend', 'RFL_Trend']
+    if 'RFL_gap_Trend' in daily_agg.columns:
+        _daily_cols.append('RFL_gap_Trend')
+    if 'RFL_sim_Trend' in daily_agg.columns:
+        _daily_cols.append('RFL_sim_Trend')
+    daily_agg.columns = _daily_cols
     
     # v46: Load non-running TSS from athlete_data.csv
     non_running_tss = {}
@@ -1437,6 +1448,10 @@ def calc_ctl_atl(df: pd.DataFrame, athlete_data_path: str = None) -> tuple:
     # Forward-fill RF_Trend, RFL_Trend (carry over from last run day)
     daily_df['RF_Trend'] = daily_df['RF_Trend'].ffill()
     daily_df['RFL_Trend'] = daily_df['RFL_Trend'].ffill()
+    if 'RFL_gap_Trend' in daily_df.columns:
+        daily_df['RFL_gap_Trend'] = daily_df['RFL_gap_Trend'].ffill()
+    if 'RFL_sim_Trend' in daily_df.columns:
+        daily_df['RFL_sim_Trend'] = daily_df['RFL_sim_Trend'].ffill()
     
     # Add non-running TSS
     daily_df['tss_other'] = daily_df['date_str'].map(non_running_tss).fillna(0)
@@ -1487,10 +1502,18 @@ def calc_ctl_atl(df: pd.DataFrame, athlete_data_path: str = None) -> tuple:
     df.drop(columns=['_date_str'], inplace=True)
     
     # Clean up daily_df for output
-    daily_df = daily_df[['date', 'distance_km', 'tss_running', 'tss_other', 'tss_total', 
-                          'CTL', 'ATL', 'TSB', 'RF_Trend', 'RFL_Trend']]
-    daily_df.columns = ['Date', 'Distance_km', 'TSS_Running', 'TSS_Other', 'TSS_Total',
+    _out_cols = ['date', 'distance_km', 'tss_running', 'tss_other', 'tss_total', 
+                          'CTL', 'ATL', 'TSB', 'RF_Trend', 'RFL_Trend']
+    _out_names = ['Date', 'Distance_km', 'TSS_Running', 'TSS_Other', 'TSS_Total',
                         'CTL', 'ATL', 'TSB', 'RF_Trend', 'RFL_Trend']
+    if 'RFL_gap_Trend' in daily_df.columns:
+        _out_cols.append('RFL_gap_Trend')
+        _out_names.append('RFL_gap_Trend')
+    if 'RFL_sim_Trend' in daily_df.columns:
+        _out_cols.append('RFL_sim_Trend')
+        _out_names.append('RFL_sim_Trend')
+    daily_df = daily_df[_out_cols]
+    daily_df.columns = _out_names
     
     latest_ctl = df['CTL'].iloc[-1] if len(df) > 0 else 0
     latest_atl = df['ATL'].iloc[-1] if len(df) > 0 else 0

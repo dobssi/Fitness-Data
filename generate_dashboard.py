@@ -563,7 +563,7 @@ def get_ctl_atl_trend(df, days=90):
         return [], [], [], [], []
 
 
-def get_daily_rfl_trend(master_file, days=14):
+def get_daily_rfl_trend(master_file, days=14, rfl_col='RFL_Trend'):
     """Get daily RFL trend from Master's Daily sheet with trendline, projection and 95% CI."""
     try:
         df = pd.read_excel(master_file, sheet_name='Daily')
@@ -574,8 +574,9 @@ def get_daily_rfl_trend(master_file, days=14):
         df_past = df[df['Date'] <= today].tail(days)
         
         dates = df_past['Date'].dt.strftime('%d %b').tolist()
-        # Master's Daily sheet has RFL_Trend (0-1 scale) - v44.5
-        rfl_col = 'RFL_Trend'
+        # Use specified RFL column, fall back to RFL_Trend if not available
+        if rfl_col not in df_past.columns:
+            rfl_col = 'RFL_Trend'
         rfl_values = [round(v * 100, 2) if pd.notna(v) else None for v in df_past[rfl_col].tolist()]
         
         # Calculate linear trendline with confidence intervals
@@ -1620,7 +1621,7 @@ def _generate_alert_banner(alert_data, critical_power=None):
     return f'<div style="background:{bg};border:1px solid {brd};border-radius:10px;padding:10px 16px;margin-bottom:14px;"><div style="text-align:center;margin-bottom:4px;"><span style="font-size:1.1em;">{icon}</span> <strong style="color:{lc};">{n} alert{s} active</strong>{cp_html}</div>{items}</div>'
 
 
-def generate_html(stats, rf_data, volume_data, ctl_atl_data, ctl_atl_lookup, rfl_trend_dates, rfl_trend_values, rfl_trendline, rfl_projection, rfl_ci_upper, rfl_ci_lower, alltime_rfl_dates, alltime_rfl_values, recent_runs, top_races, alert_data=None, weight_data=None, prediction_data=None, ag_data=None, zone_data=None):
+def generate_html(stats, rf_data, volume_data, ctl_atl_data, ctl_atl_lookup, rfl_trend_dates, rfl_trend_values, rfl_trendline, rfl_projection, rfl_ci_upper, rfl_ci_lower, alltime_rfl_dates, alltime_rfl_values, recent_runs, top_races, alert_data=None, weight_data=None, prediction_data=None, ag_data=None, zone_data=None, rfl_trend_gap=None, rfl_trend_sim=None):
     """Generate the HTML dashboard."""
     
     # Extract data for each time range - RF (v51: now includes easy_rfl and race_flags)
@@ -2055,6 +2056,8 @@ def generate_html(stats, rf_data, volume_data, ctl_atl_data, ctl_atl_lookup, rfl
         .mode-btn:hover {{ border-color:var(--accent); color:var(--text); }}
         .mode-btn.active {{ background:var(--accent); color:#fff; border-color:var(--accent); }}
         body.gap-mode .power-only {{ display:none !important; }}
+        body.sim-mode .stryd-only {{ display:none !important; }}
+        body.gap-mode .stryd-only {{ display:none !important; }}
         body.gap-mode .pace-target {{ display:block !important; }}
         .gap-only {{ display:none !important; }}
         body.gap-mode .gap-only {{ display:inline-block !important; }}
@@ -2098,7 +2101,7 @@ def generate_html(stats, rf_data, volume_data, ctl_atl_data, ctl_atl_lookup, rfl
             <div class="stat-label">RFL 14d</div>
             <div class="stat-sub">change</div>
         </div>
-        <div class="stat-card power-only">
+        <div class="stat-card stryd-only">
             <div class="stat-value">{f"{'+' if stats['easy_rfl_gap'] > 0 else ''}{stats['easy_rfl_gap']}%" if stats['easy_rfl_gap'] is not None else '-'}</div>
             <div class="stat-label">Easy RF Gap</div>
             <div class="stat-sub">vs trend</div>
@@ -2380,7 +2383,12 @@ def generate_html(stats, rf_data, volume_data, ctl_atl_data, ctl_atl_lookup, rfl
     <script>
         // RFL 14-day Trend Chart with trendline, 7-day projection and 95% CI
         const rflTrendCtx = document.getElementById('rflTrendChart').getContext('2d');
-        new Chart(rflTrendCtx, {{
+        const rfl14Data = {{
+            stryd: {{ values: {json.dumps(rfl_trend_values)}, trendline: {json.dumps(rfl_trendline)}, projection: {json.dumps(rfl_projection)}, ci_upper: {json.dumps(rfl_ci_upper)}, ci_lower: {json.dumps(rfl_ci_lower)} }},
+            gap: {{ values: {json.dumps(rfl_trend_gap['values'] if rfl_trend_gap else rfl_trend_values)}, trendline: {json.dumps(rfl_trend_gap['trendline'] if rfl_trend_gap else rfl_trendline)}, projection: {json.dumps(rfl_trend_gap['projection'] if rfl_trend_gap else rfl_projection)}, ci_upper: {json.dumps(rfl_trend_gap['ci_upper'] if rfl_trend_gap else rfl_ci_upper)}, ci_lower: {json.dumps(rfl_trend_gap['ci_lower'] if rfl_trend_gap else rfl_ci_lower)} }},
+            sim: {{ values: {json.dumps(rfl_trend_sim['values'] if rfl_trend_sim else rfl_trend_values)}, trendline: {json.dumps(rfl_trend_sim['trendline'] if rfl_trend_sim else rfl_trendline)}, projection: {json.dumps(rfl_trend_sim['projection'] if rfl_trend_sim else rfl_projection)}, ci_upper: {json.dumps(rfl_trend_sim['ci_upper'] if rfl_trend_sim else rfl_ci_upper)}, ci_lower: {json.dumps(rfl_trend_sim['ci_lower'] if rfl_trend_sim else rfl_ci_lower)} }}
+        }};
+        let rfl14Chart = new Chart(rflTrendCtx, {{
             type: 'line',
             data: {{
                 labels: {json.dumps(rfl_trend_dates)},
@@ -2477,6 +2485,31 @@ def generate_html(stats, rf_data, volume_data, ctl_atl_data, ctl_atl_lookup, rfl
                 }}
             }}
         }});
+        
+        function updateRfl14Chart(mode) {{
+            const d = rfl14Data[mode] || rfl14Data.stryd;
+            const modeColors = {{
+                stryd: {{ main: 'rgba(129, 140, 248, 1)', bg: 'rgba(129, 140, 248, 0.1)', point: 'rgba(129, 140, 248, 1)' }},
+                gap: {{ main: 'rgba(74, 222, 128, 1)', bg: 'rgba(74, 222, 128, 0.1)', point: 'rgba(74, 222, 128, 1)' }},
+                sim: {{ main: 'rgba(249, 115, 22, 1)', bg: 'rgba(249, 115, 22, 0.1)', point: 'rgba(249, 115, 22, 1)' }}
+            }};
+            const mc = modeColors[mode] || modeColors.stryd;
+            rfl14Chart.data.datasets[0].data = d.values;
+            rfl14Chart.data.datasets[0].borderColor = mc.main;
+            rfl14Chart.data.datasets[0].backgroundColor = mc.bg;
+            rfl14Chart.data.datasets[0].pointBackgroundColor = mc.point;
+            rfl14Chart.data.datasets[1].data = d.trendline;
+            rfl14Chart.data.datasets[2].data = d.projection;
+            rfl14Chart.data.datasets[3].data = d.ci_upper;
+            rfl14Chart.data.datasets[4].data = d.ci_lower;
+            // Update y-axis range
+            const vals = d.values.filter(v => v !== null);
+            if (vals.length > 0) {{
+                rfl14Chart.options.scales.y.suggestedMin = Math.min(...vals) - 5;
+                rfl14Chart.options.scales.y.suggestedMax = Math.max(...vals) + 5;
+            }}
+            rfl14Chart.update();
+        }}
 
         // RF Trend Chart - with toggle (v51: includes Easy RF EMA + race dots)
         const rfData = {{
@@ -2572,12 +2605,23 @@ def generate_html(stats, rf_data, volume_data, ctl_atl_data, ctl_atl_lookup, rfl
                         labels: {{ 
                             boxWidth: 12, padding: 8, font: {{ size: 10 }}, usePointStyle: true,
                             generateLabels: function(chart) {{
-                                const ds = chart.data.datasets;
-                                return [
-                                    {{ text: 'RFL', fillStyle: 'rgba(129, 140, 248, 0.4)', strokeStyle: 'rgba(129, 140, 248, 0.3)', pointStyle: 'circle', hidden: !chart.isDatasetVisible(0), datasetIndex: 0, fontColor: '#8b90a0' }},
-                                    {{ text: 'RFL Trend', fillStyle: 'rgba(129, 140, 248, 1)', strokeStyle: 'rgba(129, 140, 248, 1)', pointStyle: 'circle', hidden: !chart.isDatasetVisible(1), datasetIndex: 1, fontColor: '#8b90a0' }},
-                                    {{ text: 'Easy RF', fillStyle: 'rgba(34, 197, 94, 0.8)', strokeStyle: 'rgba(34, 197, 94, 0.8)', pointStyle: 'circle', hidden: !chart.isDatasetVisible(2), datasetIndex: 2, fontColor: '#8b90a0' }}
+                                const mc = typeof currentMode !== 'undefined' ? currentMode : 'stryd';
+                                const colors = {{
+                                    stryd: {{ fill: 'rgba(129, 140, 248, ', trend: '#818cf8' }},
+                                    gap: {{ fill: 'rgba(74, 222, 128, ', trend: '#4ade80' }},
+                                    sim: {{ fill: 'rgba(249, 115, 22, ', trend: '#f97316' }}
+                                }};
+                                const c = colors[mc] || colors.stryd;
+                                const modeLabel = mc === 'gap' ? 'RFL (GAP)' : mc === 'sim' ? 'RFL (Sim)' : 'RFL';
+                                const trendLabel = mc === 'gap' ? 'GAP Trend' : mc === 'sim' ? 'Sim Trend' : 'RFL Trend';
+                                const items = [
+                                    {{ text: modeLabel, fillStyle: c.fill + '0.4)', strokeStyle: c.fill + '0.3)', pointStyle: 'circle', hidden: !chart.isDatasetVisible(0), datasetIndex: 0, fontColor: '#8b90a0' }},
+                                    {{ text: trendLabel, fillStyle: c.trend, strokeStyle: c.trend, pointStyle: 'circle', hidden: !chart.isDatasetVisible(1), datasetIndex: 1, fontColor: '#8b90a0' }}
                                 ];
+                                if (mc === 'stryd') {{
+                                    items.push({{ text: 'Easy RF', fillStyle: 'rgba(34, 197, 94, 0.8)', strokeStyle: 'rgba(34, 197, 94, 0.8)', pointStyle: 'circle', hidden: !chart.isDatasetVisible(2), datasetIndex: 2, fontColor: '#8b90a0' }});
+                                }}
+                                return items;
                             }}
                         }}
                     }}
@@ -3013,7 +3057,9 @@ def generate_html(stats, rf_data, volume_data, ctl_atl_data, ctl_atl_lookup, rfl
             
             const dates = indices.map(i => d.dates[i]);
             const datesISO = indices.map(i => d.dates_iso[i]);
-            const predicted = indices.map(i => d.predicted[i]);
+            // Mode-dependent prediction source
+            const predKey = currentMode === 'gap' ? 'predicted_gap' : currentMode === 'sim' ? 'predicted_sim' : 'predicted';
+            const predicted = indices.map(i => (d[predKey] || d.predicted)[i]);
             const actual = indices.map(i => d.actual[i]);
             const names = indices.map(i => d.names[i]);
             const temps = indices.map(i => d.temps[i]);
@@ -3077,8 +3123,8 @@ def generate_html(stats, rf_data, volume_data, ctl_atl_data, ctl_atl_lookup, rfl
                     datasets: [{{
                         label: adjustConditions ? 'Predicted (adj)' : 'Predicted',
                         data: predPoints,
-                        borderColor: adjustConditions ? 'rgba(74, 222, 128, 0.7)' : 'rgba(129, 140, 248, 0.7)',
-                        backgroundColor: adjustConditions ? 'rgba(74, 222, 128, 0.05)' : 'rgba(129, 140, 248, 0.05)',
+                        borderColor: adjustConditions ? 'rgba(74, 222, 128, 0.7)' : currentMode === 'gap' ? 'rgba(74, 222, 128, 0.7)' : currentMode === 'sim' ? 'rgba(249, 115, 22, 0.7)' : 'rgba(129, 140, 248, 0.7)',
+                        backgroundColor: adjustConditions ? 'rgba(74, 222, 128, 0.05)' : currentMode === 'gap' ? 'rgba(74, 222, 128, 0.05)' : currentMode === 'sim' ? 'rgba(249, 115, 22, 0.05)' : 'rgba(129, 140, 248, 0.05)',
                         borderWidth: 2,
                         pointRadius: 0,
                         fill: true,
@@ -3406,6 +3452,17 @@ def generate_html(stats, rf_data, volume_data, ctl_atl_data, ctl_atl_lookup, rfl
             updateRfChart(currentRfRange);
         }}
         
+        // Update 14-day RFL trend chart
+        if (typeof rfl14Chart !== 'undefined' && typeof updateRfl14Chart === 'function') {{
+            updateRfl14Chart(mode);
+        }}
+        
+        // Re-render prediction chart with mode-appropriate predictions
+        if (typeof renderPredChart === 'function' && typeof currentPredDist !== 'undefined') {{
+            const showPR = document.getElementById('predParkrunToggle');
+            renderPredChart(currentPredDist, showPR ? showPR.checked : false);
+        }}
+        
         // Update RFL label
         const rflLabel = document.getElementById('rfl-label');
         if (rflLabel) {{
@@ -3415,7 +3472,9 @@ def generate_html(stats, rf_data, volume_data, ctl_atl_data, ctl_atl_lookup, rfl
         
         // Hide/show power-only elements via body class (CSS handles all hiding)
         const isGap = mode === 'gap';
+        const isSim = mode === 'sim';
         document.body.classList.toggle('gap-mode', isGap);
+        document.body.classList.toggle('sim-mode', isSim);
         
         // Update CP in alert banner for Stryd/Sim modes
         const cpBanner = document.getElementById('banner-cp');
@@ -3582,7 +3641,9 @@ def main():
     ctl_atl_lookup = get_daily_ctl_atl_lookup(MASTER_FILE)
     
     print("Processing daily RFL trend...")
-    rfl_trend_dates, rfl_trend_values, rfl_trendline, rfl_projection, rfl_ci_upper, rfl_ci_lower = get_daily_rfl_trend(MASTER_FILE, days=14)
+    rfl_trend_dates, rfl_trend_values, rfl_trendline, rfl_projection, rfl_ci_upper, rfl_ci_lower = get_daily_rfl_trend(MASTER_FILE, days=14, rfl_col='RFL_Trend')
+    _, rfl_trend_gap_values, rfl_trendline_gap, rfl_proj_gap, rfl_ci_upper_gap, rfl_ci_lower_gap = get_daily_rfl_trend(MASTER_FILE, days=14, rfl_col='RFL_gap_Trend')
+    _, rfl_trend_sim_values, rfl_trendline_sim, rfl_proj_sim, rfl_ci_upper_sim, rfl_ci_lower_sim = get_daily_rfl_trend(MASTER_FILE, days=14, rfl_col='RFL_sim_Trend')
     
     print("Processing all-time weekly RFL...")
     alltime_rfl_dates, alltime_rfl_values = get_alltime_weekly_rfl(MASTER_FILE)
@@ -3612,7 +3673,7 @@ def main():
     
     # Generate HTML
     print("Generating HTML...")
-    html = generate_html(stats, rf_data, volume_data, ctl_atl_data, ctl_atl_lookup, rfl_trend_dates, rfl_trend_values, rfl_trendline, rfl_projection, rfl_ci_upper, rfl_ci_lower, alltime_rfl_dates, alltime_rfl_values, recent_runs, top_races, alert_data=alert_data, weight_data=weight_data, prediction_data=prediction_data, ag_data=ag_data, zone_data=zone_data)
+    html = generate_html(stats, rf_data, volume_data, ctl_atl_data, ctl_atl_lookup, rfl_trend_dates, rfl_trend_values, rfl_trendline, rfl_projection, rfl_ci_upper, rfl_ci_lower, alltime_rfl_dates, alltime_rfl_values, recent_runs, top_races, alert_data=alert_data, weight_data=weight_data, prediction_data=prediction_data, ag_data=ag_data, zone_data=zone_data, rfl_trend_gap={'values': rfl_trend_gap_values, 'trendline': rfl_trendline_gap, 'projection': rfl_proj_gap, 'ci_upper': rfl_ci_upper_gap, 'ci_lower': rfl_ci_lower_gap}, rfl_trend_sim={'values': rfl_trend_sim_values, 'trendline': rfl_trendline_sim, 'projection': rfl_proj_sim, 'ci_upper': rfl_ci_upper_sim, 'ci_lower': rfl_ci_lower_sim})
     
     # Write file
     with open(OUTPUT_FILE, 'w', encoding='utf-8') as f:
