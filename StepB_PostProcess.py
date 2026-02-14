@@ -4273,6 +4273,16 @@ def main() -> int:
             gap_cold_adj = 1.0 + (5.0 - _gap_temp) * 0.002
             gap_total_adj *= gap_cold_adj
         
+        # GAP terrain adjustment: undulating terrain suppresses GAP RF more than Stryd
+        # because GAP estimates power from pace+grade but can't capture the biomechanical
+        # cost of constant direction changes (decel/accel on rolling terrain).
+        # The shared terrain_adj compensates Stryd; GAP needs ~0.135% extra per
+        # undulation point. Derived from GAP/Stryd raw ratio vs rf_window_undulation.
+        _gap_und = pd.to_numeric(row.get('rf_window_undulation_score', np.nan), errors='coerce')
+        if np.isfinite(_gap_und) and _gap_und > 0:
+            gap_terrain_extra = 1.0 + 0.00135 * _gap_und
+            gap_total_adj *= gap_terrain_extra
+        
         rf_gap_adj = rf_gap_raw * gap_total_adj
         
         # Jump cap relative to GAP trend
