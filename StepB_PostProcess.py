@@ -1133,6 +1133,38 @@ def calc_easy_rf_metrics(df: pd.DataFrame) -> pd.DataFrame:
             if len(latest_gap) > 0:
                 print(f"  Easy_RFL_Gap: {latest_gap.iloc[-1]*100:.1f}% (latest)")
     
+    # --- GAP Easy RF (same easy mask, different RF source) ---
+    df['Easy_RF_EMA_gap'] = np.nan
+    df['Easy_RFL_Gap_gap'] = np.nan
+    gap_easy_mask = easy_mask & df['RF_gap_adj'].notna()
+    n_gap_easy = gap_easy_mask.sum()
+    if n_gap_easy > 0:
+        gap_easy_rf = df.loc[gap_easy_mask, 'RF_gap_adj'].copy()
+        gap_ema = gap_easy_rf.ewm(span=EASY_RF_EMA_SPAN, adjust=True).mean()
+        df.loc[gap_easy_mask, 'Easy_RF_EMA_gap'] = gap_ema
+        df['Easy_RF_EMA_gap'] = df['Easy_RF_EMA_gap'].ffill()
+        peak_rf_gap = df['RF_gap_Trend'].max() if 'RF_gap_Trend' in df.columns else np.nan
+        if pd.notna(peak_rf_gap) and peak_rf_gap > 0:
+            easy_rfl_gap = df['Easy_RF_EMA_gap'] / peak_rf_gap
+            df['Easy_RFL_Gap_gap'] = easy_rfl_gap - df['RFL_gap_Trend']
+        print(f"  GAP Easy RF EMA: {gap_ema.iloc[-1]:.4f} (latest), n={n_gap_easy}")
+    
+    # --- SIM Easy RF (same easy mask, different RF source) ---
+    df['Easy_RF_EMA_sim'] = np.nan
+    df['Easy_RFL_Gap_sim'] = np.nan
+    sim_easy_mask = easy_mask & df['RF_sim_adj'].notna()
+    n_sim_easy = sim_easy_mask.sum()
+    if n_sim_easy > 0:
+        sim_easy_rf = df.loc[sim_easy_mask, 'RF_sim_adj'].copy()
+        sim_ema = sim_easy_rf.ewm(span=EASY_RF_EMA_SPAN, adjust=True).mean()
+        df.loc[sim_easy_mask, 'Easy_RF_EMA_sim'] = sim_ema
+        df['Easy_RF_EMA_sim'] = df['Easy_RF_EMA_sim'].ffill()
+        peak_rf_sim = df['RF_sim_Trend'].max() if 'RF_sim_Trend' in df.columns else np.nan
+        if pd.notna(peak_rf_sim) and peak_rf_sim > 0:
+            easy_rfl_sim = df['Easy_RF_EMA_sim'] / peak_rf_sim
+            df['Easy_RFL_Gap_sim'] = easy_rfl_sim - df['RFL_sim_Trend']
+        print(f"  SIM Easy RF EMA: {sim_ema.iloc[-1]:.4f} (latest), n={n_sim_easy}")
+    
     return df
 
 
@@ -4652,10 +4684,10 @@ def main() -> int:
         if c in dfm.columns:
             dfm[c] = pd.to_numeric(dfm[c], errors="coerce").round(2)
     # v51: Round Easy RF metrics
-    for c in ("Easy_RF_EMA",):
+    for c in ("Easy_RF_EMA", "Easy_RF_EMA_gap", "Easy_RF_EMA_sim"):
         if c in dfm.columns:
             dfm[c] = pd.to_numeric(dfm[c], errors="coerce").round(4)
-    for c in ("Easy_RF_z", "Easy_RFL_Gap"):
+    for c in ("Easy_RF_z", "Easy_RFL_Gap", "Easy_RFL_Gap_gap", "Easy_RFL_Gap_sim"):
         if c in dfm.columns:
             dfm[c] = pd.to_numeric(dfm[c], errors="coerce").round(3)
     for c in ("RFL_Trend_Delta",):
@@ -4732,7 +4764,9 @@ def main() -> int:
         "parkrun", "surface",
         # Phase 2: GAP RF parallel columns
         "RF_gap_median", "RF_gap_adj", "RF_gap_Trend", "RFL_gap", "RFL_gap_Trend", "PS_gap",
+        "Easy_RF_EMA_gap", "Easy_RFL_Gap_gap",
         "RF_sim_median", "RF_sim_adj", "RF_sim_Trend", "RFL_sim", "RFL_sim_Trend",
+        "Easy_RF_EMA_sim", "Easy_RFL_Gap_sim",
         # v43 Age grade and race predictions (Stryd)
         "CP", "pred_5k_s", "pred_10k_s", "pred_hm_s", "pred_marathon_s",
         "pred_5k_age_grade", "age_grade_pct",

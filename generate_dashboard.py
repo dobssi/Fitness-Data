@@ -293,6 +293,8 @@ def get_summary_stats(df):
         'latest_dist': round(latest[dist_col], 2) if latest is not None and pd.notna(latest.get(dist_col)) else None,
         # v51: Easy RF gap
         'easy_rfl_gap': round(latest.get('Easy_RFL_Gap', 0) * 100, 1) if latest is not None and pd.notna(latest.get('Easy_RFL_Gap')) else None,
+        'easy_rfl_gap_gap': round(latest.get('Easy_RFL_Gap_gap', 0) * 100, 1) if latest is not None and pd.notna(latest.get('Easy_RFL_Gap_gap')) else None,
+        'easy_rfl_gap_sim': round(latest.get('Easy_RFL_Gap_sim', 0) * 100, 1) if latest is not None and pd.notna(latest.get('Easy_RFL_Gap_sim')) else None,
         # Phase 2: GAP and Sim RFL for mode toggle
         'latest_rfl_gap': round((latest.get('RFL_gap_Trend') or 0) * 100, 1) if latest is not None and pd.notna(latest.get('RFL_gap_Trend')) else None,
         'latest_rfl_sim': round((latest.get('RFL_sim_Trend') or 0) * 100, 1) if latest is not None and pd.notna(latest.get('RFL_sim_Trend')) else None,
@@ -2101,8 +2103,12 @@ def generate_html(stats, rf_data, volume_data, ctl_atl_data, ctl_atl_lookup, rfl
             <div class="stat-label">RFL 14d</div>
             <div class="stat-sub">change</div>
         </div>
-        <div class="stat-card stryd-only">
-            <div class="stat-value">{f"{'+' if stats['easy_rfl_gap'] > 0 else ''}{stats['easy_rfl_gap']}%" if stats['easy_rfl_gap'] is not None else '-'}</div>
+        <div class="stat-card">
+            <div class="stat-value" id="easy-rf-gap-value"
+                 data-stryd="{f"{'+' if stats['easy_rfl_gap'] > 0 else ''}{stats['easy_rfl_gap']}%" if stats['easy_rfl_gap'] is not None else '-'}"
+                 data-gap="{f"{'+' if stats['easy_rfl_gap_gap'] > 0 else ''}{stats['easy_rfl_gap_gap']}%" if stats['easy_rfl_gap_gap'] is not None else '-'}"
+                 data-sim="{f"{'+' if stats['easy_rfl_gap_sim'] > 0 else ''}{stats['easy_rfl_gap_sim']}%" if stats['easy_rfl_gap_sim'] is not None else '-'}"
+            >{f"{'+' if stats['easy_rfl_gap'] > 0 else ''}{stats['easy_rfl_gap']}%" if stats['easy_rfl_gap'] is not None else '-'}</div>
             <div class="stat-label">Easy RF Gap</div>
             <div class="stat-sub">vs trend</div>
         </div>
@@ -3475,6 +3481,12 @@ def generate_html(stats, rf_data, volume_data, ctl_atl_data, ctl_atl_lookup, rfl
         if (rflLabel) {{
             const labels = {{ stryd: 'RFL Trend', gap: 'RFL (GAP)', sim: 'RFL (Sim)' }};
             rflLabel.textContent = labels[mode];
+        }}
+        
+        // Update Easy RF Gap stat card
+        const easyGapEl = document.getElementById('easy-rf-gap-value');
+        if (easyGapEl) {{
+            easyGapEl.textContent = easyGapEl.dataset[mode] || '-';
         }}
         
         // Hide/show power-only elements via body class (CSS handles all hiding)
