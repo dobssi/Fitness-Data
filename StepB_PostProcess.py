@@ -3975,8 +3975,15 @@ def main() -> int:
             terrain_adj = calc_terrain_adj(undulation_for_adj)
         
         elevation_adj = calc_elevation_adj(elev_gain_per_km)
-        # v49: Use regression-based power_adjuster_to_S4 as Era_Adj (speed-controlled)
-        power_adj_to_s4 = pd.to_numeric(row.get('power_adjuster_to_S4', np.nan), errors='coerce')
+        # v51.7: GAP-calibrated era adjustments (independent physics cross-check)
+        # Original regression-based values under-corrected older eras by 1-5%
+        # GAP power (physics-only, no hardware) provides independent calibration reference
+        GAP_ERA_OVERRIDES = {'v1': 1.097, 'repl': 1.054, 'air': 1.030, 's4': 1.000, 's5': 0.994}
+        _gap_era_override = GAP_ERA_OVERRIDES.get(str(era_id).lower().strip())
+        if _gap_era_override is not None:
+            power_adj_to_s4 = _gap_era_override
+        else:
+            power_adj_to_s4 = pd.to_numeric(row.get('power_adjuster_to_S4', np.nan), errors='coerce')
         era_adj = calc_era_adj(era_id, era_adjusters, power_adj_to_s4=power_adj_to_s4)
         # v51.6: Sim power is already S4-calibrated — don't apply Stryd-era correction
         # for runs outside the primary sim eras (those have their own calibration path)
