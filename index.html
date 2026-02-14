@@ -368,7 +368,7 @@
 <body>
 <script>Chart.defaults.color="#8b90a0";Chart.defaults.borderColor="rgba(255,255,255,0.04)";Chart.defaults.font.family="'DM Sans',sans-serif";Chart.defaults.plugins.legend.labels.padding=10;</script>
     <h1>🏃 Paul Collyer</h1>
-    <div class="dash-sub">Saturday 14 February 2026, 11:36</div>
+    <div class="dash-sub">Saturday 14 February 2026, 12:09</div>
     
     <!-- Phase 2: Mode Toggle -->
     <div class="mode-toggle" style="display:flex;gap:6px;margin:10px 0 8px;align-items:center;">
@@ -383,6 +383,8 @@
         .mode-btn:hover { border-color:var(--accent); color:var(--text); }
         .mode-btn.active { background:var(--accent); color:#fff; border-color:var(--accent); }
         body.gap-mode .power-only { display:none !important; }
+        body.sim-mode .stryd-only { display:none !important; }
+        body.gap-mode .stryd-only { display:none !important; }
         body.gap-mode .pace-target { display:block !important; }
         .gap-only { display:none !important; }
         body.gap-mode .gap-only { display:inline-block !important; }
@@ -426,7 +428,7 @@
             <div class="stat-label">RFL 14d</div>
             <div class="stat-sub">change</div>
         </div>
-        <div class="stat-card power-only">
+        <div class="stat-card stryd-only">
             <div class="stat-value">-1.0%</div>
             <div class="stat-label">Easy RF Gap</div>
             <div class="stat-sub">vs trend</div>
@@ -836,14 +838,19 @@
     </div>
     
     <div class="footer">
-        Updated: 2026-02-14 11:36<br>
+        Updated: 2026-02-14 12:09<br>
         Data through: 2026-02-14
     </div>
     
     <script>
         // RFL 14-day Trend Chart with trendline, 7-day projection and 95% CI
         const rflTrendCtx = document.getElementById('rflTrendChart').getContext('2d');
-        new Chart(rflTrendCtx, {
+        const rfl14Data = {
+            stryd: { values: [91.58, 91.46, 91.2, 91.13, 91.13, 91.13, 91.13, 90.94, 90.94, 90.63, 90.69, 90.62, 90.56, 90.23, null, null, null, null, null, null, null], trendline: [91.51, 91.43, 91.34, 91.26, 91.17, 91.08, 91.0, 90.91, 90.83, 90.74, 90.65, 90.57, 90.48, 90.4, null, null, null, null, null, null, null], projection: [null, null, null, null, null, null, null, null, null, null, null, null, null, 90.4, 90.31, 90.23, 90.14, 90.05, 89.97, 89.88, 89.8], ci_upper: [null, null, null, null, null, null, null, null, null, null, null, null, null, 90.63, 90.55, 90.47, 90.39, 90.31, 90.23, 90.16, 90.08], ci_lower: [null, null, null, null, null, null, null, null, null, null, null, null, null, 90.17, 90.08, 89.98, 89.89, 89.8, 89.71, 89.61, 89.52] },
+            gap: { values: [90.28, 90.22, 90.08, 89.96, 89.96, 89.96, 89.96, 89.8, 89.81, 89.61, 89.61, 89.64, 89.59, 89.51, null, null, null, null, null, null, null], trendline: [90.22, 90.17, 90.11, 90.05, 90.0, 89.94, 89.88, 89.83, 89.77, 89.72, 89.66, 89.6, 89.55, 89.49, null, null, null, null, null, null, null], projection: [null, null, null, null, null, null, null, null, null, null, null, null, null, 89.49, 89.43, 89.38, 89.32, 89.26, 89.21, 89.15, 89.09], ci_upper: [null, null, null, null, null, null, null, null, null, null, null, null, null, 89.62, 89.57, 89.52, 89.46, 89.41, 89.36, 89.31, 89.26], ci_lower: [null, null, null, null, null, null, null, null, null, null, null, null, null, 89.36, 89.3, 89.24, 89.17, 89.11, 89.05, 88.99, 88.93] },
+            sim: { values: [91.97, 91.91, 91.51, 91.5, 91.5, 91.5, 91.5, 91.36, 91.38, 90.95, 91.03, 90.79, 90.8, 90.65, null, null, null, null, null, null, null], trendline: [91.92, 91.82, 91.73, 91.64, 91.54, 91.45, 91.36, 91.26, 91.17, 91.08, 90.98, 90.89, 90.8, 90.71, null, null, null, null, null, null, null], projection: [null, null, null, null, null, null, null, null, null, null, null, null, null, 90.71, 90.61, 90.52, 90.43, 90.33, 90.24, 90.15, 90.05], ci_upper: [null, null, null, null, null, null, null, null, null, null, null, null, null, 90.98, 90.9, 90.81, 90.73, 90.64, 90.56, 90.48, 90.39], ci_lower: [null, null, null, null, null, null, null, null, null, null, null, null, null, 90.43, 90.33, 90.22, 90.12, 90.02, 89.92, 89.82, 89.71] }
+        };
+        let rfl14Chart = new Chart(rflTrendCtx, {
             type: 'line',
             data: {
                 labels: ["01 Feb", "02 Feb", "03 Feb", "04 Feb", "05 Feb", "06 Feb", "07 Feb", "08 Feb", "09 Feb", "10 Feb", "11 Feb", "12 Feb", "13 Feb", "14 Feb", "15 Feb", "16 Feb", "17 Feb", "18 Feb", "19 Feb", "20 Feb", "21 Feb"],
@@ -940,6 +947,31 @@
                 }
             }
         });
+        
+        function updateRfl14Chart(mode) {
+            const d = rfl14Data[mode] || rfl14Data.stryd;
+            const modeColors = {
+                stryd: { main: 'rgba(129, 140, 248, 1)', bg: 'rgba(129, 140, 248, 0.1)', point: 'rgba(129, 140, 248, 1)' },
+                gap: { main: 'rgba(74, 222, 128, 1)', bg: 'rgba(74, 222, 128, 0.1)', point: 'rgba(74, 222, 128, 1)' },
+                sim: { main: 'rgba(249, 115, 22, 1)', bg: 'rgba(249, 115, 22, 0.1)', point: 'rgba(249, 115, 22, 1)' }
+            };
+            const mc = modeColors[mode] || modeColors.stryd;
+            rfl14Chart.data.datasets[0].data = d.values;
+            rfl14Chart.data.datasets[0].borderColor = mc.main;
+            rfl14Chart.data.datasets[0].backgroundColor = mc.bg;
+            rfl14Chart.data.datasets[0].pointBackgroundColor = mc.point;
+            rfl14Chart.data.datasets[1].data = d.trendline;
+            rfl14Chart.data.datasets[2].data = d.projection;
+            rfl14Chart.data.datasets[3].data = d.ci_upper;
+            rfl14Chart.data.datasets[4].data = d.ci_lower;
+            // Update y-axis range
+            const vals = d.values.filter(v => v !== null);
+            if (vals.length > 0) {
+                rfl14Chart.options.scales.y.suggestedMin = Math.min(...vals) - 5;
+                rfl14Chart.options.scales.y.suggestedMax = Math.max(...vals) + 5;
+            }
+            rfl14Chart.update();
+        }
 
         // RF Trend Chart - with toggle (v51: includes Easy RF EMA + race dots)
         const rfData = {
@@ -1035,12 +1067,23 @@
                         labels: { 
                             boxWidth: 12, padding: 8, font: { size: 10 }, usePointStyle: true,
                             generateLabels: function(chart) {
-                                const ds = chart.data.datasets;
-                                return [
-                                    { text: 'RFL', fillStyle: 'rgba(129, 140, 248, 0.4)', strokeStyle: 'rgba(129, 140, 248, 0.3)', pointStyle: 'circle', hidden: !chart.isDatasetVisible(0), datasetIndex: 0, fontColor: '#8b90a0' },
-                                    { text: 'RFL Trend', fillStyle: 'rgba(129, 140, 248, 1)', strokeStyle: 'rgba(129, 140, 248, 1)', pointStyle: 'circle', hidden: !chart.isDatasetVisible(1), datasetIndex: 1, fontColor: '#8b90a0' },
-                                    { text: 'Easy RF', fillStyle: 'rgba(34, 197, 94, 0.8)', strokeStyle: 'rgba(34, 197, 94, 0.8)', pointStyle: 'circle', hidden: !chart.isDatasetVisible(2), datasetIndex: 2, fontColor: '#8b90a0' }
+                                const mc = typeof currentMode !== 'undefined' ? currentMode : 'stryd';
+                                const colors = {
+                                    stryd: { fill: 'rgba(129, 140, 248, ', trend: '#818cf8' },
+                                    gap: { fill: 'rgba(74, 222, 128, ', trend: '#4ade80' },
+                                    sim: { fill: 'rgba(249, 115, 22, ', trend: '#f97316' }
+                                };
+                                const c = colors[mc] || colors.stryd;
+                                const modeLabel = mc === 'gap' ? 'RFL (GAP)' : mc === 'sim' ? 'RFL (Sim)' : 'RFL';
+                                const trendLabel = mc === 'gap' ? 'GAP Trend' : mc === 'sim' ? 'Sim Trend' : 'RFL Trend';
+                                const items = [
+                                    { text: modeLabel, fillStyle: c.fill + '0.4)', strokeStyle: c.fill + '0.3)', pointStyle: 'circle', hidden: !chart.isDatasetVisible(0), datasetIndex: 0, fontColor: '#8b90a0' },
+                                    { text: trendLabel, fillStyle: c.trend, strokeStyle: c.trend, pointStyle: 'circle', hidden: !chart.isDatasetVisible(1), datasetIndex: 1, fontColor: '#8b90a0' }
                                 ];
+                                if (mc === 'stryd') {
+                                    items.push({ text: 'Easy RF', fillStyle: 'rgba(34, 197, 94, 0.8)', strokeStyle: 'rgba(34, 197, 94, 0.8)', pointStyle: 'circle', hidden: !chart.isDatasetVisible(2), datasetIndex: 2, fontColor: '#8b90a0' });
+                                }
+                                return items;
                             }
                         }
                     }
@@ -1476,7 +1519,9 @@
             
             const dates = indices.map(i => d.dates[i]);
             const datesISO = indices.map(i => d.dates_iso[i]);
-            const predicted = indices.map(i => d.predicted[i]);
+            // Mode-dependent prediction source
+            const predKey = currentMode === 'gap' ? 'predicted_gap' : currentMode === 'sim' ? 'predicted_sim' : 'predicted';
+            const predicted = indices.map(i => (d[predKey] || d.predicted)[i]);
             const actual = indices.map(i => d.actual[i]);
             const names = indices.map(i => d.names[i]);
             const temps = indices.map(i => d.temps[i]);
@@ -1540,8 +1585,8 @@
                     datasets: [{
                         label: adjustConditions ? 'Predicted (adj)' : 'Predicted',
                         data: predPoints,
-                        borderColor: adjustConditions ? 'rgba(74, 222, 128, 0.7)' : 'rgba(129, 140, 248, 0.7)',
-                        backgroundColor: adjustConditions ? 'rgba(74, 222, 128, 0.05)' : 'rgba(129, 140, 248, 0.05)',
+                        borderColor: adjustConditions ? 'rgba(74, 222, 128, 0.7)' : currentMode === 'gap' ? 'rgba(74, 222, 128, 0.7)' : currentMode === 'sim' ? 'rgba(249, 115, 22, 0.7)' : 'rgba(129, 140, 248, 0.7)',
+                        backgroundColor: adjustConditions ? 'rgba(74, 222, 128, 0.05)' : currentMode === 'gap' ? 'rgba(74, 222, 128, 0.05)' : currentMode === 'sim' ? 'rgba(249, 115, 22, 0.05)' : 'rgba(129, 140, 248, 0.05)',
                         borderWidth: 2,
                         pointRadius: 0,
                         fill: true,
@@ -1869,6 +1914,17 @@
             updateRfChart(currentRfRange);
         }
         
+        // Update 14-day RFL trend chart
+        if (typeof rfl14Chart !== 'undefined' && typeof updateRfl14Chart === 'function') {
+            updateRfl14Chart(mode);
+        }
+        
+        // Re-render prediction chart with mode-appropriate predictions
+        if (typeof renderPredChart === 'function' && typeof currentPredDist !== 'undefined') {
+            const showPR = document.getElementById('predParkrunToggle');
+            renderPredChart(currentPredDist, showPR ? showPR.checked : false);
+        }
+        
         // Update RFL label
         const rflLabel = document.getElementById('rfl-label');
         if (rflLabel) {
@@ -1878,7 +1934,9 @@
         
         // Hide/show power-only elements via body class (CSS handles all hiding)
         const isGap = mode === 'gap';
+        const isSim = mode === 'sim';
         document.body.classList.toggle('gap-mode', isGap);
+        document.body.classList.toggle('sim-mode', isSim);
         
         // Update CP in alert banner for Stryd/Sim modes
         const cpBanner = document.getElementById('banner-cp');
