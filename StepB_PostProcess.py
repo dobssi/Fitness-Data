@@ -4046,6 +4046,7 @@ def main() -> int:
     dfm['Factor'] = np.nan
     dfm['Power_Score'] = np.nan  # v44.5: Power Score for each run
     dfm['PS_Floor_Applied'] = False  # v44.5: Track when Power Score floor was used
+    dfm['PS_sim'] = np.nan  # Phase 2: SIM Power Score
     
     days_back = RF_CONSTANTS['days_back']
     max_jump_pct = RF_CONSTANTS['rf_max_jump_pct']
@@ -4125,6 +4126,14 @@ def main() -> int:
             # No era adjustment (GAP is hardware-independent)
             gap_power_score = gap_avg_power * distance_factor * ps_heat_adj
             dfm.at[i, 'PS_gap'] = gap_power_score
+            
+            # Phase 2: SIM Power Score (uses athlete-specific RE model)
+            sim_re = pd.to_numeric(row.get('sim_re_med', np.nan), errors='coerce')
+            if pd.notna(sim_re) and sim_re > 0:
+                sim_avg_power = avg_speed_mps * float(args.mass_kg) / sim_re
+                sim_avg_power += 0.5 * 0.24 * 1.225 * avg_speed_mps ** 3
+                sim_power_score = sim_avg_power * distance_factor * ps_heat_adj
+                dfm.at[i, 'PS_sim'] = sim_power_score
         
         if pd.notna(rf_raw) and rf_raw > 0 and np.isfinite(total_adj):
             # Get previous RF_Trend (from row i-1) for intensity calculation
@@ -4170,6 +4179,24 @@ def main() -> int:
                 if rf_adj < rf_floor:
                     rf_adj = rf_floor
                     ps_floor_applied = True
+            
+            # v51.7: PS ceiling for short races (< 5km)
+            # At mile/1500m/3K intensity, HR lags metabolic demand, inflating Power/HR.
+            # PS captures actual output (power × distance scaling × heat).
+            # When PS/RF < 175 (vs steady-state ~184 at longer distances), the RF
+            # inflation is clear. Average RF and PS/184 to dampen while preserving signal.
+            # Only applies to races — training runs have naturally lower PS/RF ratios.
+            _is_race = bool(row.get('race_flag', False))
+            if _is_race and distance_km < 5.0 and pd.notna(power_score) and power_score > 0 and rf_adj > 0:
+                _ps_rf_ratio = power_score / rf_adj
+                if _ps_rf_ratio < 175:
+                    _ps_ceiling_ref = power_score / 184
+                    rf_adj_avg = (rf_adj + _ps_ceiling_ref) / 2
+                    # Don't pull below current RF_Trend (i.e. below ~100% RFL)
+                    if pd.notna(prev_rf_trend) and prev_rf_trend > 0:
+                        rf_adj = max(rf_adj_avg, prev_rf_trend)
+                    else:
+                        rf_adj = rf_adj_avg
             
             dfm.at[i, 'RF_adj'] = float(rf_adj)
             dfm.at[i, 'PS_Floor_Applied'] = ps_floor_applied
@@ -4329,6 +4356,17 @@ def main() -> int:
             if rf_gap_adj < rf_gap_floor:
                 rf_gap_adj = rf_gap_floor
         
+        # PS ceiling for short races (averaging when PS/RF ratio indicates HR lag)
+        _gap_is_race = bool(row.get('race_flag', False))
+        _gap_dist = pd.to_numeric(row.get('distance_km', np.nan), errors='coerce')
+        if _gap_is_race and pd.notna(_gap_dist) and _gap_dist < 5.0 and pd.notna(ps_gap) and ps_gap > 0 and rf_gap_adj > 0:
+            if ps_gap / rf_gap_adj < 175:
+                _gap_avg = (rf_gap_adj + ps_gap / 184) / 2
+                if np.isfinite(prev_rf_gap_trend) and prev_rf_gap_trend > 0:
+                    rf_gap_adj = max(_gap_avg, prev_rf_gap_trend)
+                else:
+                    rf_gap_adj = _gap_avg
+        
         dfm.at[i, 'RF_gap_adj'] = float(rf_gap_adj)
         
         # RF_gap_Trend: same weighted rolling logic with Factor and quadratic decay
@@ -4396,12 +4434,25 @@ def main() -> int:
             max_rf_sim = prev_rf_sim_trend * (1 + max_jump_pct / 100)
             rf_sim_adj = min(rf_sim_adj, max_rf_sim)
         
-        # PS floor using Stryd Power Score (sim power is on the same scale as Stryd)
-        ps_val = pd.to_numeric(row.get('Power_Score', np.nan), errors='coerce')
-        if pd.notna(ps_val) and ps_val > 0:
-            rf_sim_floor = ps_val / ps_rf_divisor
+        # PS floor using PS_sim (or Stryd Power Score as fallback)
+        ps_sim_val = pd.to_numeric(row.get('PS_sim', np.nan), errors='coerce')
+        if not (pd.notna(ps_sim_val) and ps_sim_val > 0):
+            ps_sim_val = pd.to_numeric(row.get('Power_Score', np.nan), errors='coerce')
+        if pd.notna(ps_sim_val) and ps_sim_val > 0:
+            rf_sim_floor = ps_sim_val / ps_rf_divisor
             if rf_sim_adj < rf_sim_floor:
                 rf_sim_adj = rf_sim_floor
+        
+        # PS ceiling for short races (averaging when PS/RF ratio indicates HR lag)
+        _sim_is_race = bool(row.get('race_flag', False))
+        _sim_dist = pd.to_numeric(row.get('distance_km', np.nan), errors='coerce')
+        if _sim_is_race and pd.notna(_sim_dist) and _sim_dist < 5.0 and pd.notna(ps_sim_val) and ps_sim_val > 0 and rf_sim_adj > 0:
+            if ps_sim_val / rf_sim_adj < 175:
+                _sim_avg = (rf_sim_adj + ps_sim_val / 184) / 2
+                if np.isfinite(prev_rf_sim_trend) and prev_rf_sim_trend > 0:
+                    rf_sim_adj = max(_sim_avg, prev_rf_sim_trend)
+                else:
+                    rf_sim_adj = _sim_avg
         
         dfm.at[i, 'RF_sim_adj'] = float(rf_sim_adj)
         
@@ -4765,7 +4816,7 @@ def main() -> int:
         # Phase 2: GAP RF parallel columns
         "RF_gap_median", "RF_gap_adj", "RF_gap_Trend", "RFL_gap", "RFL_gap_Trend", "PS_gap",
         "Easy_RF_EMA_gap", "Easy_RFL_Gap_gap",
-        "RF_sim_median", "RF_sim_adj", "RF_sim_Trend", "RFL_sim", "RFL_sim_Trend",
+        "RF_sim_median", "RF_sim_adj", "RF_sim_Trend", "RFL_sim", "RFL_sim_Trend", "PS_sim",
         "Easy_RF_EMA_sim", "Easy_RFL_Gap_sim",
         # v43 Age grade and race predictions (Stryd)
         "CP", "pred_5k_s", "pred_10k_s", "pred_hm_s", "pred_marathon_s",
