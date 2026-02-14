@@ -4223,14 +4223,25 @@ def main() -> int:
         # GAP adj = all adjustments except era (which is Stryd-specific)
         gap_total_adj = total_adj / era_adj if era_adj != 0 else total_adj
         
-        # Auto-apply indoor track penalty for GAP mode only
-        # Indoor = no air resistance + fast surface → GAP pace flatters fitness
-        # Stryd RF unaffected (measures actual power regardless of surface)
+        # GAP-only surface corrections
+        # GAP estimates power from speed, so surface conditions that affect speed
+        # (but not actual power output) need extra adjustment beyond the shared surface_adj.
+        # Stryd measures actual power → unaffected by surface speed changes.
         surface_type = str(row.get('surface', '')).upper()
         if surface_type == 'INDOOR_TRACK':
+            # Indoor = no air resistance + fast surface → GAP overstates fitness
             manual_sadj = pd.to_numeric(row.get('surface_adj', 1.0), errors='coerce')
             if not np.isfinite(manual_sadj) or manual_sadj == 1.0:
                 gap_total_adj *= 0.95
+        
+        # GAP cold adjustment: cold slows pace via heavier clothing, cold air,
+        # reduced muscle efficiency. Stryd measures actual power so is unaffected.
+        # Rate: +0.2% per degree below 5°C. Validated: closes GAP/Stryd RFL gap
+        # from 1.3% to ~0.2% in winter (2026-01 data).
+        _gap_temp = pd.to_numeric(row.get('avg_temp_c', np.nan), errors='coerce')
+        if np.isfinite(_gap_temp) and _gap_temp < 5.0:
+            gap_cold_adj = 1.0 + (5.0 - _gap_temp) * 0.002
+            gap_total_adj *= gap_cold_adj
         
         rf_gap_adj = rf_gap_raw * gap_total_adj
         
