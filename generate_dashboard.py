@@ -3123,8 +3123,15 @@ def generate_html(stats, rf_data, volume_data, ctl_atl_data, ctl_atl_lookup, rfl
                     datasets: [{{
                         label: adjustConditions ? 'Predicted (adj)' : 'Predicted',
                         data: predPoints,
-                        borderColor: adjustConditions ? 'rgba(74, 222, 128, 0.7)' : currentMode === 'gap' ? 'rgba(74, 222, 128, 0.7)' : currentMode === 'sim' ? 'rgba(249, 115, 22, 0.7)' : 'rgba(129, 140, 248, 0.7)',
-                        backgroundColor: adjustConditions ? 'rgba(74, 222, 128, 0.05)' : currentMode === 'gap' ? 'rgba(74, 222, 128, 0.05)' : currentMode === 'sim' ? 'rgba(249, 115, 22, 0.05)' : 'rgba(129, 140, 248, 0.05)',
+                        borderColor: (function() {{
+                            const modeBase = currentMode === 'gap' ? 'rgba(74, 222, 128,' : currentMode === 'sim' ? 'rgba(249, 115, 22,' : 'rgba(129, 140, 248,';
+                            return adjustConditions ? modeBase + ' 1)' : modeBase + ' 0.7)';
+                        }})(),
+                        backgroundColor: (function() {{
+                            const modeBase = currentMode === 'gap' ? 'rgba(74, 222, 128,' : currentMode === 'sim' ? 'rgba(249, 115, 22,' : 'rgba(129, 140, 248,';
+                            return modeBase + ' 0.05)';
+                        }})(),
+                        borderDash: adjustConditions ? [4, 3] : [],
                         borderWidth: 2,
                         pointRadius: 0,
                         fill: true,
