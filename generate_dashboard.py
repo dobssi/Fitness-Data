@@ -1365,22 +1365,10 @@ def get_zone_data(df):
                 spd_arr = npz_data['speed_mps']
                 grd_arr = npz_data['grade']
                 
-                # Clean power: exclude sections with implausible cost-of-transport
-                # COT = power/(mass*speed); sensor errors inflate COT >25% above run median
-                running = spd_arr > 2.0  # only assess at running pace (>8:20/km)
-                if running.sum() > 60:
-                    grd_safe = np.where(np.isnan(grd_arr), 0, grd_arr)
-                    cot = np.full_like(pw_arr, np.nan)
-                    mass_kg = row.get('weight_kg', ATHLETE_MASS_KG_DASH)
-                    cot[running] = pw_arr[running] / (mass_kg * spd_arr[running])
-                    cot_adj = cot - 4.0 * grd_safe
-                    cot_30 = pd.Series(cot_adj).rolling(30, min_periods=15).median().values
-                    cot_med = np.nanmedian(cot_adj)
-                    bad_pw = running & (~np.isnan(cot_30)) & (cot_30 > cot_med * 1.25)
-                    pw_arr[bad_pw] = 0.0  # zero so rolling avg doesn't bleed
-                    # Also zero HR for these seconds to keep zones consistent
-                    hr_arr = hr_arr.copy()
-                    hr_arr[bad_pw] = 0.0
+                # COT power cleaning now happens in rebuild (v51.8) — NPZ power_w
+                # already has implausible sections set to NaN.  For zone calcs,
+                # treat NaN power as 0 so _time_in_zones counts them correctly.
+                pw_arr = np.where(np.isnan(pw_arr), 0.0, pw_arr)
                 
                 run_entry['hz'] = _time_in_zones(hr_arr, hr_bounds, hr_znames)
                 run_entry['pz'] = _time_in_zones(pw_arr, pw_bounds, pw_znames)

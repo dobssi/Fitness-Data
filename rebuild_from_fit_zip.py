@@ -2151,6 +2151,39 @@ def summarize_fit(fit_path: str, tz_out: str, weight_kg: float, gps_outlier_spee
     except Exception:
         pass
 
+    # -----------------------------------------------------------------------
+    # COT-based power exclusion filter (moved from dashboard to rebuild, v51.8)
+    # Sensor malfunctions can inflate power for sections of a run (e.g. first
+    # 5 minutes after a cold start). We detect these by computing the
+    # cost-of-transport ratio: COT = power / (mass × speed), grade-adjusted.
+    # Sections where 30s rolling COT exceeds 25% above the run median are
+    # marked as bad and their power_w is set to NaN.  This cleans the NPZ
+    # cache so NPWR, RF, and dashboard zone calculations all see clean data.
+    # -----------------------------------------------------------------------
+    cot_secs_excluded = 0
+    cot_pct_excluded = 0.0
+    try:
+        _pw = pd.to_numeric(df.get('power_w'), errors='coerce').to_numpy(dtype=float)
+        _spd = pd.to_numeric(df.get('speed'), errors='coerce').to_numpy(dtype=float)
+        _grd = pd.to_numeric(df.get('grade'), errors='coerce').to_numpy(dtype=float)
+        _running = np.isfinite(_pw) & np.isfinite(_spd) & (_spd > 2.0) & (_pw > 0)
+        if _running.sum() > 60:
+            _grd_safe = np.where(np.isnan(_grd), 0, _grd)
+            _cot = np.full_like(_pw, np.nan)
+            _cot[_running] = _pw[_running] / (weight_kg * _spd[_running])
+            _cot_adj = _cot - 4.0 * _grd_safe
+            _cot_30 = pd.Series(_cot_adj).rolling(30, min_periods=15).median().values
+            _cot_med = np.nanmedian(_cot_adj)
+            if np.isfinite(_cot_med) and _cot_med > 0:
+                _bad = _running & (~np.isnan(_cot_30)) & (_cot_30 > _cot_med * 1.25)
+                cot_secs_excluded = int(_bad.sum())
+                cot_pct_excluded = round(100.0 * cot_secs_excluded / _running.sum(), 1) if _running.sum() > 0 else 0.0
+                if cot_secs_excluded > 0:
+                    df.loc[df.index[_bad], 'power_w'] = np.nan
+                    df.loc[df.index[_bad], 'pwkg'] = np.nan
+    except Exception:
+        pass
+
     # Optional per-second cache for downstream RE modelling / sim-power.
     # Written AFTER grade detrend (v37) so sim-power sees the corrected grade series.
     if persec_cache_dir:
@@ -2191,6 +2224,8 @@ def summarize_fit(fit_path: str, tz_out: str, weight_kg: float, gps_outlier_spee
                     loop_like=bool(loop_like),
                     loop_displacement_m=float(loop_displacement_m) if loop_displacement_m==loop_displacement_m else float('nan'),
                     weight_kg=float(weight_kg),
+                    cot_secs_excluded=int(cot_secs_excluded),
+                    cot_pct_excluded=float(cot_pct_excluded),
                 )
                 # v50: Update cache index entry
                 _update_cache_index_entry(persec_cache_dir, safe_name + '.npz', float(df['ts'].iloc[0]))
@@ -2511,6 +2546,8 @@ def summarize_fit(fit_path: str, tz_out: str, weight_kg: float, gps_outlier_spee
         "avg_pace_min_per_km": round(pace, 2) if np.isfinite(pace) else np.nan,
         "avg_power_w": round(avg_power, 1) if np.isfinite(avg_power) else np.nan,
         "npower_w": round(nP, 1) if np.isfinite(nP) else np.nan,
+        "cot_secs_excluded": cot_secs_excluded,
+        "cot_pct_excluded": cot_pct_excluded,
         "avg_air_power_wkg": round(avg_air_wkg, 3) if np.isfinite(avg_air_wkg) else np.nan,
         "avg_air_power_w": round(avg_air_w, 1) if np.isfinite(avg_air_w) else np.nan,
         "avg_hr": round(avg_hr, 1) if np.isfinite(avg_hr) else np.nan,
