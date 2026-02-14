@@ -1223,7 +1223,33 @@ def get_zone_data(df):
     # Race HR zones: contiguous
     race_hr_bounds = [0, 163, 170, 175, 180, 184, 9999]
     race_hr_names = ['Other', 'Mara', 'HM', '10K', '5K', 'Sub-5K']
-    
+
+    # Race GAP pace zones (sec/km) — built from GAP predictions
+    # These mirror the JS makeRacePaceZones() logic
+    # Note: pace is inverted — faster pace = lower number = harder effort
+    gap_target_paces_local = {}
+    latest_row = df.iloc[-1] if len(df) > 0 else None
+    if latest_row is not None:
+        for dk, dkm in [('5k', 5.0), ('10k', 10.0), ('hm', 21.097), ('marathon', 42.195)]:
+            col = f'pred_{dk}_s_gap'
+            if col in df.columns and pd.notna(latest_row.get(col)):
+                gap_target_paces_local[dk] = round(latest_row[col] / dkm)
+    p5 = gap_target_paces_local.get('5k', 240)
+    p10 = gap_target_paces_local.get('10k', 252)
+    ph = gap_target_paces_local.get('hm', 265)
+    pm = gap_target_paces_local.get('marathon', 282)
+    # Bounds: fastest (lowest sec/km) to slowest — same midpoint logic as JS
+    race_pace_bounds_fast_to_slow = [
+        0,                          # Sub-5K lower (fastest possible)
+        round(p5 * 0.97),           # Sub-5K / 5K boundary
+        round((p5 + p10) / 2),      # 5K / 10K boundary
+        round((p10 + ph) / 2),      # 10K / HM boundary
+        round((ph + pm) / 2),       # HM / Mara boundary
+        round(pm * 1.07),           # Mara / Other boundary
+        9999                        # Other upper
+    ]
+    race_pace_names = ['Sub-5K', '5K', '10K', 'HM', 'Mara', 'Other']
+
     def _time_in_zones(values, bounds, names, rolling_s=30):
         """Compute minutes in each zone using rolling average."""
         import numpy as np
@@ -1245,6 +1271,41 @@ def get_zone_data(df):
                 if v >= bounds[i]:
                     result[names[i]] += 1.0
                     break
+        # Convert seconds to minutes
+        return {n: round(v / 60.0, 1) for n, v in result.items()}
+
+    def _time_in_pace_zones(pace_skm_values, bounds_fast_to_slow, names, rolling_s=30):
+        """Compute minutes in each pace zone using rolling average.
+        
+        Pace zones are inverted vs power/HR: lower value = faster = harder effort.
+        bounds_fast_to_slow: [0, sub5k_bound, 5k_10k_bound, ..., 9999]
+        names: ['Sub-5K', '5K', '10K', 'HM', 'Mara', 'Other']
+        A pace value falls in zone i if bounds[i] <= pace < bounds[i+1].
+        """
+        import numpy as np
+        vals = np.array(pace_skm_values, dtype=float)
+        valid = ~np.isnan(vals) & (vals > 0) & (vals < 1200)  # sane pace range
+        if valid.sum() < 10:
+            return {n: 0.0 for n in names}
+        # Rolling average
+        kernel = min(rolling_s, valid.sum())
+        if kernel > 1:
+            rolled = pd.Series(vals).rolling(kernel, min_periods=1).mean().values
+        else:
+            rolled = vals
+        result = {n: 0.0 for n in names}
+        for v in rolled:
+            if np.isnan(v) or v <= 0:
+                continue
+            # Assign to zone: find which bracket this pace falls in
+            assigned = False
+            for i in range(len(bounds_fast_to_slow) - 1):
+                if bounds_fast_to_slow[i] <= v < bounds_fast_to_slow[i + 1]:
+                    result[names[i]] += 1.0
+                    assigned = True
+                    break
+            if not assigned:
+                result[names[-1]] += 1.0  # slowest zone
         # Convert seconds to minutes
         return {n: round(v / 60.0, 1) for n, v in result.items()}
     
@@ -1322,6 +1383,19 @@ def get_zone_data(df):
                 run_entry['pz'] = _time_in_zones(pw_arr, pw_bounds, pw_znames)
                 run_entry['rpz'] = _time_in_zones(pw_arr, race_pw_bounds, race_pw_names)
                 run_entry['rhz'] = _time_in_zones(hr_arr, race_hr_bounds, race_hr_names)
+                
+                # GAP pace zones: compute per-second GAP pace from speed + grade
+                try:
+                    from gap_power import compute_gap_for_run
+                    grd_safe_gap = np.where(np.isnan(grd_arr), 0, grd_arr)
+                    gap_speed = compute_gap_for_run(spd_arr, grd_safe_gap)
+                    # Convert to pace (sec/km); zero/stopped seconds → NaN
+                    gap_pace_skm = np.where(gap_speed > 0.5, 1000.0 / gap_speed, np.nan)
+                    run_entry['rpz_gap'] = _time_in_pace_zones(
+                        gap_pace_skm, race_pace_bounds_fast_to_slow, race_pace_names)
+                except Exception:
+                    pass  # GAP zones not available — JS will use heuristic fallback
+                
                 npz_hits += 1
             except Exception as e:
                 pass  # Fall back to no zone data
@@ -1330,17 +1404,7 @@ def get_zone_data(df):
     
     print(f"  Zone data: {len(runs)} runs, {npz_hits} with NPZ, CP={current_cp}W (RFL={current_rfl:.4f}), RE_p90={re_p90}")
     
-    # Compute GAP target paces (sec/km) from latest predictions
-    gap_target_paces = {}
-    latest = df.iloc[-1] if len(df) > 0 else None
-    if latest is not None:
-        pace_dists = {'5k': 5.0, '10k': 10.0, 'hm': 21.097, 'marathon': 42.195}
-        for dist_key, dist_km in pace_dists.items():
-            col = f'pred_{dist_key}_s_gap'
-            if col in df.columns and pd.notna(latest.get(col)):
-                gap_target_paces[dist_key] = round(latest[col] / dist_km)
-    
-    return {'runs': runs, 'current_cp': current_cp, 'current_rfl': round(current_rfl, 4), 're_p90': re_p90, 'gap_target_paces': gap_target_paces}
+    return {'runs': runs, 'current_cp': current_cp, 'current_rfl': round(current_rfl, 4), 're_p90': re_p90, 'gap_target_paces': gap_target_paces_local}
 
 
 # ============================================================================
@@ -1507,8 +1571,10 @@ def _generate_zone_html(zone_data):
     function estimateRaceEffortMinsHR(r,zones){{const result={{}};zones.forEach(z=>result[z.id]=0);const mins=r.duration_min||0,hr=r.avg_hr||0;if(!hr||!mins){{result['Other']=mins;return result;}}assignToZone(hr*1.06,zones,result,mins*0.15);assignToZone(hr,zones,result,mins*0.60);assignToZone(hr*0.92,zones,result,mins*0.25);return result;}}
     function getZoneMins(r,mode,zones){{
       // Use pre-computed NPZ zone data if available
-      // Skip power-based race zones (rpz/pz) in GAP mode — use pace heuristic instead
       const isGapMode=(typeof currentMode!=='undefined'&&currentMode==='gap');
+      // In GAP mode for race zones, prefer rpz_gap (per-second GAP pace data)
+      if(isGapMode&&mode==='race'&&r.rpz_gap){{const result={{}};zones.forEach(z=>result[z.id]=0);Object.keys(r.rpz_gap).forEach(k=>{{if(result[k]!==undefined)result[k]=r.rpz_gap[k];}});return result;}}
+      // Skip power-based race/power zones in GAP mode
       const key={{hr:'hz',power:'pz',race:'rpz',racehr:'rhz'}}[mode];
       if(r[key]&&!(isGapMode&&(key==='rpz'||key==='pz'))){{const result={{}};zones.forEach(z=>result[z.id]=0);Object.keys(r[key]).forEach(k=>{{if(result[k]!==undefined)result[k]=r[key][k];}});return result;}}
       // Fallback to heuristic
