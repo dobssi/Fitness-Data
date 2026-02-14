@@ -368,7 +368,7 @@
 <body>
 <script>Chart.defaults.color="#8b90a0";Chart.defaults.borderColor="rgba(255,255,255,0.04)";Chart.defaults.font.family="'DM Sans',sans-serif";Chart.defaults.plugins.legend.labels.padding=10;</script>
     <h1>🏃 Paul Collyer</h1>
-    <div class="dash-sub">Saturday 14 February 2026, 13:57</div>
+    <div class="dash-sub">Saturday 14 February 2026, 14:12</div>
     
     <!-- Phase 2: Mode Toggle -->
     <div class="mode-toggle" style="display:flex;gap:6px;margin:10px 0 8px;align-items:center;">
@@ -428,8 +428,12 @@
             <div class="stat-label">RFL 14d</div>
             <div class="stat-sub">change</div>
         </div>
-        <div class="stat-card stryd-only">
-            <div class="stat-value">-0.9%</div>
+        <div class="stat-card">
+            <div class="stat-value" id="easy-rf-gap-value"
+                 data-stryd="-0.9%"
+                 data-gap="-1.4%"
+                 data-sim="+0.5%"
+            >-0.9%</div>
             <div class="stat-label">Easy RF Gap</div>
             <div class="stat-sub">vs trend</div>
         </div>
@@ -838,7 +842,7 @@
     </div>
     
     <div class="footer">
-        Updated: 2026-02-14 13:57<br>
+        Updated: 2026-02-14 14:12<br>
         Data through: 2026-02-14
     </div>
     
@@ -1937,6 +1941,12 @@
         if (rflLabel) {
             const labels = { stryd: 'RFL Trend', gap: 'RFL (GAP)', sim: 'RFL (Sim)' };
             rflLabel.textContent = labels[mode];
+        }
+        
+        // Update Easy RF Gap stat card
+        const easyGapEl = document.getElementById('easy-rf-gap-value');
+        if (easyGapEl) {
+            easyGapEl.textContent = easyGapEl.dataset[mode] || '-';
         }
         
         // Hide/show power-only elements via body class (CSS handles all hiding)
