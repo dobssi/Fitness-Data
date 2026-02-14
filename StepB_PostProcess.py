@@ -3962,6 +3962,9 @@ def main() -> int:
         # Own_Adj is just surface_adj
         surface_adj = pd.to_numeric(row.get('surface_adj', 1.0), errors='coerce')
         own_adj = surface_adj if surface_adj and np.isfinite(surface_adj) else 1.0
+        # Write back auto-applied surface_adj so it's visible in output
+        if own_adj != 1.0 and pd.isna(row.get('surface_adj')) or row.get('surface_adj') == 1.0:
+            dfm.at[i, 'surface_adj'] = float(own_adj)
         
         # Use scaled temp_adj for RF's total_adj
         total_adj = calc_total_adj(temp_adj_for_rf, terrain_adj, era_adj, own_adj, elevation_adj=elevation_adj)
@@ -4219,6 +4222,15 @@ def main() -> int:
             era_adj = 1.0
         # GAP adj = all adjustments except era (which is Stryd-specific)
         gap_total_adj = total_adj / era_adj if era_adj != 0 else total_adj
+        
+        # Auto-apply indoor track penalty for GAP mode only
+        # Indoor = no air resistance + fast surface → GAP pace flatters fitness
+        # Stryd RF unaffected (measures actual power regardless of surface)
+        surface_type = str(row.get('surface', '')).upper()
+        if surface_type == 'INDOOR_TRACK':
+            manual_sadj = pd.to_numeric(row.get('surface_adj', 1.0), errors='coerce')
+            if not np.isfinite(manual_sadj) or manual_sadj == 1.0:
+                gap_total_adj *= 0.95
         
         rf_gap_adj = rf_gap_raw * gap_total_adj
         
