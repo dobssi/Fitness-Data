@@ -389,37 +389,41 @@ function raceAnnotations(dates) {
     const pDash = {'A': [], 'B': [6,3], 'C': [3,3]};
     const annots = {};
     if (!dates || dates.length === 0) return annots;
-    PLANNED_RACES.forEach((r, i) => {
+    // Find only the NEXT upcoming race
+    const upcoming = PLANNED_RACES.filter(r => {
         const rd = new Date(r.date + 'T00:00:00');
-        if (rd < _today || rd > _14dFromNow) return;
-        // Try both date formats
-        const short = _isoToShort(r.date);
-        const medium = _isoToMedium(r.date);
-        let matchLabel = null;
-        if (dates.includes(short)) matchLabel = short;
-        else if (dates.includes(medium)) matchLabel = medium;
-        if (matchLabel) {
-            annots['race_'+i] = {
-                type: 'line', xMin: matchLabel, xMax: matchLabel,
-                borderColor: pColors[r.priority] || '#fbbf24',
-                borderWidth: r.priority === 'A' ? 2 : 1.5,
-                borderDash: pDash[r.priority] || [6,3],
-                label: { display: true, content: r.name, position: 'start',
-                    backgroundColor: 'rgba(15,17,23,0.85)',
-                    color: pColors[r.priority] || '#fbbf24',
-                    font: { size: 10, family: "'DM Sans'" },
-                    padding: {x:4,y:2}, borderRadius: 3
-                }
-            };
-        }
-    });
+        return rd >= _today;
+    }).sort((a,b) => a.date.localeCompare(b.date));
+    if (upcoming.length === 0) return annots;
+    const r = upcoming[0];
+    const rd = new Date(r.date + 'T00:00:00');
+    if (rd > _14dFromNow) return annots;
+    const short = _isoToShort(r.date);
+    const medium = _isoToMedium(r.date);
+    let matchLabel = null;
+    if (dates.includes(short)) matchLabel = short;
+    else if (dates.includes(medium)) matchLabel = medium;
+    if (matchLabel) {
+        annots['race_next'] = {
+            type: 'line', xMin: matchLabel, xMax: matchLabel,
+            borderColor: pColors[r.priority] || '#fbbf24',
+            borderWidth: r.priority === 'A' ? 2 : 1.5,
+            borderDash: pDash[r.priority] || [6,3],
+            label: { display: true, content: r.name, position: 'start',
+                backgroundColor: 'rgba(15,17,23,0.85)',
+                color: pColors[r.priority] || '#fbbf24',
+                font: { size: 10, family: "'DM Sans'" },
+                padding: {x:4,y:2}, borderRadius: 3
+            }
+        };
+    }
     return annots;
 }
 
 
 </script>
     <h1>🏃 Paul Collyer</h1>
-    <div class="dash-sub">Sunday 15 February 2026, 18:02</div>
+    <div class="dash-sub">Sunday 15 February 2026, 18:14</div>
     
     <!-- Phase 2: Mode Toggle -->
     <div class="mode-toggle" style="display:flex;gap:6px;margin:10px 0 8px;align-items:center;">
@@ -558,12 +562,12 @@ function raceAnnotations(dates) {
                 <span class="rd">2026-02-21 · 6d</span>
             </div>
             <div class="rs">
-                <div class="power-only"><div class="rv" style="color:var(--accent)" id="race-pw-5K">350W</div><div class="rl">Target</div><div class="rx">±10W</div></div>
-                <div class="pace-target" style="display:none"><div class="rv" style="color:#4ade80" id="race-pace-5K">3:57/km</div><div class="rl">Target pace</div></div>
-                <div><div class="rv" id="race-pred-5K">19:48</div><div class="rl">Predicted</div><div class="rx power-only">3:57/km</div></div>
+                <div class="power-only"><div class="rv" style="color:var(--accent)" id="race-pw-0">350W</div><div class="rl">Target</div><div class="rx">±10W</div></div>
+                <div class="pace-target" style="display:none"><div class="rv" style="color:#4ade80" id="race-pace-0">3:57/km</div><div class="rl">Target pace</div></div>
+                <div><div class="rv" id="race-pred-0">19:48</div><div class="rl">Predicted</div><div class="rx power-only">3:57/km</div></div>
                 <div><div class="rv" style="color:#4ade80">→ 89.5%</div><div class="rl">RFL at race</div></div>
-                <div><div class="rv" id="spec14_5K">—</div><div class="rl">14-day</div><div class="rx">at effort</div></div>
-                <div><div class="rv" id="spec28_5K">—</div><div class="rl">28-day</div><div class="rx">at effort</div></div>
+                <div><div class="rv" id="spec14_0">—</div><div class="rl">14-day</div><div class="rx">at effort</div></div>
+                <div><div class="rv" id="spec28_0">—</div><div class="rl">28-day</div><div class="rx">at effort</div></div>
             </div>
             <div style="margin-top:6px"></div>
         </div><div class="rc">
@@ -572,12 +576,12 @@ function raceAnnotations(dates) {
                 <span class="rd">2026-02-27 · 12d</span>
             </div>
             <div class="rs">
-                <div class="power-only"><div class="rv" style="color:var(--accent)" id="race-pw-5K">350W</div><div class="rl">Target</div><div class="rx">±10W</div></div>
-                <div class="pace-target" style="display:none"><div class="rv" style="color:#4ade80" id="race-pace-5K">3:57/km</div><div class="rl">Target pace</div></div>
-                <div><div class="rv" id="race-pred-5K">19:48</div><div class="rl">Predicted</div><div class="rx power-only">3:57/km</div></div>
+                <div class="power-only"><div class="rv" style="color:var(--accent)" id="race-pw-1">350W</div><div class="rl">Target</div><div class="rx">±10W</div></div>
+                <div class="pace-target" style="display:none"><div class="rv" style="color:#4ade80" id="race-pace-1">3:57/km</div><div class="rl">Target pace</div></div>
+                <div><div class="rv" id="race-pred-1">19:48</div><div class="rl">Predicted</div><div class="rx power-only">3:57/km</div></div>
                 <div><div class="rv" style="color:#4ade80">→ 89.5%</div><div class="rl">RFL at race</div></div>
-                <div><div class="rv" id="spec14_5K">—</div><div class="rl">14-day</div><div class="rx">at effort</div></div>
-                <div><div class="rv" id="spec28_5K">—</div><div class="rl">28-day</div><div class="rx">at effort</div></div>
+                <div><div class="rv" id="spec14_1">—</div><div class="rl">14-day</div><div class="rx">at effort</div></div>
+                <div><div class="rv" id="spec28_1">—</div><div class="rl">28-day</div><div class="rx">at effort</div></div>
             </div>
             <div style="margin-top:6px"><span style="color:#fbbf24;font-size:0.72rem">⏳ Taper starts in 5d</span></div>
         </div><div class="rc">
@@ -586,12 +590,12 @@ function raceAnnotations(dates) {
                 <span class="rd">2026-04-25 · 69d</span>
             </div>
             <div class="rs">
-                <div class="power-only"><div class="rv" style="color:var(--accent)" id="race-pw-HM">316W</div><div class="rl">Target</div><div class="rx">±9W</div></div>
-                <div class="pace-target" style="display:none"><div class="rv" style="color:#4ade80" id="race-pace-HM">4:23/km</div><div class="rl">Target pace</div></div>
-                <div><div class="rv" id="race-pred-HM">1:32:31</div><div class="rl">Predicted</div><div class="rx power-only">4:23/km</div></div>
+                <div class="power-only"><div class="rv" style="color:var(--accent)" id="race-pw-2">316W</div><div class="rl">Target</div><div class="rx">±9W</div></div>
+                <div class="pace-target" style="display:none"><div class="rv" style="color:#4ade80" id="race-pace-2">4:23/km</div><div class="rl">Target pace</div></div>
+                <div><div class="rv" id="race-pred-2">1:32:31</div><div class="rl">Predicted</div><div class="rx power-only">4:23/km</div></div>
                 <div><div class="rv" style="color:#4ade80">→ 89.5%</div><div class="rl">RFL at race</div></div>
-                <div><div class="rv" id="spec14_HM">—</div><div class="rl">14-day</div><div class="rx">at effort</div></div>
-                <div><div class="rv" id="spec28_HM">—</div><div class="rl">28-day</div><div class="rx">at effort</div></div>
+                <div><div class="rv" id="spec14_2">—</div><div class="rl">14-day</div><div class="rx">at effort</div></div>
+                <div><div class="rv" id="spec28_2">—</div><div class="rl">28-day</div><div class="rx">at effort</div></div>
             </div>
             <div style="margin-top:6px"><span style="color:var(--text-dim);font-size:0.72rem">Taper in 55d</span></div>
         </div><div class="rc">
@@ -600,12 +604,12 @@ function raceAnnotations(dates) {
                 <span class="rd">2026-05-17 · 91d</span>
             </div>
             <div class="rs">
-                <div class="power-only"><div class="rv" style="color:var(--accent)" id="race-pw-HM">316W</div><div class="rl">Target</div><div class="rx">±9W</div></div>
-                <div class="pace-target" style="display:none"><div class="rv" style="color:#4ade80" id="race-pace-HM">4:23/km</div><div class="rl">Target pace</div></div>
-                <div><div class="rv" id="race-pred-HM">1:32:31</div><div class="rl">Predicted</div><div class="rx power-only">4:23/km</div></div>
+                <div class="power-only"><div class="rv" style="color:var(--accent)" id="race-pw-3">316W</div><div class="rl">Target</div><div class="rx">±9W</div></div>
+                <div class="pace-target" style="display:none"><div class="rv" style="color:#4ade80" id="race-pace-3">4:23/km</div><div class="rl">Target pace</div></div>
+                <div><div class="rv" id="race-pred-3">1:32:31</div><div class="rl">Predicted</div><div class="rx power-only">4:23/km</div></div>
                 <div><div class="rv" style="color:#4ade80"> —</div><div class="rl">RFL at race</div></div>
-                <div><div class="rv" id="spec14_HM">—</div><div class="rl">14-day</div><div class="rx">at effort</div></div>
-                <div><div class="rv" id="spec28_HM">—</div><div class="rl">28-day</div><div class="rx">at effort</div></div>
+                <div><div class="rv" id="spec14_3">—</div><div class="rl">14-day</div><div class="rx">at effort</div></div>
+                <div><div class="rv" id="spec28_3">—</div><div class="rl">28-day</div><div class="rx">at effort</div></div>
             </div>
             <div style="margin-top:6px"><span style="color:var(--text-dim);font-size:0.72rem">Taper in 84d</span></div>
         </div><div class="rc">
@@ -614,12 +618,12 @@ function raceAnnotations(dates) {
                 <span class="rd">2026-09-26 · 223d</span>
             </div>
             <div class="rs">
-                <div class="power-only"><div class="rv" style="color:var(--accent)" id="race-pw-Mara">300W</div><div class="rl">Target</div><div class="rx">±9W</div></div>
-                <div class="pace-target" style="display:none"><div class="rv" style="color:#4ade80" id="race-pace-Mara">4:37/km</div><div class="rl">Target pace</div></div>
-                <div><div class="rv" id="race-pred-Mara">3:14:55</div><div class="rl">Predicted</div><div class="rx power-only">4:37/km</div></div>
+                <div class="power-only"><div class="rv" style="color:var(--accent)" id="race-pw-4">300W</div><div class="rl">Target</div><div class="rx">±9W</div></div>
+                <div class="pace-target" style="display:none"><div class="rv" style="color:#4ade80" id="race-pace-4">4:37/km</div><div class="rl">Target pace</div></div>
+                <div><div class="rv" id="race-pred-4">3:14:55</div><div class="rl">Predicted</div><div class="rx power-only">4:37/km</div></div>
                 <div><div class="rv" style="color:#4ade80"> —</div><div class="rl">RFL at race</div></div>
-                <div><div class="rv" id="spec14_Mara">—</div><div class="rl">14-day</div><div class="rx">at effort</div></div>
-                <div><div class="rv" id="spec28_Mara">—</div><div class="rl">28-day</div><div class="rx">at effort</div></div>
+                <div><div class="rv" id="spec14_4">—</div><div class="rl">14-day</div><div class="rx">at effort</div></div>
+                <div><div class="rv" id="spec28_4">—</div><div class="rl">28-day</div><div class="rx">at effort</div></div>
             </div>
             <div style="margin-top:6px"><span style="color:var(--text-dim);font-size:0.72rem">Taper in 209d</span></div>
         </div>
@@ -716,7 +720,7 @@ function raceAnnotations(dates) {
       // HR/Power zone fallback: assign all time to primary zone
       const result={};zones.forEach(z=>result[z.id]=0);const mins=r.duration_min||0,v=valFor(r,mode),zid=assignZ(v,zones,false);if(result[zid]!==undefined)result[zid]=mins;return result;
     }
-    function calcSpecificity(){const today=new Date();const c14=new Date(today);c14.setDate(c14.getDate()-14);const c28=new Date(today);c28.setDate(c28.getDate()-28);const useGAP=(typeof currentMode!=='undefined'&&currentMode==='gap');const zones=useGAP?RACE_PACE_Z:RACE_PW_Z;const modeKey='race';const targets=[{key:'5K'},{key:'HM'}];targets.forEach(tgt=>{let m14=0,m28=0;ZONE_RUNS.forEach(r=>{const d=new Date(r.date);if(d<c28)return;const est=getZoneMins(r,modeKey,zones);const mins=est[tgt.key]||0;if(d>=c14)m14+=mins;m28+=mins;});const e14=document.getElementById('spec14_'+tgt.key),e28=document.getElementById('spec28_'+tgt.key);if(e14)e14.innerHTML=Math.round(m14)+'<span style="font-size:0.75rem;color:var(--text-dim)">min</span>';if(e28)e28.innerHTML=Math.round(m28)+'<span style="font-size:0.75rem;color:var(--text-dim)">min</span>';});}calcSpecificity();
+    function calcSpecificity(){const today=new Date();const c14=new Date(today);c14.setDate(c14.getDate()-14);const c28=new Date(today);c28.setDate(c28.getDate()-28);const useGAP=(typeof currentMode!=='undefined'&&currentMode==='gap');const zones=useGAP?RACE_PACE_Z:RACE_PW_Z;const modeKey='race';PLANNED_RACES.forEach((tgt,idx)=>{let m14=0,m28=0;ZONE_RUNS.forEach(r=>{const d=new Date(r.date);if(d<c28)return;const est=getZoneMins(r,modeKey,zones);const mins=est[tgt.distance_key]||0;if(d>=c14)m14+=mins;m28+=mins;});const e14=document.getElementById('spec14_'+idx),e28=document.getElementById('spec28_'+idx);if(e14)e14.innerHTML=Math.round(m14)+'<span style="font-size:0.75rem;color:var(--text-dim)">min</span>';if(e28)e28.innerHTML=Math.round(m28)+'<span style="font-size:0.75rem;color:var(--text-dim)">min</span>';});}calcSpecificity();
     // Weekly zone bars
     function weekKey(ds){const d=new Date(ds),day=d.getDay(),m=new Date(d);m.setDate(d.getDate()-((day+6)%7));return m.toISOString().slice(0,10);}
     function fmtWk(s){const d=new Date(s),tmp=new Date(d.valueOf());tmp.setDate(tmp.getDate()+3-(tmp.getDay()+6)%7);const w1=new Date(tmp.getFullYear(),0,4);const wk=1+Math.round(((tmp-w1)/864e5-3+(w1.getDay()+6)%7)/7);return'W'+String(wk).padStart(2,'0')+'/'+String(tmp.getFullYear()).slice(-2);}
@@ -945,7 +949,7 @@ function raceAnnotations(dates) {
     </div>
     
     <div class="footer">
-        Updated: 2026-02-15 18:02<br>
+        Updated: 2026-02-15 18:14<br>
         Data through: 2026-02-15
     </div>
     
@@ -2110,19 +2114,23 @@ function raceAnnotations(dates) {
         
         // Update race readiness cards (predicted time, target power/pace)
         const raceCfg = {
+            'Sub-5K': { factor: 1.07, dist: 3.0 },
             '5K': { factor: 1.05, dist: 5.0 },
-            'HM': { factor: 0.95, dist: 21.097 }
+            '10K': { factor: 1.00, dist: 10.0 },
+            'HM': { factor: 0.95, dist: 21.097 },
+            'Mara': { factor: 0.90, dist: 42.195 }
         };
-        ['5K', 'HM'].forEach(key => {
-            const cfg = raceCfg[key];
+        PLANNED_RACES.forEach((race, idx) => {
+            const key = race.distance_key;
+            const cfg = raceCfg[key] || { factor: 1.0, dist: 5.0 };
             const mcp = ms.cp;
             const pw = Math.round(mcp * cfg.factor);
             // Update power target
-            const pwEl = document.getElementById('race-pw-' + key);
+            const pwEl = document.getElementById('race-pw-' + idx);
             if (pwEl) pwEl.textContent = pw + 'W';
-            // Update predicted time
-            const predKey = key === '5K' ? 'pred5k_s' : 'predHm_s';
-            const predEl = document.getElementById('race-pred-' + key);
+            // Update predicted time - use closest available prediction
+            const predKey = (key === '5K' || key === 'Sub-5K') ? 'pred5k_s' : 'predHm_s';
+            const predEl = document.getElementById('race-pred-' + idx);
             if (predEl && ms[predKey]) {
                 const t = Math.round(ms[predKey]);
                 const hrs = Math.floor(t / 3600);
@@ -2131,7 +2139,7 @@ function raceAnnotations(dates) {
                 predEl.textContent = hrs > 0 ? hrs + ':' + String(mins).padStart(2,'0') + ':' + String(secs).padStart(2,'0') : mins + ':' + String(secs).padStart(2,'0');
             }
             // Update pace target
-            const paceEl = document.getElementById('race-pace-' + key);
+            const paceEl = document.getElementById('race-pace-' + idx);
             if (paceEl && ms[predKey]) {
                 const pace = ms[predKey] / cfg.dist;
                 const pm = Math.floor(pace / 60);
