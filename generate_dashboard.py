@@ -2587,7 +2587,8 @@ function raceAnnotations(dates) {{
                                 return !item.text.includes('CI');
                             }}
                         }}
-                    }}
+                    }},
+                    annotation: {{ annotations: raceAnnotations({json.dumps(rfl_trend_dates)}) }}
                 }},
                 scales: {{
                     x: {{
@@ -2607,8 +2608,7 @@ function raceAnnotations(dates) {{
                         suggestedMin: Math.min(...{json.dumps(rfl_trend_values)}.filter(v => v !== null)) - 5,
                         suggestedMax: Math.max(...{json.dumps(rfl_trend_values)}.filter(v => v !== null)) + 5
                     }}
-                }},
-                annotation: {{ annotations: raceAnnotations({json.dumps(rfl_trend_dates)}) }}
+                }}
             }}
         }});
         
@@ -2893,13 +2893,13 @@ function raceAnnotations(dates) {{
                                 return !item.text.includes('Projection');
                             }}
                         }}
-                    }}
+                    }},
+                    annotation: {{ annotations: raceAnnotations(ctlAtlData['90'].dates) }}
                 }},
                 scales: {{
                     x: {{ display: true, ticks: {{ maxTicksLimit: 5, maxRotation: 0, font: {{ size: 10 }} }} }},
                     y: {{ display: true, ticks: {{ font: {{ size: 10 }} }} }}
-                }},
-                annotation: {{ annotations: raceAnnotations(ctlAtlData['90'].dates) }}
+                }}
             }}
         }});
         
