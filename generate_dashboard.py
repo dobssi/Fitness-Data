@@ -1487,11 +1487,21 @@ def _generate_zone_html(zone_data):
         'trail':        {'power_mult': 0.95, 're_mult': 0.97},
         'undulating_trail': {'power_mult': 0.90, 're_mult': 0.95}
     }
-    # Continuous power-duration curve: factor = 1.1491 - 0.0657 * ln(dist_km)
-    # Fitted to Sub-5K(1.07), 5K(1.05), 10K(1.00), HM(0.95), Mara(0.90)
+    # Continuous power-duration curve: piecewise linear in log-distance space
+    # Exact at anchor points, interpolated between them
     import math as _math
+    _pd_anchors = [(3.0, 1.07), (5.0, 1.05), (10.0, 1.00), (21.097, 0.95), (42.195, 0.90)]
     def _road_cp_factor(dist_km):
-        return 1.1491 - 0.0657 * _math.log(max(dist_km, 1.0))
+        d = max(dist_km, 1.0)
+        ld = _math.log(d)
+        if ld <= _math.log(_pd_anchors[0][0]): return _pd_anchors[0][1]
+        if ld >= _math.log(_pd_anchors[-1][0]): return _pd_anchors[-1][1]
+        for i in range(len(_pd_anchors) - 1):
+            l0, l1 = _math.log(_pd_anchors[i][0]), _math.log(_pd_anchors[i+1][0])
+            if l0 <= ld <= l1:
+                frac = (ld - l0) / (l1 - l0)
+                return _pd_anchors[i][1] + frac * (_pd_anchors[i+1][1] - _pd_anchors[i][1])
+        return 1.0
     
     for race_idx, race in enumerate(PLANNED_RACES_DASH):
         key = race['distance_key']
@@ -3698,8 +3708,8 @@ function raceAnnotations(dates) {{
         
         // Update race readiness cards (predicted time, target power/pace)
         const _surfF = {{'indoor_track':{{pw:1.0,re:1.04}},'track':{{pw:1.0,re:1.02}},'road':{{pw:1.0,re:1.0}},'trail':{{pw:0.95,re:0.97}},'undulating_trail':{{pw:0.90,re:0.95}}}};
-        function _roadCpF(d){{return 1.1491-0.0657*Math.log(Math.max(d,1));}};
-        PLANNED_RACES.forEach((race, idx) => {{
+        const _pdA=[[3,1.07],[5,1.05],[10,1.00],[21.097,0.95],[42.195,0.90]];
+        function _roadCpF(d){{d=Math.max(d,1);const ld=Math.log(d);if(ld<=Math.log(_pdA[0][0]))return _pdA[0][1];if(ld>=Math.log(_pdA[_pdA.length-1][0]))return _pdA[_pdA.length-1][1];for(let i=0;i<_pdA.length-1;i++){{const l0=Math.log(_pdA[i][0]),l1=Math.log(_pdA[i+1][0]);if(ld>=l0&&ld<=l1){{const f=(ld-l0)/(l1-l0);return _pdA[i][1]+f*(_pdA[i+1][1]-_pdA[i][1]);}}}}return 1.0;}};        PLANNED_RACES.forEach((race, idx) => {{
             const dist = race.distance_km || 5.0;
             const sf = _surfF[race.surface||'road'] || _surfF.road;
             const factor = _roadCpF(dist) * sf.pw;
