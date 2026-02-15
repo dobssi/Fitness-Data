@@ -1507,8 +1507,9 @@ def _generate_zone_html(zone_data):
         # RFL projection at race day
         proj_rfl = _rfl_current + (_rfl_proj_per_day * max(days_to, 0))
         proj_rfl = max(0, min(1.05, proj_rfl))  # sanity clamp
-        proj_rfl_pct = f"{proj_rfl*100:.1f}%"
-        proj_direction = "↗" if _rfl_proj_per_day > 0.0002 else ("↘" if _rfl_proj_per_day < -0.0002 else "→")
+        proj_show = days_to <= 90 and days_to > 0
+        proj_rfl_pct = f"{proj_rfl*100:.1f}%" if proj_show else "—"
+        proj_direction = ("↗" if _rfl_proj_per_day > 0.0002 else ("↘" if _rfl_proj_per_day < -0.0002 else "→")) if proj_show else ""
         
         # Taper guidance
         taper_d = _taper_days.get(priority, 7)
@@ -2111,35 +2112,59 @@ def generate_html(stats, rf_data, volume_data, ctl_atl_data, ctl_atl_lookup, rfl
 <body>
 <script>Chart.defaults.color="#8b90a0";Chart.defaults.borderColor="rgba(255,255,255,0.04)";Chart.defaults.font.family="'DM Sans',sans-serif";Chart.defaults.plugins.legend.labels.padding=10;
 const PLANNED_RACES = {_planned_races_json};
+const _today = new Date().toISOString().slice(0,10);
+const _14dFromNow = new Date(Date.now() + 14*86400000).toISOString().slice(0,10);
 function raceAnnotations(dates) {{
-    const pColors = {{'A': '#f87171', 'B': '#fbbf24', 'C': '#555'}};
+    const pColors = {{'A': '#f87171', 'B': '#fbbf24', 'C': '#6b7280'}};
     const pDash = {{'A': [], 'B': [6,3], 'C': [3,3]}};
     const annots = {{}};
+    if (!dates || dates.length === 0) return annots;
+    const lastDate = dates[dates.length - 1];
     PLANNED_RACES.forEach((r, i) => {{
-        if (dates.includes(r.date)) {{
+        if (r.date < _today || r.date > _14dFromNow) return;
+        if (r.date > lastDate) return;
+        let bestIdx = -1, bestDiff = Infinity;
+        dates.forEach((d, di) => {{
+            const diff = Math.abs(new Date(d) - new Date(r.date));
+            if (diff < bestDiff) {{ bestDiff = diff; bestIdx = di; }}
+        }});
+        if (bestIdx >= 0 && bestDiff < 2*86400000) {{
             annots['race_'+i] = {{
-                type: 'line', xMin: r.date, xMax: r.date, borderColor: pColors[r.priority] || '#fbbf24',
-                borderWidth: r.priority === 'A' ? 2 : 1.5, borderDash: pDash[r.priority] || [6,3],
-                label: {{ display: true, content: r.name, position: 'start', backgroundColor: 'rgba(15,17,23,0.85)',
-                    color: pColors[r.priority] || '#fbbf24', font: {{ size: 10, family: "'DM Sans'" }},
+                type: 'line', xMin: dates[bestIdx], xMax: dates[bestIdx],
+                borderColor: pColors[r.priority] || '#fbbf24',
+                borderWidth: r.priority === 'A' ? 2 : 1.5,
+                borderDash: pDash[r.priority] || [6,3],
+                label: {{ display: true, content: r.name, position: 'start',
+                    backgroundColor: 'rgba(15,17,23,0.85)',
+                    color: pColors[r.priority] || '#fbbf24',
+                    font: {{ size: 10, family: "'DM Sans'" }},
                     padding: {{x:4,y:2}}, borderRadius: 3 }}
             }};
-        }} else {{
-            // Race date not in chart range — check if it falls within range
-            const sorted = [...dates].sort();
-            if (sorted.length > 1 && r.date >= sorted[0] && r.date <= sorted[sorted.length-1]) {{
-                annots['race_'+i] = {{
-                    type: 'line', xMin: r.date, xMax: r.date, borderColor: pColors[r.priority] || '#fbbf24',
-                    borderWidth: r.priority === 'A' ? 2 : 1.5, borderDash: pDash[r.priority] || [6,3],
-                    label: {{ display: true, content: r.name, position: 'start', backgroundColor: 'rgba(15,17,23,0.85)',
-                        color: pColors[r.priority] || '#fbbf24', font: {{ size: 10, family: "'DM Sans'" }},
-                        padding: {{x:4,y:2}}, borderRadius: 3 }}
-                }};
-            }}
         }}
     }});
     return annots;
 }}
+function raceAnnotationsTime() {{
+    const pColors = {{'A': '#f87171', 'B': '#fbbf24', 'C': '#6b7280'}};
+    const pDash = {{'A': [], 'B': [6,3], 'C': [3,3]}};
+    const annots = {{}};
+    PLANNED_RACES.forEach((r, i) => {{
+        if (r.date < _today || r.date > _14dFromNow) return;
+        annots['race_'+i] = {{
+            type: 'line', xMin: r.date, xMax: r.date,
+            borderColor: pColors[r.priority] || '#fbbf24',
+            borderWidth: r.priority === 'A' ? 2 : 1.5,
+            borderDash: pDash[r.priority] || [6,3],
+            label: {{ display: true, content: r.name, position: 'start',
+                backgroundColor: 'rgba(15,17,23,0.85)',
+                color: pColors[r.priority] || '#fbbf24',
+                font: {{ size: 10, family: "'DM Sans'" }},
+                padding: {{x:4,y:2}}, borderRadius: 3 }}
+        }};
+    }});
+    return annots;
+}}
+
 </script>
     <h1>🏃 Paul Collyer</h1>
     <div class="dash-sub">{datetime.now().strftime("%A %d %B %Y, %H:%M")}</div>
@@ -2743,8 +2768,7 @@ function raceAnnotations(dates) {{
                         min: 50,
                         suggestedMax: 100
                     }}
-                }},
-                annotation: {{ annotations: raceAnnotations(rfData['all'].dates) }}
+                }}
             }}
         }});
         
@@ -2790,7 +2814,6 @@ function raceAnnotations(dates) {{
             rfChart.data.datasets[1].borderColor = mc.trend;
             rfChart.options.scales.y.min = settings.yMin;
             rfChart.options.scales.x.ticks.maxTicksLimit = settings.ticks;
-            rfChart.options.plugins.annotation = {{ annotations: raceAnnotations(d.dates) }};
             
             rfChart.update();
         }}
@@ -3341,26 +3364,7 @@ function raceAnnotations(dates) {{
                                 font: {{ size: 10 }}
                             }}
                         }}
-                    }},
-                    annotation: {{ annotations: (function() {{
-                        const pColors = {{'A': '#f87171', 'B': '#fbbf24', 'C': '#555'}};
-                        const pDash = {{'A': [], 'B': [6,3], 'C': [3,3]}};
-                        const a = {{}};
-                        PLANNED_RACES.forEach((r, i) => {{
-                            a['race_'+i] = {{
-                                type: 'line', xMin: r.date, xMax: r.date,
-                                borderColor: pColors[r.priority] || '#fbbf24',
-                                borderWidth: r.priority === 'A' ? 2 : 1.5,
-                                borderDash: pDash[r.priority] || [6,3],
-                                label: {{ display: true, content: r.name, position: 'start',
-                                    backgroundColor: 'rgba(15,17,23,0.85)',
-                                    color: pColors[r.priority] || '#fbbf24',
-                                    font: {{ size: 10, family: "'DM Sans'" }},
-                                    padding: {{x:4,y:2}}, borderRadius: 3 }}
-                            }};
-                        }});
-                        return a;
-                    }})() }}
+                    }}
                 }}
             }});
         }}
@@ -3492,26 +3496,7 @@ function raceAnnotations(dates) {{
                                 font: {{ size: 10 }}
                             }}
                         }}
-                    }},
-                    annotation: {{ annotations: (function() {{
-                        const pColors = {{'A': '#f87171', 'B': '#fbbf24', 'C': '#555'}};
-                        const pDash = {{'A': [], 'B': [6,3], 'C': [3,3]}};
-                        const a = {{}};
-                        PLANNED_RACES.forEach((r, i) => {{
-                            a['race_'+i] = {{
-                                type: 'line', xMin: r.date, xMax: r.date,
-                                borderColor: pColors[r.priority] || '#fbbf24',
-                                borderWidth: r.priority === 'A' ? 2 : 1.5,
-                                borderDash: pDash[r.priority] || [6,3],
-                                label: {{ display: true, content: r.name, position: 'start',
-                                    backgroundColor: 'rgba(15,17,23,0.85)',
-                                    color: pColors[r.priority] || '#fbbf24',
-                                    font: {{ size: 10, family: "'DM Sans'" }},
-                                    padding: {{x:4,y:2}}, borderRadius: 3 }}
-                            }};
-                        }});
-                        return a;
-                    }})() }}
+                    }}
                 }}
             }});
         }}
