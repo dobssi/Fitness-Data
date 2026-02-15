@@ -764,55 +764,73 @@ def get_recent_runs(df, n=10):
 
 
 def get_alert_data(df):
-    """v51: Get current alert status for dashboard banner."""
-    alert_cols = ['Alert_1', 'Alert_1b', 'Alert_2', 'Alert_3b', 'Alert_5']
-    alerts = []
+    """Get current alert status for dashboard banner, per mode.
+    
+    Returns dict with keys 'stryd', 'gap', 'sim', each a list of alert dicts.
+    Also returns 'stryd' as the top-level list for backward compatibility.
+    """
+    ALERT_DEFS = {
+        0: {'name': 'Training more, scoring worse', 'level': 'concern', 'icon': '⚠️'},
+        1: {'name': 'Taper not working', 'level': 'concern', 'icon': '⚠️'},
+        2: {'name': 'Deep fatigue', 'level': 'watch', 'icon': '👀'},
+        3: {'name': 'Easy run outlier', 'level': 'watch', 'icon': '👀'},
+        4: {'name': 'Easy RF divergence', 'level': 'concern', 'icon': '⚠️'},
+    }
+    
+    result = {'stryd': [], 'gap': [], 'sim': []}
     
     if len(df) == 0:
-        return alerts
+        return result
     
     latest = df.iloc[-1]
     
-    alert_defs = {
-        'Alert_1': {'name': 'Training more, scoring worse', 'level': 'concern', 'icon': '⚠️'},
-        'Alert_1b': {'name': 'Taper not working', 'level': 'concern', 'icon': '⚠️'},
-        'Alert_2': {'name': 'Deep fatigue', 'level': 'watch', 'icon': '👀'},
-        'Alert_3b': {'name': 'Easy run outlier', 'level': 'watch', 'icon': '👀'},
-        'Alert_5': {'name': 'Easy RF divergence', 'level': 'concern', 'icon': '⚠️'},
-    }
+    mode_configs = [
+        ('stryd', '', 'RFL_Trend', 'Easy_RF_z', 'Easy_RFL_Gap'),
+        ('gap', '_gap', 'RFL_gap_Trend', 'Easy_RF_z_gap', 'Easy_RFL_Gap_gap'),
+        ('sim', '_sim', 'RFL_sim_Trend', 'Easy_RF_z_sim', 'Easy_RFL_Gap_sim'),
+    ]
     
-    for col in alert_cols:
-        if col in df.columns and latest.get(col, False):
-            defn = alert_defs.get(col, {})
+    for mode_name, suffix, rfl_col, ez_z_col, ez_gap_col in mode_configs:
+        mask_col = f'Alert_Mask{suffix}'
+        mask = int(latest.get(mask_col, 0)) if mask_col in df.columns else 0
+        if not mask:
+            continue
+        
+        alerts = []
+        for bit in range(5):
+            if not (mask & (1 << bit)):
+                continue
+            defn = ALERT_DEFS[bit]
             detail = ''
-            if col == 'Alert_1':
-                # Find run ~28d ago for RFL drop / CTL rise context
+            if bit == 0:  # Alert 1: CTL/RFL divergence
                 try:
                     cutoff = latest['date'] - pd.Timedelta(days=28)
                     earlier = df[df['date'] <= cutoff]
                     if len(earlier) > 0:
                         j = earlier.iloc[-1]
-                        rfl_drop = (j['RFL_Trend'] - latest['RFL_Trend']) * 100
+                        rfl_drop = (j[rfl_col] - latest[rfl_col]) * 100
                         ctl_rise = latest['CTL'] - j['CTL']
                         detail = f" (RFL -{rfl_drop:.1f}%, CTL +{ctl_rise:.0f})"
                 except Exception:
                     pass
-            elif col == 'Alert_1b':
+            elif bit == 1:  # Alert 1b: Taper
                 detail = " (RFL below 90d peak at race distance)"
-            elif col == 'Alert_2' and pd.notna(latest.get('TSB')):
+            elif bit == 2 and pd.notna(latest.get('TSB')):  # Alert 2: TSB
                 detail = f" (TSB {latest['TSB']:.0f})"
-            elif col == 'Alert_3b' and pd.notna(latest.get('Easy_RF_z')):
-                detail = f" (z={latest['Easy_RF_z']:.1f})"
-            elif col == 'Alert_5' and pd.notna(latest.get('Easy_RFL_Gap')):
-                detail = f" (gap {latest['Easy_RFL_Gap']*100:.1f}%)"
+            elif bit == 3 and pd.notna(latest.get(ez_z_col)):  # Alert 3b: z-score
+                detail = f" (z={latest[ez_z_col]:.1f})"
+            elif bit == 4 and pd.notna(latest.get(ez_gap_col)):  # Alert 5: gap
+                detail = f" (gap {latest[ez_gap_col]*100:.1f}%)"
             alerts.append({
-                'name': defn.get('name', col),
-                'level': defn.get('level', 'info'),
-                'icon': defn.get('icon', 'ℹ️'),
+                'name': defn['name'],
+                'level': defn['level'],
+                'icon': defn['icon'],
                 'detail': detail,
+                'bit': bit,
             })
+        result[mode_name] = alerts
     
-    return alerts
+    return result
 
 
 def get_weight_chart_data(master_file, months=12):
@@ -1716,19 +1734,50 @@ def _generate_zone_html(zone_data, stats=None):
 # v51: ALERT BANNER GENERATOR
 # ============================================================================
 def _generate_alert_banner(alert_data, critical_power=None):
-    """Generate dark-themed alert banner."""
-    cp_html = f'<span class="power-only" id="banner-cp" style="font-size:0.82em;color:#8b90a0;">⚡ CP {critical_power}W</span>' if critical_power else ''
+    """Generate dark-themed alert banner with per-mode switching."""
+    import json as _json
+    
+    # alert_data is now {stryd: [...], gap: [...], sim: [...]}
     if not alert_data:
-        return f'<div style="background:rgba(34,197,94,0.08);border:1px solid rgba(34,197,94,0.3);border-radius:10px;padding:10px 16px;margin-bottom:14px;display:flex;justify-content:center;align-items:center;gap:8px;"><span style="font-size:1.1em;">🟢</span> <strong style="color:#4ade80;">All clear</strong> <span style="color:#8b90a0;">— no alerts</span>{cp_html}</div>'
-    levels = [a['level'] for a in alert_data]
-    if 'concern' in levels:
-        bg, brd, icon, lc = 'rgba(239,68,68,0.08)', 'rgba(239,68,68,0.3)', '🔴', '#f87171'
-    else:
-        bg, brd, icon, lc = 'rgba(234,179,8,0.08)', 'rgba(234,179,8,0.3)', '🟡', '#fbbf24'
-    items = ''.join(f'<div style="margin:4px 0;font-size:0.85em;color:#e4e7ef;">{a["icon"]} <strong>{a["name"]}</strong><span style="color:#8b90a0"> {a.get("detail","")}</span></div>' for a in alert_data)
-    n = len(alert_data)
-    s = "s" if n > 1 else ""
-    return f'<div style="background:{bg};border:1px solid {brd};border-radius:10px;padding:10px 16px;margin-bottom:14px;"><div style="text-align:center;margin-bottom:4px;"><span style="font-size:1.1em;">{icon}</span> <strong style="color:{lc};">{n} alert{s} active</strong>{cp_html}</div>{items}</div>'
+        alert_data = {'stryd': [], 'gap': [], 'sim': []}
+    alert_json = _json.dumps({
+        mode: [{'name': a['name'], 'level': a['level'], 'icon': a['icon'], 'detail': a.get('detail', '')} for a in alerts]
+        for mode, alerts in alert_data.items()
+    })
+    
+    cp_html = f'<span class="power-only" id="banner-cp" style="font-size:0.82em;color:#8b90a0;">⚡ CP {critical_power}W</span>' if critical_power else ''
+    
+    return f'''<div id="alert-banner"></div>
+    <script>
+    const _alertData = {alert_json};
+    function renderAlertBanner(mode) {{
+        const el = document.getElementById('alert-banner');
+        const alerts = _alertData[mode] || [];
+        const ms = (typeof modeStats !== 'undefined') ? modeStats[mode] : null;
+        const cpVal = ms ? ms.cp : {critical_power or 0};
+        const cpHtml = (mode !== 'gap' && cpVal > 0) ? '<span class="power-only" style="font-size:0.82em;color:#8b90a0;">⚡ CP ' + cpVal + 'W</span>' : '';
+        if (alerts.length === 0) {{
+            el.innerHTML = '<div style="background:rgba(34,197,94,0.08);border:1px solid rgba(34,197,94,0.3);border-radius:10px;padding:10px 16px;margin-bottom:14px;display:flex;justify-content:center;align-items:center;gap:8px;"><span style="font-size:1.1em;">🟢</span> <strong style="color:#4ade80;">All clear</strong> <span style="color:#8b90a0;">— no alerts</span>' + cpHtml + '</div>';
+            return;
+        }}
+        const hasConcern = alerts.some(a => a.level === 'concern');
+        const bg = hasConcern ? 'rgba(239,68,68,0.08)' : 'rgba(234,179,8,0.08)';
+        const brd = hasConcern ? 'rgba(239,68,68,0.3)' : 'rgba(234,179,8,0.3)';
+        const icon = hasConcern ? '🔴' : '🟡';
+        const lc = hasConcern ? '#f87171' : '#fbbf24';
+        const n = alerts.length;
+        const s = n > 1 ? 's' : '';
+        const items = alerts.map(a => '<div style="margin:4px 0;font-size:0.85em;color:#e4e7ef;">' + a.icon + ' <strong>' + a.name + '</strong><span style="color:#8b90a0"> ' + a.detail + '</span></div>').join('');
+        el.innerHTML = '<div style="background:'+bg+';border:1px solid '+brd+';border-radius:10px;padding:10px 16px;margin-bottom:14px;"><div style="text-align:center;margin-bottom:4px;"><span style="font-size:1.1em;">'+icon+'</span> <strong style="color:'+lc+';">'+n+' alert'+s+' active</strong>' + cpHtml + '</div>'+items+'</div>';
+    }}
+    renderAlertBanner('stryd');
+    </script>'''
+
+    # Note: renderAlertBanner references modeStats which is defined later in generate_html.
+    # The script tag is inline and runs immediately, but modeStats won't exist yet.
+    # We handle this by having the function check for modeStats existence (with fallback),
+    # and we'll call renderAlertBanner again after modeStats is defined.
+    # The initial call uses the fallback CP value.
 
 
 def generate_html(stats, rf_data, volume_data, ctl_atl_data, ctl_atl_lookup, rfl_trend_dates, rfl_trend_values, rfl_trendline, rfl_projection, rfl_ci_upper, rfl_ci_lower, alltime_rfl_dates, alltime_rfl_values, recent_runs, top_races, alert_data=None, weight_data=None, prediction_data=None, ag_data=None, zone_data=None, rfl_trend_gap=None, rfl_trend_sim=None):
@@ -2737,6 +2786,9 @@ function raceAnnotations(dates) {{
                 predMara_s: {stats["race_predictions"].get("_mode_sim", dict()).get("marathon_raw", 0)} }}
         }};
         
+        // Re-render alert banner now that modeStats is available (for CP display)
+        if (typeof renderAlertBanner === 'function') renderAlertBanner('stryd');
+        
         // v51: Generate per-point colours (red for races, blue for training)
         function racePointColors(races, baseColor, raceColor) {{
             return races.map(r => r === 1 ? raceColor : baseColor);
@@ -3675,12 +3727,8 @@ function raceAnnotations(dates) {{
         document.body.classList.toggle('gap-mode', isGap);
         document.body.classList.toggle('sim-mode', isSim);
         
-        // Update CP in alert banner for Stryd/Sim modes
-        const cpBanner = document.getElementById('banner-cp');
-        if (cpBanner) {{
-            const cpVal = mode === 'sim' ? modeStats.sim : modeStats.stryd;
-            cpBanner.textContent = '⚡ CP ' + Math.round(372 * parseFloat(cpVal.rfl) / 100) + 'W';
-        }}
+        // Update alert banner for current mode
+        if (typeof renderAlertBanner === 'function') renderAlertBanner(mode);
         
         // Update zone badge (hide power info in GAP mode, use mode CP for Sim)
         const zb = document.getElementById('zone-badge');

@@ -1136,6 +1136,7 @@ def calc_easy_rf_metrics(df: pd.DataFrame) -> pd.DataFrame:
     # --- GAP Easy RF (same easy mask, different RF source) ---
     df['Easy_RF_EMA_gap'] = np.nan
     df['Easy_RFL_Gap_gap'] = np.nan
+    df['Easy_RF_z_gap'] = np.nan
     gap_easy_mask = easy_mask & df['RF_gap_adj'].notna()
     n_gap_easy = gap_easy_mask.sum()
     if n_gap_easy > 0:
@@ -1147,11 +1148,16 @@ def calc_easy_rf_metrics(df: pd.DataFrame) -> pd.DataFrame:
         if pd.notna(peak_rf_gap) and peak_rf_gap > 0:
             easy_rfl_gap = df['Easy_RF_EMA_gap'] / peak_rf_gap
             df['Easy_RFL_Gap_gap'] = easy_rfl_gap - df['RFL_gap_Trend']
+        if n_gap_easy >= EASY_RF_Z_WINDOW:
+            gap_rm = gap_easy_rf.rolling(window=EASY_RF_Z_WINDOW, min_periods=10).mean()
+            gap_rs = gap_easy_rf.rolling(window=EASY_RF_Z_WINDOW, min_periods=10).std()
+            df.loc[gap_easy_mask, 'Easy_RF_z_gap'] = (gap_easy_rf - gap_rm) / gap_rs.replace(0, np.nan)
         print(f"  GAP Easy RF EMA: {gap_ema.iloc[-1]:.4f} (latest), n={n_gap_easy}")
     
     # --- SIM Easy RF (same easy mask, different RF source) ---
     df['Easy_RF_EMA_sim'] = np.nan
     df['Easy_RFL_Gap_sim'] = np.nan
+    df['Easy_RF_z_sim'] = np.nan
     sim_easy_mask = easy_mask & df['RF_sim_adj'].notna()
     n_sim_easy = sim_easy_mask.sum()
     if n_sim_easy > 0:
@@ -1163,214 +1169,174 @@ def calc_easy_rf_metrics(df: pd.DataFrame) -> pd.DataFrame:
         if pd.notna(peak_rf_sim) and peak_rf_sim > 0:
             easy_rfl_sim = df['Easy_RF_EMA_sim'] / peak_rf_sim
             df['Easy_RFL_Gap_sim'] = easy_rfl_sim - df['RFL_sim_Trend']
+        if n_sim_easy >= EASY_RF_Z_WINDOW:
+            sim_rm = sim_easy_rf.rolling(window=EASY_RF_Z_WINDOW, min_periods=10).mean()
+            sim_rs = sim_easy_rf.rolling(window=EASY_RF_Z_WINDOW, min_periods=10).std()
+            df.loc[sim_easy_mask, 'Easy_RF_z_sim'] = (sim_easy_rf - sim_rm) / sim_rs.replace(0, np.nan)
         print(f"  SIM Easy RF EMA: {sim_ema.iloc[-1]:.4f} (latest), n={n_sim_easy}")
     
     return df
 
 
 def calc_alert_columns(df: pd.DataFrame) -> pd.DataFrame:
-    """v51: Calculate historical alert columns for every run in the Master.
+    """Calculate alert bitmask and text per mode (stryd, gap, sim).
     
-    Each alert column is True when the alert condition is active, False otherwise.
-    Alerts persist (stay True) on every run while the condition holds.
+    Alert bits:
+      Bit 0 (1)  - Alert 1:  CTL rising, RFL falling (4-week divergence)
+      Bit 1 (2)  - Alert 1b: Taper not working (RFL below 90-day peak near race)
+      Bit 2 (4)  - Alert 2:  Sustained deep-negative TSB (3 of last 5 runs < -15)
+      Bit 3 (8)  - Alert 3b: Easy run outlier (z < -2.0 on this easy run)
+      Bit 4 (16) - Alert 5:  Easy RF / RFL_Trend gap < -3%
     
-    New columns:
-      Alert_1      - CTL rising, RFL falling (4-week divergence)
-      Alert_1b     - Taper not working (RFL below 90-day peak near race)
-      Alert_2      - Sustained deep-negative TSB (3 of last 5 runs < -15)
-      Alert_3b     - Easy run outlier (z < -2.0 on this easy run)
-      Alert_5      - Easy RF / RFL_Trend gap < -3%
+    Output columns per mode suffix ('', '_gap', '_sim'):
+      Alert_Mask{suffix}  - int bitmask (0-31)
+      Alert_Text{suffix}  - human-readable summary
+    
+    Also writes legacy bool columns (Alert_1..Alert_5) from the Stryd mask
+    for backward compatibility with any code that reads them.
     """
-    print("\n=== v51: Calculating alert columns ===")
-    
-    # Initialise all alert columns as False
-    for col in ['Alert_1', 'Alert_1b', 'Alert_2', 'Alert_3b', 'Alert_5']:
-        df[col] = False
+    print("\n=== Calculating alert columns (bitmask, 3 modes) ===")
     
     dates = df['date'].values  # numpy datetime64
     n = len(df)
+    ctl_vals = pd.to_numeric(df.get('CTL'), errors='coerce').values if 'CTL' in df.columns else np.full(n, np.nan)
+    tsb_vals = pd.to_numeric(df.get('TSB'), errors='coerce').values if 'TSB' in df.columns else np.full(n, np.nan)
     
-    # --- Alert 1: CTL rising while RFL falling (4-week window) ---
-    if 'CTL' in df.columns and 'RFL_Trend' in df.columns:
-        rfl = df['RFL_Trend'].values
-        ctl = df['CTL'].values
-        a1_count = 0
-        for i in range(1, n):
-            # Find run ~28 days ago
-            cutoff = dates[i] - np.timedelta64(ALERT1_WINDOW_DAYS, 'D')
-            # Find the closest run at or before the cutoff
-            earlier = np.where((dates[:i] <= cutoff))[0]
-            if len(earlier) == 0:
-                continue
-            j = earlier[-1]
-            if np.isfinite(rfl[i]) and np.isfinite(rfl[j]) and np.isfinite(ctl[i]) and np.isfinite(ctl[j]):
-                rfl_drop = rfl[j] - rfl[i]  # positive = dropped
-                ctl_rise = ctl[i] - ctl[j]   # positive = rose
-                if rfl_drop > ALERT1_RFL_DROP and ctl_rise > ALERT1_CTL_RISE:
-                    df.iat[i, df.columns.get_loc('Alert_1')] = True
-                    a1_count += 1
-        print(f"  Alert 1 (CTL up/RFL down): {a1_count} runs flagged")
+    # Build planned race taper windows
+    try:
+        from config import PLANNED_RACES
+    except (ImportError, Exception):
+        PLANNED_RACES = []
+    _taper_days_map = {'A': 14, 'B': 7, 'C': 0}
+    _taper_windows = {}  # np.datetime64 -> taper_days
+    for pr in PLANNED_RACES:
+        td = _taper_days_map.get(pr.get('priority', 'B'), 7)
+        if td > 0:
+            _taper_windows[np.datetime64(pr['date'])] = td
     
-    # --- Alert 1b: Taper not working (near race, RFL below 90d peak) ---
-    # --- Alert 1b: Taper not working ---
-    # Two triggers:
-    # a) Historical: On race day for races >= 20km (original logic)
-    # b) Pre-race: During taper window before planned races, if RFL below 90-day peak
-    if 'RFL_Trend' in df.columns:
-        rfl = df['RFL_Trend'].values
-        race_flags = df.get('race_flag', pd.Series(dtype='float64')).values if 'race_flag' in df.columns else np.zeros(n)
-        dist_km = df.get('distance_km', pd.Series(dtype='float64')).values if 'distance_km' in df.columns else np.zeros(n)
-        a1b_count = 0
-        
-        # Build planned race taper windows: {date_str: taper_days}
-        try:
-            from config import PLANNED_RACES
-        except (ImportError, Exception):
-            PLANNED_RACES = []
-        _taper_windows = {}  # np.datetime64 -> taper_days
-        _taper_days_map = {'A': 14, 'B': 7, 'C': 0}
-        for pr in PLANNED_RACES:
-            td = _taper_days_map.get(pr.get('priority', 'B'), 7)
-            if td > 0:
-                race_dt = np.datetime64(pr['date'])
-                _taper_windows[race_dt] = td
-        
-        for i in range(1, n):
-            triggered = False
-            
-            # a) Historical: race day >= 20km
-            if race_flags[i] == 1 and dist_km[i] >= 20:
-                cutoff_90d = dates[i] - np.timedelta64(ALERT1B_PEAK_WINDOW_DAYS, 'D')
-                window = np.where((dates[:i+1] >= cutoff_90d))[0]
-                if len(window) >= 3:
-                    peak = np.nanmax(rfl[window])
-                    if np.isfinite(peak) and np.isfinite(rfl[i]) and (peak - rfl[i]) > ALERT1B_RFL_GAP:
-                        triggered = True
-            
-            # b) Pre-race: within taper window of a planned race
-            if not triggered:
-                for race_dt, td in _taper_windows.items():
-                    days_to_race = (race_dt - dates[i]) / np.timedelta64(1, 'D')
-                    if 0 <= days_to_race <= td:
-                        # In taper window — check RFL vs 90-day peak
-                        cutoff_90d = dates[i] - np.timedelta64(ALERT1B_PEAK_WINDOW_DAYS, 'D')
-                        window = np.where((dates[:i+1] >= cutoff_90d))[0]
-                        if len(window) >= 3:
-                            peak = np.nanmax(rfl[window])
-                            if np.isfinite(peak) and np.isfinite(rfl[i]) and (peak - rfl[i]) > ALERT1B_RFL_GAP:
-                                triggered = True
-                                break
-            
-            if triggered:
-                df.iat[i, df.columns.get_loc('Alert_1b')] = True
-                a1b_count += 1
-        print(f"  Alert 1b (taper): {a1b_count} runs flagged")
-    
-    # --- Alert 2: Sustained deep-negative TSB (3 of last 5 < -15) ---
+    # Pre-compute Alert 2 (TSB-based, mode-independent)
+    a2_flags = np.zeros(n, dtype=bool)
     if 'TSB' in df.columns:
-        tsb = df['TSB'].values
-        deep = tsb < ALERT2_TSB_THRESHOLD
-        a2_count = 0
+        deep = tsb_vals < ALERT2_TSB_THRESHOLD
         for i in range(ALERT2_WINDOW - 1, n):
             window_deep = deep[max(0, i - ALERT2_WINDOW + 1):i + 1]
             if np.sum(window_deep) >= ALERT2_COUNT:
-                df.iat[i, df.columns.get_loc('Alert_2')] = True
-                a2_count += 1
-        print(f"  Alert 2 (deep TSB): {a2_count} runs flagged")
+                a2_flags[i] = True
     
-    # --- Alert 3b: Easy run outlier (z < -2.0) ---
-    if 'Easy_RF_z' in df.columns:
-        z_vals = df['Easy_RF_z'].values
-        a3b_count = 0
+    # Mode definitions: (suffix, rfl_col, ez_z_col, ez_gap_col)
+    modes = [
+        ('',     'RFL_Trend',     'Easy_RF_z',     'Easy_RFL_Gap'),
+        ('_gap', 'RFL_gap_Trend', 'Easy_RF_z_gap', 'Easy_RFL_Gap_gap'),
+        ('_sim', 'RFL_sim_Trend', 'Easy_RF_z_sim', 'Easy_RFL_Gap_sim'),
+    ]
+    
+    for suffix, rfl_col, ez_z_col, ez_gap_col in modes:
+        mask_col = f'Alert_Mask{suffix}'
+        text_col = f'Alert_Text{suffix}'
+        df[mask_col] = 0
+        df[text_col] = ''
+        
+        rfl = pd.to_numeric(df.get(rfl_col), errors='coerce').values if rfl_col in df.columns else np.full(n, np.nan)
+        ez_z = pd.to_numeric(df.get(ez_z_col), errors='coerce').values if ez_z_col in df.columns else np.full(n, np.nan)
+        ez_gap = pd.to_numeric(df.get(ez_gap_col), errors='coerce').values if ez_gap_col in df.columns else np.full(n, np.nan)
+        
+        race_flags = df.get('race_flag', pd.Series(dtype='float64')).values if 'race_flag' in df.columns else np.zeros(n)
+        dist_km = df.get('distance_km', pd.Series(dtype='float64')).values if 'distance_km' in df.columns else np.zeros(n)
+        
+        mask_idx = df.columns.get_loc(mask_col)
+        text_idx = df.columns.get_loc(text_col)
+        
+        a_counts = [0, 0, 0, 0, 0]  # per bit
+        
         for i in range(n):
-            if np.isfinite(z_vals[i]) and z_vals[i] < ALERT3B_Z_THRESHOLD:
-                df.iat[i, df.columns.get_loc('Alert_3b')] = True
-                a3b_count += 1
-        print(f"  Alert 3b (easy outlier): {a3b_count} runs flagged")
+            bits = 0
+            parts = []
+            
+            # Bit 0 (1): Alert 1 — CTL rising, RFL falling
+            if i > 0 and np.isfinite(rfl[i]) and np.isfinite(ctl_vals[i]):
+                cutoff = dates[i] - np.timedelta64(ALERT1_WINDOW_DAYS, 'D')
+                earlier = np.where((dates[:i] <= cutoff))[0]
+                if len(earlier) > 0:
+                    j = earlier[-1]
+                    if np.isfinite(rfl[j]) and np.isfinite(ctl_vals[j]):
+                        rfl_drop = rfl[j] - rfl[i]
+                        ctl_rise = ctl_vals[i] - ctl_vals[j]
+                        if rfl_drop > ALERT1_RFL_DROP and ctl_rise > ALERT1_CTL_RISE:
+                            bits |= 1
+                            rfl_drop_pct = rfl_drop * 100
+                            parts.append(f"Training more scoring worse (RFL -{rfl_drop_pct:.1f}%, CTL +{ctl_rise:.0f})")
+                            a_counts[0] += 1
+            
+            # Bit 1 (2): Alert 1b — Taper not working
+            if i > 0 and np.isfinite(rfl[i]):
+                triggered_1b = False
+                _1b_text = "Taper not working"
+                # a) Historical: race day >= 20km
+                if race_flags[i] == 1 and dist_km[i] >= 20:
+                    cutoff_90d = dates[i] - np.timedelta64(ALERT1B_PEAK_WINDOW_DAYS, 'D')
+                    window = np.where((dates[:i+1] >= cutoff_90d))[0]
+                    if len(window) >= 3:
+                        peak = np.nanmax(rfl[window])
+                        if np.isfinite(peak) and (peak - rfl[i]) > ALERT1B_RFL_GAP:
+                            triggered_1b = True
+                # b) Pre-race: within taper window
+                if not triggered_1b:
+                    for race_dt, td in _taper_windows.items():
+                        days_to_race = (race_dt - dates[i]) / np.timedelta64(1, 'D')
+                        if 0 <= days_to_race <= td:
+                            cutoff_90d = dates[i] - np.timedelta64(ALERT1B_PEAK_WINDOW_DAYS, 'D')
+                            window = np.where((dates[:i+1] >= cutoff_90d))[0]
+                            if len(window) >= 3:
+                                peak = np.nanmax(rfl[window])
+                                if np.isfinite(peak) and (peak - rfl[i]) > ALERT1B_RFL_GAP:
+                                    triggered_1b = True
+                                    # Find race name
+                                    for pr in PLANNED_RACES:
+                                        if np.datetime64(pr['date']) == race_dt:
+                                            _1b_text = f"Taper not working ({pr['name']} in {int(days_to_race)}d)"
+                                            break
+                                    break
+                if triggered_1b:
+                    bits |= 2
+                    parts.append(_1b_text)
+                    a_counts[1] += 1
+            
+            # Bit 2 (4): Alert 2 — Deep fatigue (mode-independent)
+            if a2_flags[i]:
+                bits |= 4
+                t = tsb_vals[i]
+                parts.append(f"Deep fatigue (TSB {t:.0f})" if np.isfinite(t) else "Deep fatigue")
+                a_counts[2] += 1
+            
+            # Bit 3 (8): Alert 3b — Easy run outlier
+            if np.isfinite(ez_z[i]) and ez_z[i] < ALERT3B_Z_THRESHOLD:
+                bits |= 8
+                parts.append(f"Easy run outlier (z={ez_z[i]:.1f})")
+                a_counts[3] += 1
+            
+            # Bit 4 (16): Alert 5 — Easy RF divergence
+            if np.isfinite(ez_gap[i]) and ez_gap[i] < ALERT5_GAP_THRESHOLD:
+                bits |= 16
+                parts.append(f"Easy RF divergence ({ez_gap[i]*100:.1f}%)")
+                a_counts[4] += 1
+            
+            if bits:
+                df.iat[i, mask_idx] = int(bits)
+                df.iat[i, text_idx] = ' | '.join(parts)
+        
+        mode_label = suffix.replace('_', '').upper() if suffix else 'Stryd'
+        total = sum(1 for i in range(n) if df.iat[i, mask_idx] > 0)
+        print(f"  {mode_label}: A1={a_counts[0]} A1b={a_counts[1]} A2={a_counts[2]} "
+              f"A3b={a_counts[3]} A5={a_counts[4]} | total={total} ({100*total/n:.1f}%)")
     
-    # --- Alert 5: Easy RF / RFL_Trend gap < -3% ---
-    if 'Easy_RFL_Gap' in df.columns:
-        gap = df['Easy_RFL_Gap'].values
-        a5_count = 0
-        for i in range(n):
-            if np.isfinite(gap[i]) and gap[i] < ALERT5_GAP_THRESHOLD:
-                df.iat[i, df.columns.get_loc('Alert_5')] = True
-                a5_count += 1
-        print(f"  Alert 5 (easy RF gap): {a5_count} runs flagged")
-    
-    # --- Build Alert_Text column: human-readable summary, blank if no alerts ---
-    df['Alert_Text'] = ''
-    rfl_vals = pd.to_numeric(df.get('RFL_Trend'), errors='coerce').values if 'RFL_Trend' in df.columns else np.full(n, np.nan)
-    ctl_vals = pd.to_numeric(df.get('CTL'), errors='coerce').values if 'CTL' in df.columns else np.full(n, np.nan)
-    tsb_vals = pd.to_numeric(df.get('TSB'), errors='coerce').values if 'TSB' in df.columns else np.full(n, np.nan)
-    ez_z_vals = pd.to_numeric(df.get('Easy_RF_z'), errors='coerce').values if 'Easy_RF_z' in df.columns else np.full(n, np.nan)
-    ez_gap_vals = pd.to_numeric(df.get('Easy_RFL_Gap'), errors='coerce').values if 'Easy_RFL_Gap' in df.columns else np.full(n, np.nan)
-    
-    text_col_idx = df.columns.get_loc('Alert_Text')
-    for i in range(n):
-        parts = []
-        
-        if df.iat[i, df.columns.get_loc('Alert_1')]:
-            # Find run ~28 days ago for context
-            cutoff = dates[i] - np.timedelta64(ALERT1_WINDOW_DAYS, 'D')
-            earlier = np.where((dates[:i] <= cutoff))[0]
-            if len(earlier) > 0:
-                j = earlier[-1]
-                rfl_drop = (rfl_vals[j] - rfl_vals[i]) * 100 if np.isfinite(rfl_vals[i]) and np.isfinite(rfl_vals[j]) else 0
-                ctl_rise = ctl_vals[i] - ctl_vals[j] if np.isfinite(ctl_vals[i]) and np.isfinite(ctl_vals[j]) else 0
-                parts.append(f"Training more scoring worse (RFL -{rfl_drop:.1f}%, CTL +{ctl_rise:.0f})")
-            else:
-                parts.append("Training more scoring worse")
-        
-        if df.iat[i, df.columns.get_loc('Alert_1b')]:
-            # Try to find which race triggered it
-            _1b_race_name = None
-            for race_dt, td in _taper_windows.items():
-                days_to = (race_dt - dates[i]) / np.timedelta64(1, 'D')
-                if 0 <= days_to <= td:
-                    # Find the race name
-                    for pr in PLANNED_RACES:
-                        if np.datetime64(pr['date']) == race_dt:
-                            _1b_race_name = pr['name']
-                            _1b_days = int(days_to)
-                            break
-                    break
-            if _1b_race_name and _1b_days > 0:
-                parts.append(f"Taper not working ({_1b_race_name} in {_1b_days}d)")
-            else:
-                parts.append("Taper not working")
-        
-        if df.iat[i, df.columns.get_loc('Alert_2')]:
-            t = tsb_vals[i]
-            if np.isfinite(t):
-                parts.append(f"Deep fatigue (TSB {t:.0f})")
-            else:
-                parts.append("Deep fatigue")
-        
-        if df.iat[i, df.columns.get_loc('Alert_3b')]:
-            z = ez_z_vals[i]
-            if np.isfinite(z):
-                parts.append(f"Easy run outlier (z={z:.1f})")
-            else:
-                parts.append("Easy run outlier")
-        
-        if df.iat[i, df.columns.get_loc('Alert_5')]:
-            g = ez_gap_vals[i]
-            if np.isfinite(g):
-                parts.append(f"Easy RF divergence ({g*100:.1f}%)")
-            else:
-                parts.append("Easy RF divergence")
-        
-        if parts:
-            df.iat[i, text_col_idx] = ' | '.join(parts)
-    
-    alert_text_count = (df['Alert_Text'] != '').sum()
-    print(f"  Alert_Text populated: {alert_text_count} rows")
-    
-    # Summary
-    any_alert = df[['Alert_1', 'Alert_1b', 'Alert_2', 'Alert_3b', 'Alert_5']].any(axis=1)
-    total_flagged = any_alert.sum()
-    print(f"  Total runs with any alert: {total_flagged} ({100*total_flagged/n:.1f}%)")
+    # Legacy bool columns from Stryd mask for backward compatibility
+    mask_stryd = df['Alert_Mask'].values
+    df['Alert_1'] = (mask_stryd & 1).astype(bool)
+    df['Alert_1b'] = (mask_stryd & 2).astype(bool)
+    df['Alert_2'] = (mask_stryd & 4).astype(bool)
+    df['Alert_3b'] = (mask_stryd & 8).astype(bool)
+    df['Alert_5'] = (mask_stryd & 16).astype(bool)
+    df['Alert_Text'] = df['Alert_Text']  # Already the Stryd text (suffix='')
     
     return df
 
@@ -4838,7 +4804,7 @@ def main() -> int:
     for c in ("Easy_RF_EMA", "Easy_RF_EMA_gap", "Easy_RF_EMA_sim"):
         if c in dfm.columns:
             dfm[c] = pd.to_numeric(dfm[c], errors="coerce").round(4)
-    for c in ("Easy_RF_z", "Easy_RFL_Gap", "Easy_RFL_Gap_gap", "Easy_RFL_Gap_sim"):
+    for c in ("Easy_RF_z", "Easy_RF_z_gap", "Easy_RF_z_sim", "Easy_RFL_Gap", "Easy_RFL_Gap_gap", "Easy_RFL_Gap_sim"):
         if c in dfm.columns:
             dfm[c] = pd.to_numeric(dfm[c], errors="coerce").round(3)
     for c in ("RFL_Trend_Delta",):
@@ -4911,13 +4877,16 @@ def main() -> int:
         "weight_kg",
         # v51: Easy RF metrics and alerts
         "Easy_RF_EMA", "Easy_RF_z", "RFL_Trend_Delta", "Easy_RFL_Gap",
-        "Alert_1", "Alert_1b", "Alert_2", "Alert_3b", "Alert_5", "Alert_Text",
+        "Alert_Mask", "Alert_Text",
+        "Alert_1", "Alert_1b", "Alert_2", "Alert_3b", "Alert_5",
         "parkrun", "surface",
         # Phase 2: GAP RF parallel columns
         "RF_gap_median", "RF_gap_adj", "RF_gap_Trend", "RFL_gap", "RFL_gap_Trend", "PS_gap",
-        "Easy_RF_EMA_gap", "Easy_RFL_Gap_gap",
+        "Easy_RF_EMA_gap", "Easy_RF_z_gap", "Easy_RFL_Gap_gap",
+        "Alert_Mask_gap", "Alert_Text_gap",
         "RF_sim_median", "RF_sim_adj", "RF_sim_Trend", "RFL_sim", "RFL_sim_Trend", "PS_sim",
-        "Easy_RF_EMA_sim", "Easy_RFL_Gap_sim",
+        "Easy_RF_EMA_sim", "Easy_RF_z_sim", "Easy_RFL_Gap_sim",
+        "Alert_Mask_sim", "Alert_Text_sim",
         # v43 Age grade and race predictions (Stryd)
         "CP", "pred_5k_s", "pred_10k_s", "pred_hm_s", "pred_marathon_s",
         "pred_5k_age_grade", "age_grade_pct",
