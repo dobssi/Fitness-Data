@@ -419,7 +419,7 @@ function raceAnnotations(dates) {
 
 </script>
     <h1>🏃 Paul Collyer</h1>
-    <div class="dash-sub">Sunday 15 February 2026, 17:22</div>
+    <div class="dash-sub">Sunday 15 February 2026, 18:02</div>
     
     <!-- Phase 2: Mode Toggle -->
     <div class="mode-toggle" style="display:flex;gap:6px;margin:10px 0 8px;align-items:center;">
@@ -945,7 +945,7 @@ function raceAnnotations(dates) {
     </div>
     
     <div class="footer">
-        Updated: 2026-02-15 17:22<br>
+        Updated: 2026-02-15 18:02<br>
         Data through: 2026-02-15
     </div>
     
@@ -1031,7 +1031,8 @@ function raceAnnotations(dates) {
                                 return !item.text.includes('CI');
                             }
                         }
-                    }
+                    },
+                    annotation: { annotations: raceAnnotations(["02 Feb", "03 Feb", "04 Feb", "05 Feb", "06 Feb", "07 Feb", "08 Feb", "09 Feb", "10 Feb", "11 Feb", "12 Feb", "13 Feb", "14 Feb", "15 Feb", "16 Feb", "17 Feb", "18 Feb", "19 Feb", "20 Feb", "21 Feb", "22 Feb"]) }
                 },
                 scales: {
                     x: {
@@ -1051,8 +1052,7 @@ function raceAnnotations(dates) {
                         suggestedMin: Math.min(...[90.67, 90.41, 90.34, 90.34, 90.34, 90.34, 90.16, 90.16, 89.86, 89.91, 89.84, 89.79, 89.47, 89.47, null, null, null, null, null, null, null].filter(v => v !== null)) - 5,
                         suggestedMax: Math.max(...[90.67, 90.41, 90.34, 90.34, 90.34, 90.34, 90.16, 90.16, 89.86, 89.91, 89.84, 89.79, 89.47, 89.47, null, null, null, null, null, null, null].filter(v => v !== null)) + 5
                     }
-                },
-                annotation: { annotations: raceAnnotations(["02 Feb", "03 Feb", "04 Feb", "05 Feb", "06 Feb", "07 Feb", "08 Feb", "09 Feb", "10 Feb", "11 Feb", "12 Feb", "13 Feb", "14 Feb", "15 Feb", "16 Feb", "17 Feb", "18 Feb", "19 Feb", "20 Feb", "21 Feb", "22 Feb"]) }
+                }
             }
         });
         
@@ -1337,13 +1337,13 @@ function raceAnnotations(dates) {
                                 return !item.text.includes('Projection');
                             }
                         }
-                    }
+                    },
+                    annotation: { annotations: raceAnnotations(ctlAtlData['90'].dates) }
                 },
                 scales: {
                     x: { display: true, ticks: { maxTicksLimit: 5, maxRotation: 0, font: { size: 10 } } },
                     y: { display: true, ticks: { font: { size: 10 } } }
-                },
-                annotation: { annotations: raceAnnotations(ctlAtlData['90'].dates) }
+                }
             }
         });
         
