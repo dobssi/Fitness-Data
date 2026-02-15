@@ -2112,25 +2112,38 @@ def generate_html(stats, rf_data, volume_data, ctl_atl_data, ctl_atl_lookup, rfl
 <body>
 <script>Chart.defaults.color="#8b90a0";Chart.defaults.borderColor="rgba(255,255,255,0.04)";Chart.defaults.font.family="'DM Sans',sans-serif";Chart.defaults.plugins.legend.labels.padding=10;
 const PLANNED_RACES = {_planned_races_json};
-const _today = new Date().toISOString().slice(0,10);
-const _14dFromNow = new Date(Date.now() + 14*86400000).toISOString().slice(0,10);
+const _today = new Date(); _today.setHours(0,0,0,0);
+const _14dFromNow = new Date(_today.getTime() + 14*86400000);
+// Format ISO date "2026-02-21" to match chart label formats
+function _isoToShort(iso) {{
+    // -> "21 Feb" (matches RFL 14-day chart '%d %b')
+    const d = new Date(iso + 'T00:00:00');
+    const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+    return String(d.getDate()).padStart(2,'0') + ' ' + months[d.getMonth()];
+}}
+function _isoToMedium(iso) {{
+    // -> "21 Feb 26" (matches CTL chart '%d %b %y')
+    const d = new Date(iso + 'T00:00:00');
+    const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+    return String(d.getDate()).padStart(2,'0') + ' ' + months[d.getMonth()] + ' ' + String(d.getFullYear()).slice(2);
+}}
 function raceAnnotations(dates) {{
     const pColors = {{'A': '#f87171', 'B': '#fbbf24', 'C': '#6b7280'}};
     const pDash = {{'A': [], 'B': [6,3], 'C': [3,3]}};
     const annots = {{}};
     if (!dates || dates.length === 0) return annots;
-    const lastDate = dates[dates.length - 1];
     PLANNED_RACES.forEach((r, i) => {{
-        if (r.date < _today || r.date > _14dFromNow) return;
-        if (r.date > lastDate) return;
-        let bestIdx = -1, bestDiff = Infinity;
-        dates.forEach((d, di) => {{
-            const diff = Math.abs(new Date(d) - new Date(r.date));
-            if (diff < bestDiff) {{ bestDiff = diff; bestIdx = di; }}
-        }});
-        if (bestIdx >= 0 && bestDiff < 2*86400000) {{
+        const rd = new Date(r.date + 'T00:00:00');
+        if (rd < _today || rd > _14dFromNow) return;
+        // Try both date formats
+        const short = _isoToShort(r.date);
+        const medium = _isoToMedium(r.date);
+        let matchLabel = null;
+        if (dates.includes(short)) matchLabel = short;
+        else if (dates.includes(medium)) matchLabel = medium;
+        if (matchLabel) {{
             annots['race_'+i] = {{
-                type: 'line', xMin: dates[bestIdx], xMax: dates[bestIdx],
+                type: 'line', xMin: matchLabel, xMax: matchLabel,
                 borderColor: pColors[r.priority] || '#fbbf24',
                 borderWidth: r.priority === 'A' ? 2 : 1.5,
                 borderDash: pDash[r.priority] || [6,3],
@@ -2138,32 +2151,14 @@ function raceAnnotations(dates) {{
                     backgroundColor: 'rgba(15,17,23,0.85)',
                     color: pColors[r.priority] || '#fbbf24',
                     font: {{ size: 10, family: "'DM Sans'" }},
-                    padding: {{x:4,y:2}}, borderRadius: 3 }}
+                    padding: {{x:4,y:2}}, borderRadius: 3
+                }}
             }};
         }}
     }});
     return annots;
 }}
-function raceAnnotationsTime() {{
-    const pColors = {{'A': '#f87171', 'B': '#fbbf24', 'C': '#6b7280'}};
-    const pDash = {{'A': [], 'B': [6,3], 'C': [3,3]}};
-    const annots = {{}};
-    PLANNED_RACES.forEach((r, i) => {{
-        if (r.date < _today || r.date > _14dFromNow) return;
-        annots['race_'+i] = {{
-            type: 'line', xMin: r.date, xMax: r.date,
-            borderColor: pColors[r.priority] || '#fbbf24',
-            borderWidth: r.priority === 'A' ? 2 : 1.5,
-            borderDash: pDash[r.priority] || [6,3],
-            label: {{ display: true, content: r.name, position: 'start',
-                backgroundColor: 'rgba(15,17,23,0.85)',
-                color: pColors[r.priority] || '#fbbf24',
-                font: {{ size: 10, family: "'DM Sans'" }},
-                padding: {{x:4,y:2}}, borderRadius: 3 }}
-        }};
-    }});
-    return annots;
-}}
+
 
 </script>
     <h1>🏃 Paul Collyer</h1>

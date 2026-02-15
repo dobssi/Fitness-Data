@@ -190,6 +190,7 @@ class PlannedRace:
     date: str
     distance_km: float
     priority: str = "B"  # A = goal race, B = important, C = training race
+    surface: str = "road"  # road, trail, undulating_trail, track, indoor_track
     
     @classmethod
     def from_dict(cls, d: Dict[str, Any]) -> PlannedRace:
@@ -197,7 +198,8 @@ class PlannedRace:
             name=str(d["name"]),
             date=str(d["date"]),
             distance_km=float(d["distance_km"]),
-            priority=str(d.get("priority", "B")).upper()
+            priority=str(d.get("priority", "B")).upper(),
+            surface=str(d.get("surface", "road")).lower()
         )
 
 
@@ -348,8 +350,8 @@ class AthleteConfig:
             lthr=178,
             max_hr=192,
             planned_races=[
-                PlannedRace("5K London", "2026-02-27", 5.0, "A"),
-                PlannedRace("HM Stockholm", "2026-04-25", 21.097, "A"),
+                PlannedRace("5K London", "2026-02-27", 5.0, "A", "road"),
+                PlannedRace("HM Stockholm", "2026-04-25", 21.097, "A", "road"),
             ],
         )
 

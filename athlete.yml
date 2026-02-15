@@ -17,27 +17,33 @@ athlete:
 
 # Planned races (for dashboard race readiness section)
 # Priority: A = goal race (full taper), B = important (light taper), C = training race (no taper)
+# Surface: road, trail, undulating_trail, track, indoor_track
 planned_races:
   - name: "Battersea parkrun"
     date: "2026-02-21"
     distance_km: 5.0
     priority: C
+    surface: road
   - name: "LFOTM 5K"
     date: "2026-02-27"
     distance_km: 5.0
     priority: B
+    surface: road
   - name: "Premiärhalvan"
     date: "2026-04-25"
     distance_km: 21.097
     priority: A
+    surface: road
   - name: "Hackney Half"
     date: "2026-05-17"
     distance_km: 21.097
     priority: B
+    surface: road
   - name: "Lidingöloppet"
     date: "2026-09-26"
     distance_km: 30.25
     priority: A
+    surface: undulating_trail
 
 # Power mode configuration
 power:
