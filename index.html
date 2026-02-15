@@ -369,38 +369,62 @@
 <body>
 <script>Chart.defaults.color="#8b90a0";Chart.defaults.borderColor="rgba(255,255,255,0.04)";Chart.defaults.font.family="'DM Sans',sans-serif";Chart.defaults.plugins.legend.labels.padding=10;
 const PLANNED_RACES = [{"name": "Battersea parkrun", "date": "2026-02-21", "priority": "C", "distance_key": "5K"}, {"name": "LFOTM 5K", "date": "2026-02-27", "priority": "B", "distance_key": "5K"}, {"name": "Premi\u00e4rhalvan", "date": "2026-04-25", "priority": "A", "distance_key": "HM"}, {"name": "Hackney Half", "date": "2026-05-17", "priority": "B", "distance_key": "HM"}, {"name": "Liding\u00f6loppet", "date": "2026-09-26", "priority": "A", "distance_key": "Mara"}];
+const _today = new Date().toISOString().slice(0,10);
+const _14dFromNow = new Date(Date.now() + 14*86400000).toISOString().slice(0,10);
 function raceAnnotations(dates) {
-    const pColors = {'A': '#f87171', 'B': '#fbbf24', 'C': '#555'};
+    const pColors = {'A': '#f87171', 'B': '#fbbf24', 'C': '#6b7280'};
     const pDash = {'A': [], 'B': [6,3], 'C': [3,3]};
     const annots = {};
+    if (!dates || dates.length === 0) return annots;
+    const lastDate = dates[dates.length - 1];
     PLANNED_RACES.forEach((r, i) => {
-        if (dates.includes(r.date)) {
+        if (r.date < _today || r.date > _14dFromNow) return;
+        if (r.date > lastDate) return;
+        let bestIdx = -1, bestDiff = Infinity;
+        dates.forEach((d, di) => {
+            const diff = Math.abs(new Date(d) - new Date(r.date));
+            if (diff < bestDiff) { bestDiff = diff; bestIdx = di; }
+        });
+        if (bestIdx >= 0 && bestDiff < 2*86400000) {
             annots['race_'+i] = {
-                type: 'line', xMin: r.date, xMax: r.date, borderColor: pColors[r.priority] || '#fbbf24',
-                borderWidth: r.priority === 'A' ? 2 : 1.5, borderDash: pDash[r.priority] || [6,3],
-                label: { display: true, content: r.name, position: 'start', backgroundColor: 'rgba(15,17,23,0.85)',
-                    color: pColors[r.priority] || '#fbbf24', font: { size: 10, family: "'DM Sans'" },
+                type: 'line', xMin: dates[bestIdx], xMax: dates[bestIdx],
+                borderColor: pColors[r.priority] || '#fbbf24',
+                borderWidth: r.priority === 'A' ? 2 : 1.5,
+                borderDash: pDash[r.priority] || [6,3],
+                label: { display: true, content: r.name, position: 'start',
+                    backgroundColor: 'rgba(15,17,23,0.85)',
+                    color: pColors[r.priority] || '#fbbf24',
+                    font: { size: 10, family: "'DM Sans'" },
                     padding: {x:4,y:2}, borderRadius: 3 }
             };
-        } else {
-            // Race date not in chart range — check if it falls within range
-            const sorted = [...dates].sort();
-            if (sorted.length > 1 && r.date >= sorted[0] && r.date <= sorted[sorted.length-1]) {
-                annots['race_'+i] = {
-                    type: 'line', xMin: r.date, xMax: r.date, borderColor: pColors[r.priority] || '#fbbf24',
-                    borderWidth: r.priority === 'A' ? 2 : 1.5, borderDash: pDash[r.priority] || [6,3],
-                    label: { display: true, content: r.name, position: 'start', backgroundColor: 'rgba(15,17,23,0.85)',
-                        color: pColors[r.priority] || '#fbbf24', font: { size: 10, family: "'DM Sans'" },
-                        padding: {x:4,y:2}, borderRadius: 3 }
-                };
-            }
         }
     });
     return annots;
 }
+function raceAnnotationsTime() {
+    const pColors = {'A': '#f87171', 'B': '#fbbf24', 'C': '#6b7280'};
+    const pDash = {'A': [], 'B': [6,3], 'C': [3,3]};
+    const annots = {};
+    PLANNED_RACES.forEach((r, i) => {
+        if (r.date < _today || r.date > _14dFromNow) return;
+        annots['race_'+i] = {
+            type: 'line', xMin: r.date, xMax: r.date,
+            borderColor: pColors[r.priority] || '#fbbf24',
+            borderWidth: r.priority === 'A' ? 2 : 1.5,
+            borderDash: pDash[r.priority] || [6,3],
+            label: { display: true, content: r.name, position: 'start',
+                backgroundColor: 'rgba(15,17,23,0.85)',
+                color: pColors[r.priority] || '#fbbf24',
+                font: { size: 10, family: "'DM Sans'" },
+                padding: {x:4,y:2}, borderRadius: 3 }
+        };
+    });
+    return annots;
+}
+
 </script>
     <h1>🏃 Paul Collyer</h1>
-    <div class="dash-sub">Sunday 15 February 2026, 16:36</div>
+    <div class="dash-sub">Sunday 15 February 2026, 16:48</div>
     
     <!-- Phase 2: Mode Toggle -->
     <div class="mode-toggle" style="display:flex;gap:6px;margin:10px 0 8px;align-items:center;">
@@ -584,7 +608,7 @@ function raceAnnotations(dates) {
                 <div class="power-only"><div class="rv" style="color:var(--accent)" id="race-pw-HM">316W</div><div class="rl">Target</div><div class="rx">±9W</div></div>
                 <div class="pace-target" style="display:none"><div class="rv" style="color:#4ade80" id="race-pace-HM">4:23/km</div><div class="rl">Target pace</div></div>
                 <div><div class="rv" id="race-pred-HM">1:32:31</div><div class="rl">Predicted</div><div class="rx power-only">4:23/km</div></div>
-                <div><div class="rv" style="color:#4ade80">→ 89.5%</div><div class="rl">RFL at race</div></div>
+                <div><div class="rv" style="color:#4ade80"> —</div><div class="rl">RFL at race</div></div>
                 <div><div class="rv" id="spec14_HM">—</div><div class="rl">14-day</div><div class="rx">at effort</div></div>
                 <div><div class="rv" id="spec28_HM">—</div><div class="rl">28-day</div><div class="rx">at effort</div></div>
             </div>
@@ -598,7 +622,7 @@ function raceAnnotations(dates) {
                 <div class="power-only"><div class="rv" style="color:var(--accent)" id="race-pw-Mara">300W</div><div class="rl">Target</div><div class="rx">±9W</div></div>
                 <div class="pace-target" style="display:none"><div class="rv" style="color:#4ade80" id="race-pace-Mara">4:37/km</div><div class="rl">Target pace</div></div>
                 <div><div class="rv" id="race-pred-Mara">3:14:55</div><div class="rl">Predicted</div><div class="rx power-only">4:37/km</div></div>
-                <div><div class="rv" style="color:#4ade80">→ 89.5%</div><div class="rl">RFL at race</div></div>
+                <div><div class="rv" style="color:#4ade80"> —</div><div class="rl">RFL at race</div></div>
                 <div><div class="rv" id="spec14_Mara">—</div><div class="rl">14-day</div><div class="rx">at effort</div></div>
                 <div><div class="rv" id="spec28_Mara">—</div><div class="rl">28-day</div><div class="rx">at effort</div></div>
             </div>
@@ -926,7 +950,7 @@ function raceAnnotations(dates) {
     </div>
     
     <div class="footer">
-        Updated: 2026-02-15 16:36<br>
+        Updated: 2026-02-15 16:48<br>
         Data through: 2026-02-15
     </div>
     
@@ -1188,8 +1212,7 @@ function raceAnnotations(dates) {
                         min: 50,
                         suggestedMax: 100
                     }
-                },
-                annotation: { annotations: raceAnnotations(rfData['all'].dates) }
+                }
             }
         });
         
@@ -1235,7 +1258,6 @@ function raceAnnotations(dates) {
             rfChart.data.datasets[1].borderColor = mc.trend;
             rfChart.options.scales.y.min = settings.yMin;
             rfChart.options.scales.x.ticks.maxTicksLimit = settings.ticks;
-            rfChart.options.plugins.annotation = { annotations: raceAnnotations(d.dates) };
             
             rfChart.update();
         }
@@ -1786,26 +1808,7 @@ function raceAnnotations(dates) {
                                 font: { size: 10 }
                             }
                         }
-                    },
-                    annotation: { annotations: (function() {
-                        const pColors = {'A': '#f87171', 'B': '#fbbf24', 'C': '#555'};
-                        const pDash = {'A': [], 'B': [6,3], 'C': [3,3]};
-                        const a = {};
-                        PLANNED_RACES.forEach((r, i) => {
-                            a['race_'+i] = {
-                                type: 'line', xMin: r.date, xMax: r.date,
-                                borderColor: pColors[r.priority] || '#fbbf24',
-                                borderWidth: r.priority === 'A' ? 2 : 1.5,
-                                borderDash: pDash[r.priority] || [6,3],
-                                label: { display: true, content: r.name, position: 'start',
-                                    backgroundColor: 'rgba(15,17,23,0.85)',
-                                    color: pColors[r.priority] || '#fbbf24',
-                                    font: { size: 10, family: "'DM Sans'" },
-                                    padding: {x:4,y:2}, borderRadius: 3 }
-                            };
-                        });
-                        return a;
-                    })() }
+                    }
                 }
             });
         }
@@ -1937,26 +1940,7 @@ function raceAnnotations(dates) {
                                 font: { size: 10 }
                             }
                         }
-                    },
-                    annotation: { annotations: (function() {
-                        const pColors = {'A': '#f87171', 'B': '#fbbf24', 'C': '#555'};
-                        const pDash = {'A': [], 'B': [6,3], 'C': [3,3]};
-                        const a = {};
-                        PLANNED_RACES.forEach((r, i) => {
-                            a['race_'+i] = {
-                                type: 'line', xMin: r.date, xMax: r.date,
-                                borderColor: pColors[r.priority] || '#fbbf24',
-                                borderWidth: r.priority === 'A' ? 2 : 1.5,
-                                borderDash: pDash[r.priority] || [6,3],
-                                label: { display: true, content: r.name, position: 'start',
-                                    backgroundColor: 'rgba(15,17,23,0.85)',
-                                    color: pColors[r.priority] || '#fbbf24',
-                                    font: { size: 10, family: "'DM Sans'" },
-                                    padding: {x:4,y:2}, borderRadius: 3 }
-                            };
-                        });
-                        return a;
-                    })() }
+                    }
                 }
             });
         }
