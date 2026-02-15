@@ -152,11 +152,13 @@ def load_and_process_data():
             race_predictions['5k_raw'] = int(pred_5k)
         if pd.notna(pred_10k):
             race_predictions['10k'] = format_seconds(pred_10k)
+            race_predictions['10k_raw'] = int(pred_10k)
         if pd.notna(pred_hm):
             race_predictions['Half Marathon'] = format_seconds(pred_hm)
             race_predictions['hm_raw'] = int(pred_hm)
         if pd.notna(pred_mara):
             race_predictions['Marathon'] = format_seconds(pred_mara)
+            race_predictions['marathon_raw'] = int(pred_mara)
         
         print(f"  From Master: CP={critical_power}W, Age Grade={age_grade}%")
         print(f"  Race predictions: {race_predictions}")
@@ -1418,7 +1420,7 @@ def get_zone_data(df):
 # ============================================================================
 # v51.7: ZONE HTML GENERATOR
 # ============================================================================
-def _generate_zone_html(zone_data):
+def _generate_zone_html(zone_data, stats=None):
     """Generate the Training Zones, Race Readiness, and Weekly Zone Volume HTML."""
     if zone_data is None:
         return '<!-- zones: no data -->'
@@ -1519,9 +1521,18 @@ def _generate_zone_html(zone_data):
         
         pw = round(cp * factor)
         dist_m = dist_km * 1000
-        speed = (pw / ATHLETE_MASS_KG_DASH) * surface_re
-        t = round(dist_m / speed) if speed > 0 else 0
         band = round(pw * 0.03)
+        
+        # For standard road distances, use StepB predictions (matches stats grid exactly)
+        # For non-standard distances or non-road surfaces, use continuous model
+        _stepb_key_map = {'5K': '5k_raw', '10K': '10k_raw', 'HM': 'hm_raw', 'Mara': 'marathon_raw'}
+        _stepb_raw = stats.get('race_predictions', {}).get(_stepb_key_map.get(key, ''), 0) if stats and surface == 'road' else 0
+        if _stepb_raw and _stepb_raw > 0:
+            t = _stepb_raw
+        else:
+            speed = (pw / ATHLETE_MASS_KG_DASH) * surface_re
+            t = round(dist_m / speed) if speed > 0 else 0
+        
         mins = t // 60
         secs = t % 60
         hrs = mins // 60
@@ -2329,7 +2340,7 @@ function raceAnnotations(dates) {{
     <!-- RF Trend Chart -->
     
     <!-- Training Zones Section -->
-    {_generate_zone_html(zone_data)}
+    {_generate_zone_html(zone_data, stats)}
     
     <!-- RF Trend Chart -->
     <div class="chart-container">
