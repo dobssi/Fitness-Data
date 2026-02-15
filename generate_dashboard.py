@@ -1188,13 +1188,13 @@ def _distance_km_to_key(km):
 if _cfg_races is not None:
     PLANNED_RACES_DASH = [
         {'name': r['name'], 'date': r['date'], 'distance_key': _distance_km_to_key(r['distance_km']),
-         'distance_km': r['distance_km'], 'priority': r.get('priority', 'B')}
+         'distance_km': r['distance_km'], 'priority': r.get('priority', 'B'), 'surface': r.get('surface', 'road')}
         for r in _cfg_races
     ]
 else:
     PLANNED_RACES_DASH = [
-        {'name': '5K London', 'date': '2026-02-27', 'distance_key': '5K', 'distance_km': 5.0, 'priority': 'A'},
-        {'name': 'HM Stockholm', 'date': '2026-04-25', 'distance_key': 'HM', 'distance_km': 21.097, 'priority': 'A'},
+        {'name': '5K London', 'date': '2026-02-27', 'distance_key': '5K', 'distance_km': 5.0, 'priority': 'A', 'surface': 'road'},
+        {'name': 'HM Stockholm', 'date': '2026-04-25', 'distance_key': 'HM', 'distance_km': 21.097, 'priority': 'A', 'surface': 'road'},
     ]
 
 
@@ -1477,14 +1477,39 @@ def _generate_zone_html(zone_data):
     _priority_labels = {'A': 'A RACE', 'B': 'B RACE', 'C': 'C RACE'}
     _taper_days = {'A': 14, 'B': 7, 'C': 0}
     
+    # Surface-specific multipliers
+    # power_mult: sustainable fraction of road CP factor on this surface
+    # re_mult: running economy relative to road (speed per unit power)
+    _surface_factors = {
+        'indoor_track': {'power_mult': 1.00, 're_mult': 1.04},
+        'track':        {'power_mult': 1.00, 're_mult': 1.02},
+        'road':         {'power_mult': 1.00, 're_mult': 1.00},
+        'trail':        {'power_mult': 0.95, 're_mult': 0.97},
+        'undulating_trail': {'power_mult': 0.90, 're_mult': 0.95}
+    }
+    # Continuous power-duration curve: factor = 1.1491 - 0.0657 * ln(dist_km)
+    # Fitted to Sub-5K(1.07), 5K(1.05), 10K(1.00), HM(0.95), Mara(0.90)
+    import math as _math
+    def _road_cp_factor(dist_km):
+        return 1.1491 - 0.0657 * _math.log(max(dist_km, 1.0))
+    
     for race_idx, race in enumerate(PLANNED_RACES_DASH):
         key = race['distance_key']
         priority = race.get('priority', 'B')
-        factor = RACE_POWER_FACTORS_DASH.get(key, 1.0)
-        dist_km = RACE_DISTANCES_KM_DASH.get(key, race.get('distance_km', 5.0))
+        surface = race.get('surface', 'road')
+        
+        # Use actual race distance for continuous power-duration curve
+        dist_km = race.get('distance_km', RACE_DISTANCES_KM_DASH.get(key, 5.0))
+        road_factor = _road_cp_factor(dist_km)
+        
+        # Surface adjustments
+        sf = _surface_factors.get(surface, _surface_factors['road'])
+        factor = road_factor * sf['power_mult']
+        surface_re = re_p90 * sf['re_mult']
+        
         pw = round(cp * factor)
         dist_m = dist_km * 1000
-        speed = (pw / ATHLETE_MASS_KG_DASH) * re_p90
+        speed = (pw / ATHLETE_MASS_KG_DASH) * surface_re
         t = round(dist_m / speed) if speed > 0 else 0
         band = round(pw * 0.03)
         mins = t // 60
@@ -1525,19 +1550,20 @@ def _generate_zone_html(zone_data):
         
         p_color = _priority_colors.get(priority, '#8b90a0')
         p_label = _priority_labels.get(priority, priority)
+        _surface_labels = {'indoor_track': '🏟️ Indoor', 'track': '🏟️ Track', 'road': '🛣️ Road', 'trail': '🌲 Trail', 'undulating_trail': '⛰️ Trail'}
+        s_label = _surface_labels.get(surface, '')
         
         race_cards += f'''<div class="rc">
             <div class="rh">
-                <span class="rn">{race['name']} <span style="font-size:0.65rem;padding:2px 6px;border-radius:4px;background:{p_color}22;color:{p_color};font-weight:600;margin-left:6px;vertical-align:middle">{p_label}</span></span>
+                <span class="rn">{race['name']} <span style="font-size:0.65rem;padding:2px 6px;border-radius:4px;background:{p_color}22;color:{p_color};font-weight:600;margin-left:6px;vertical-align:middle">{p_label}</span>{f' <span style="font-size:0.65rem;color:var(--text-dim)">{s_label}</span>' if surface != 'road' else ''}</span>
                 <span class="rd">{race['date']} · {days_str}</span>
             </div>
             <div class="rs">
                 <div class="power-only"><div class="rv" style="color:var(--accent)" id="race-pw-{race_idx}">{pw}W</div><div class="rl">Target</div><div class="rx">±{band}W</div></div>
                 <div class="pace-target" style="display:none"><div class="rv" style="color:#4ade80" id="race-pace-{race_idx}">{pace_str}</div><div class="rl">Target pace</div></div>
                 <div><div class="rv" id="race-pred-{race_idx}">{t_str}</div><div class="rl">Predicted</div><div class="rx power-only">{pace_str}</div></div>
-                <div><div class="rv" style="color:{'#4ade80' if _rfl_proj_per_day >= 0 else '#f87171'}">{proj_direction} {proj_rfl_pct}</div><div class="rl">RFL at race</div></div>
-                <div><div class="rv" id="spec14_{race_idx}">—</div><div class="rl">14-day</div><div class="rx">at effort</div></div>
-                <div><div class="rv" id="spec28_{race_idx}">—</div><div class="rl">28-day</div><div class="rx">at effort</div></div>
+                <div><div class="rv" id="spec14_{race_idx}">—</div><div class="rl">14d at effort</div></div>
+                <div><div class="rv" id="spec28_{race_idx}">—</div><div class="rl">28d at effort</div></div>
             </div>
             <div style="margin-top:6px">{taper_html}</div>
         </div>'''
@@ -1737,7 +1763,9 @@ def generate_html(stats, rf_data, volume_data, ctl_atl_data, ctl_atl_lookup, rfl
     
     # Build planned races JSON for JS injection (outside f-string to avoid dict/brace conflicts)
     _planned_races_json = json.dumps([
-        {'name': r['name'], 'date': r['date'], 'priority': r.get('priority', 'B'), 'distance_key': r['distance_key']}
+        {'name': r['name'], 'date': r['date'], 'priority': r.get('priority', 'B'),
+         'distance_key': r['distance_key'], 'distance_km': r.get('distance_km', 5.0),
+         'surface': r.get('surface', 'road')}
         for r in PLANNED_RACES_DASH
     ])
     
@@ -3669,26 +3697,23 @@ function raceAnnotations(dates) {{
         }}
         
         // Update race readiness cards (predicted time, target power/pace)
-        const raceCfg = {{
-            'Sub-5K': {{ factor: 1.07, dist: 3.0 }},
-            '5K': {{ factor: 1.05, dist: 5.0 }},
-            '10K': {{ factor: 1.00, dist: 10.0 }},
-            'HM': {{ factor: 0.95, dist: 21.097 }},
-            'Mara': {{ factor: 0.90, dist: 42.195 }}
-        }};
+        const _surfF = {{'indoor_track':{{pw:1.0,re:1.04}},'track':{{pw:1.0,re:1.02}},'road':{{pw:1.0,re:1.0}},'trail':{{pw:0.95,re:0.97}},'undulating_trail':{{pw:0.90,re:0.95}}}};
+        function _roadCpF(d){{return 1.1491-0.0657*Math.log(Math.max(d,1));}};
         PLANNED_RACES.forEach((race, idx) => {{
-            const key = race.distance_key;
-            const cfg = raceCfg[key] || {{ factor: 1.0, dist: 5.0 }};
+            const dist = race.distance_km || 5.0;
+            const sf = _surfF[race.surface||'road'] || _surfF.road;
+            const factor = _roadCpF(dist) * sf.pw;
             const mcp = ms.cp;
-            const pw = Math.round(mcp * cfg.factor);
+            const pw = Math.round(mcp * factor);
             // Update power target
             const pwEl = document.getElementById('race-pw-' + idx);
             if (pwEl) pwEl.textContent = pw + 'W';
-            // Update predicted time - use closest available prediction
-            const predKey = (key === '5K' || key === 'Sub-5K') ? 'pred5k_s' : 'predHm_s';
+            // Update predicted time using RE
+            const re = (ms.re_p90 || 0.914) * sf.re;
+            const speed = (pw / {ATHLETE_MASS_KG_DASH}) * re;
+            const t = speed > 0 ? Math.round(dist * 1000 / speed) : 0;
             const predEl = document.getElementById('race-pred-' + idx);
-            if (predEl && ms[predKey]) {{
-                const t = Math.round(ms[predKey]);
+            if (predEl && t > 0) {{
                 const hrs = Math.floor(t / 3600);
                 const mins = Math.floor((t % 3600) / 60);
                 const secs = t % 60;
@@ -3696,8 +3721,8 @@ function raceAnnotations(dates) {{
             }}
             // Update pace target
             const paceEl = document.getElementById('race-pace-' + idx);
-            if (paceEl && ms[predKey]) {{
-                const pace = ms[predKey] / cfg.dist;
+            if (paceEl && t > 0) {{
+                const pace = t / dist;
                 const pm = Math.floor(pace / 60);
                 const ps = Math.round(pace % 60);
                 paceEl.textContent = pm + ':' + String(ps).padStart(2,'0') + '/km';
