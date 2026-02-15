@@ -423,7 +423,7 @@ function raceAnnotations(dates) {
 
 </script>
     <h1>🏃 Paul Collyer</h1>
-    <div class="dash-sub">Sunday 15 February 2026, 19:35</div>
+    <div class="dash-sub">Sunday 15 February 2026, 20:52</div>
     
     <!-- Phase 2: Mode Toggle -->
     <div class="mode-toggle" style="display:flex;gap:6px;margin:10px 0 8px;align-items:center;">
@@ -446,7 +446,31 @@ function raceAnnotations(dates) {
     </style>
     
     <!-- v51: Health Check Banner -->
-    <div style="background:rgba(34,197,94,0.08);border:1px solid rgba(34,197,94,0.3);border-radius:10px;padding:10px 16px;margin-bottom:14px;display:flex;justify-content:center;align-items:center;gap:8px;"><span style="font-size:1.1em;">🟢</span> <strong style="color:#4ade80;">All clear</strong> <span style="color:#8b90a0;">— no alerts</span><span class="power-only" id="banner-cp" style="font-size:0.82em;color:#8b90a0;">⚡ CP 333W</span></div>
+    <div id="alert-banner"></div>
+    <script>
+    const _alertData = {"stryd": [], "gap": [], "sim": []};
+    function renderAlertBanner(mode) {
+        const el = document.getElementById('alert-banner');
+        const alerts = _alertData[mode] || [];
+        const ms = (typeof modeStats !== 'undefined') ? modeStats[mode] : null;
+        const cpVal = ms ? ms.cp : 333;
+        const cpHtml = (mode !== 'gap' && cpVal > 0) ? '<span class="power-only" style="font-size:0.82em;color:#8b90a0;">⚡ CP ' + cpVal + 'W</span>' : '';
+        if (alerts.length === 0) {
+            el.innerHTML = '<div style="background:rgba(34,197,94,0.08);border:1px solid rgba(34,197,94,0.3);border-radius:10px;padding:10px 16px;margin-bottom:14px;display:flex;justify-content:center;align-items:center;gap:8px;"><span style="font-size:1.1em;">🟢</span> <strong style="color:#4ade80;">All clear</strong> <span style="color:#8b90a0;">— no alerts</span>' + cpHtml + '</div>';
+            return;
+        }
+        const hasConcern = alerts.some(a => a.level === 'concern');
+        const bg = hasConcern ? 'rgba(239,68,68,0.08)' : 'rgba(234,179,8,0.08)';
+        const brd = hasConcern ? 'rgba(239,68,68,0.3)' : 'rgba(234,179,8,0.3)';
+        const icon = hasConcern ? '🔴' : '🟡';
+        const lc = hasConcern ? '#f87171' : '#fbbf24';
+        const n = alerts.length;
+        const s = n > 1 ? 's' : '';
+        const items = alerts.map(a => '<div style="margin:4px 0;font-size:0.85em;color:#e4e7ef;">' + a.icon + ' <strong>' + a.name + '</strong><span style="color:#8b90a0"> ' + a.detail + '</span></div>').join('');
+        el.innerHTML = '<div style="background:'+bg+';border:1px solid '+brd+';border-radius:10px;padding:10px 16px;margin-bottom:14px;"><div style="text-align:center;margin-bottom:4px;"><span style="font-size:1.1em;">'+icon+'</span> <strong style="color:'+lc+';">'+n+' alert'+s+' active</strong>' + cpHtml + '</div>'+items+'</div>';
+    }
+    renderAlertBanner('stryd');
+    </script>
     
     <!-- Stats Cards -->
     <div class="stats-grid">
@@ -944,7 +968,7 @@ function raceAnnotations(dates) {
     </div>
     
     <div class="footer">
-        Updated: 2026-02-15 19:35<br>
+        Updated: 2026-02-15 20:52<br>
         Data through: 2026-02-15
     </div>
     
@@ -1127,6 +1151,9 @@ function raceAnnotations(dates) {
                 predHm_s: 5506,
                 predMara_s: 11755 }
         };
+        
+        // Re-render alert banner now that modeStats is available (for CP display)
+        if (typeof renderAlertBanner === 'function') renderAlertBanner('stryd');
         
         // v51: Generate per-point colours (red for races, blue for training)
         function racePointColors(races, baseColor, raceColor) {
@@ -2066,12 +2093,8 @@ function raceAnnotations(dates) {
         document.body.classList.toggle('gap-mode', isGap);
         document.body.classList.toggle('sim-mode', isSim);
         
-        // Update CP in alert banner for Stryd/Sim modes
-        const cpBanner = document.getElementById('banner-cp');
-        if (cpBanner) {
-            const cpVal = mode === 'sim' ? modeStats.sim : modeStats.stryd;
-            cpBanner.textContent = '⚡ CP ' + Math.round(372 * parseFloat(cpVal.rfl) / 100) + 'W';
-        }
+        // Update alert banner for current mode
+        if (typeof renderAlertBanner === 'function') renderAlertBanner(mode);
         
         // Update zone badge (hide power info in GAP mode, use mode CP for Sim)
         const zb = document.getElementById('zone-badge');
