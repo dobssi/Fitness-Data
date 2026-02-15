@@ -1212,27 +1212,58 @@ def calc_alert_columns(df: pd.DataFrame) -> pd.DataFrame:
         print(f"  Alert 1 (CTL up/RFL down): {a1_count} runs flagged")
     
     # --- Alert 1b: Taper not working (near race, RFL below 90d peak) ---
-    if 'RFL_Trend' in df.columns and 'race_flag' in df.columns:
+    # --- Alert 1b: Taper not working ---
+    # Two triggers:
+    # a) Historical: On race day for races >= 20km (original logic)
+    # b) Pre-race: During taper window before planned races, if RFL below 90-day peak
+    if 'RFL_Trend' in df.columns:
         rfl = df['RFL_Trend'].values
-        race_flags = df['race_flag'].values
-        dist_km = df['distance_km'].values
+        race_flags = df.get('race_flag', pd.Series(dtype='float64')).values if 'race_flag' in df.columns else np.zeros(n)
+        dist_km = df.get('distance_km', pd.Series(dtype='float64')).values if 'distance_km' in df.columns else np.zeros(n)
         a1b_count = 0
+        
+        # Build planned race taper windows: {date_str: taper_days}
+        try:
+            from config import PLANNED_RACES
+        except (ImportError, Exception):
+            PLANNED_RACES = []
+        _taper_windows = {}  # np.datetime64 -> taper_days
+        _taper_days_map = {'A': 14, 'B': 7, 'C': 0}
+        for pr in PLANNED_RACES:
+            td = _taper_days_map.get(pr.get('priority', 'B'), 7)
+            if td > 0:
+                race_dt = np.datetime64(pr['date'])
+                _taper_windows[race_dt] = td
+        
         for i in range(1, n):
-            # Check if this is a race >= 20km
-            if race_flags[i] != 1 or dist_km[i] < 20:
-                continue
-            # Find 90-day peak RFL_Trend before this race
-            cutoff_90d = dates[i] - np.timedelta64(ALERT1B_PEAK_WINDOW_DAYS, 'D')
-            window = np.where((dates[:i+1] >= cutoff_90d))[0]
-            if len(window) < 3:
-                continue
-            rfl_window = rfl[window]
-            peak = np.nanmax(rfl_window)
-            if np.isfinite(peak) and np.isfinite(rfl[i]):
-                gap = peak - rfl[i]
-                if gap > ALERT1B_RFL_GAP:
-                    df.iat[i, df.columns.get_loc('Alert_1b')] = True
-                    a1b_count += 1
+            triggered = False
+            
+            # a) Historical: race day >= 20km
+            if race_flags[i] == 1 and dist_km[i] >= 20:
+                cutoff_90d = dates[i] - np.timedelta64(ALERT1B_PEAK_WINDOW_DAYS, 'D')
+                window = np.where((dates[:i+1] >= cutoff_90d))[0]
+                if len(window) >= 3:
+                    peak = np.nanmax(rfl[window])
+                    if np.isfinite(peak) and np.isfinite(rfl[i]) and (peak - rfl[i]) > ALERT1B_RFL_GAP:
+                        triggered = True
+            
+            # b) Pre-race: within taper window of a planned race
+            if not triggered:
+                for race_dt, td in _taper_windows.items():
+                    days_to_race = (race_dt - dates[i]) / np.timedelta64(1, 'D')
+                    if 0 <= days_to_race <= td:
+                        # In taper window — check RFL vs 90-day peak
+                        cutoff_90d = dates[i] - np.timedelta64(ALERT1B_PEAK_WINDOW_DAYS, 'D')
+                        window = np.where((dates[:i+1] >= cutoff_90d))[0]
+                        if len(window) >= 3:
+                            peak = np.nanmax(rfl[window])
+                            if np.isfinite(peak) and np.isfinite(rfl[i]) and (peak - rfl[i]) > ALERT1B_RFL_GAP:
+                                triggered = True
+                                break
+            
+            if triggered:
+                df.iat[i, df.columns.get_loc('Alert_1b')] = True
+                a1b_count += 1
         print(f"  Alert 1b (taper): {a1b_count} runs flagged")
     
     # --- Alert 2: Sustained deep-negative TSB (3 of last 5 < -15) ---
@@ -1292,7 +1323,22 @@ def calc_alert_columns(df: pd.DataFrame) -> pd.DataFrame:
                 parts.append("Training more scoring worse")
         
         if df.iat[i, df.columns.get_loc('Alert_1b')]:
-            parts.append("Taper not working")
+            # Try to find which race triggered it
+            _1b_race_name = None
+            for race_dt, td in _taper_windows.items():
+                days_to = (race_dt - dates[i]) / np.timedelta64(1, 'D')
+                if 0 <= days_to <= td:
+                    # Find the race name
+                    for pr in PLANNED_RACES:
+                        if np.datetime64(pr['date']) == race_dt:
+                            _1b_race_name = pr['name']
+                            _1b_days = int(days_to)
+                            break
+                    break
+            if _1b_race_name and _1b_days > 0:
+                parts.append(f"Taper not working ({_1b_race_name} in {_1b_days}d)")
+            else:
+                parts.append("Taper not working")
         
         if df.iat[i, df.columns.get_loc('Alert_2')]:
             t = tsb_vals[i]

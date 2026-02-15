@@ -1187,13 +1187,14 @@ def _distance_km_to_key(km):
 
 if _cfg_races is not None:
     PLANNED_RACES_DASH = [
-        {'name': r['name'], 'date': r['date'], 'distance_key': _distance_km_to_key(r['distance_km'])}
+        {'name': r['name'], 'date': r['date'], 'distance_key': _distance_km_to_key(r['distance_km']),
+         'distance_km': r['distance_km'], 'priority': r.get('priority', 'B')}
         for r in _cfg_races
     ]
 else:
     PLANNED_RACES_DASH = [
-        {'name': '5K London', 'date': '2026-02-27', 'distance_key': '5K'},
-        {'name': 'HM Stockholm', 'date': '2026-04-25', 'distance_key': 'HM'},
+        {'name': '5K London', 'date': '2026-02-27', 'distance_key': '5K', 'distance_km': 5.0, 'priority': 'A'},
+        {'name': 'HM Stockholm', 'date': '2026-04-25', 'distance_key': 'HM', 'distance_km': 21.097, 'priority': 'A'},
     ]
 
 
@@ -1452,10 +1453,35 @@ def _generate_zone_html(zone_data):
     # Race readiness cards
     race_cards = ''
     from datetime import date as dt_date
+    
+    # Get current RFL trend and recent trajectory for projection
+    _rfl_current = zone_data.get('current_rfl', 0.90)
+    # Simple linear projection: use last 28 days of RFL_Trend slope
+    _rfl_proj_per_day = 0.0  # default: flat
+    try:
+        _rfl_col = df['RFL_Trend'].dropna()
+        if len(_rfl_col) >= 10:
+            _recent_28 = _rfl_col.tail(28)
+            if len(_recent_28) >= 5:
+                _x = np.arange(len(_recent_28), dtype=float)
+                _y = _recent_28.values.astype(float)
+                _slope, _ = np.polyfit(_x, _y, 1)
+                # Convert per-run slope to per-day (approx runs per day)
+                _days_span = (df['date'].iloc[-1] - df['date'].iloc[-len(_recent_28)]).days
+                if _days_span > 0:
+                    _rfl_proj_per_day = _slope * len(_recent_28) / _days_span
+    except Exception:
+        pass
+    
+    _priority_colors = {'A': '#f87171', 'B': '#fbbf24', 'C': '#8b90a0'}
+    _priority_labels = {'A': 'A RACE', 'B': 'B RACE', 'C': 'C RACE'}
+    _taper_days = {'A': 14, 'B': 7, 'C': 0}
+    
     for race in PLANNED_RACES_DASH:
         key = race['distance_key']
+        priority = race.get('priority', 'B')
         factor = RACE_POWER_FACTORS_DASH.get(key, 1.0)
-        dist_km = RACE_DISTANCES_KM_DASH.get(key, 5.0)
+        dist_km = RACE_DISTANCES_KM_DASH.get(key, race.get('distance_km', 5.0))
         pw = round(cp * factor)
         dist_m = dist_km * 1000
         speed = (pw / ATHLETE_MASS_KG_DASH) * re_p90
@@ -1471,17 +1497,48 @@ def _generate_zone_html(zone_data):
         pace_str = f"{p_min}:{p_sec:02d}/km" if pace > 0 else '-'
         race_dt = datetime.strptime(race['date'], '%Y-%m-%d').date()
         days_to = (race_dt - dt_date.today()).days
-        days_str = f"{days_to}d" if days_to > 0 else "TODAY"
+        if days_to < 0:
+            days_str = f"{abs(days_to)}d ago"
+        elif days_to == 0:
+            days_str = "TODAY"
+        else:
+            days_str = f"{days_to}d"
+        
+        # RFL projection at race day
+        proj_rfl = _rfl_current + (_rfl_proj_per_day * max(days_to, 0))
+        proj_rfl = max(0, min(1.05, proj_rfl))  # sanity clamp
+        proj_rfl_pct = f"{proj_rfl*100:.1f}%"
+        proj_direction = "↗" if _rfl_proj_per_day > 0.0002 else ("↘" if _rfl_proj_per_day < -0.0002 else "→")
+        
+        # Taper guidance
+        taper_d = _taper_days.get(priority, 7)
+        taper_html = ''
+        if taper_d > 0 and days_to > 0:
+            taper_start = days_to - taper_d
+            if taper_start <= 0:
+                taper_html = f'<span style="color:#4ade80;font-size:0.72rem">🟢 In taper window</span>'
+            elif taper_start <= 7:
+                taper_html = f'<span style="color:#fbbf24;font-size:0.72rem">⏳ Taper starts in {taper_start}d</span>'
+            else:
+                taper_html = f'<span style="color:var(--text-dim);font-size:0.72rem">Taper in {taper_start}d</span>'
+        
+        p_color = _priority_colors.get(priority, '#8b90a0')
+        p_label = _priority_labels.get(priority, priority)
         
         race_cards += f'''<div class="rc">
-            <div class="rh"><span class="rn">{race['name']}</span><span class="rd">{race['date']} · {days_str}</span></div>
+            <div class="rh">
+                <span class="rn">{race['name']} <span style="font-size:0.65rem;padding:2px 6px;border-radius:4px;background:{p_color}22;color:{p_color};font-weight:600;margin-left:6px;vertical-align:middle">{p_label}</span></span>
+                <span class="rd">{race['date']} · {days_str}</span>
+            </div>
             <div class="rs">
                 <div class="power-only"><div class="rv" style="color:var(--accent)" id="race-pw-{key}">{pw}W</div><div class="rl">Target</div><div class="rx">±{band}W</div></div>
                 <div class="pace-target" style="display:none"><div class="rv" style="color:#4ade80" id="race-pace-{key}">{pace_str}</div><div class="rl">Target pace</div></div>
                 <div><div class="rv" id="race-pred-{key}">{t_str}</div><div class="rl">Predicted</div><div class="rx power-only">{pace_str}</div></div>
+                <div><div class="rv" style="color:{'#4ade80' if _rfl_proj_per_day >= 0 else '#f87171'}">{proj_direction} {proj_rfl_pct}</div><div class="rl">RFL at race</div></div>
                 <div><div class="rv" id="spec14_{key}">—</div><div class="rl">14-day</div><div class="rx">at effort</div></div>
                 <div><div class="rv" id="spec28_{key}">—</div><div class="rl">28-day</div><div class="rx">at effort</div></div>
             </div>
+            <div style="margin-top:6px">{taper_html}</div>
         </div>'''
     
     # Zone run data as JSON for JS
@@ -1688,6 +1745,7 @@ def generate_html(stats, rf_data, volume_data, ctl_atl_data, ctl_atl_lookup, rfl
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3"></script>
     <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-annotation@3"></script>
     <style>
         :root {{
             --bg: #0f1117;
@@ -2045,7 +2103,38 @@ def generate_html(stats, rf_data, volume_data, ctl_atl_data, ctl_atl_lookup, rfl
     </style>
 </head>
 <body>
-<script>Chart.defaults.color="#8b90a0";Chart.defaults.borderColor="rgba(255,255,255,0.04)";Chart.defaults.font.family="'DM Sans',sans-serif";Chart.defaults.plugins.legend.labels.padding=10;</script>
+<script>Chart.defaults.color="#8b90a0";Chart.defaults.borderColor="rgba(255,255,255,0.04)";Chart.defaults.font.family="'DM Sans',sans-serif";Chart.defaults.plugins.legend.labels.padding=10;
+const PLANNED_RACES = {json.dumps([{{'name': r['name'], 'date': r['date'], 'priority': r.get('priority', 'B'), 'distance_key': r['distance_key']}} for r in PLANNED_RACES_DASH])};
+function raceAnnotations(dates) {{
+    const pColors = {{'A': '#f87171', 'B': '#fbbf24', 'C': '#555'}};
+    const pDash = {{'A': [], 'B': [6,3], 'C': [3,3]}};
+    const annots = {{}};
+    PLANNED_RACES.forEach((r, i) => {{
+        if (dates.includes(r.date)) {{
+            annots['race_'+i] = {{
+                type: 'line', xMin: r.date, xMax: r.date, borderColor: pColors[r.priority] || '#fbbf24',
+                borderWidth: r.priority === 'A' ? 2 : 1.5, borderDash: pDash[r.priority] || [6,3],
+                label: {{ display: true, content: r.name, position: 'start', backgroundColor: 'rgba(15,17,23,0.85)',
+                    color: pColors[r.priority] || '#fbbf24', font: {{ size: 10, family: "'DM Sans'" }},
+                    padding: {{x:4,y:2}}, borderRadius: 3 }}
+            }};
+        }} else {{
+            // Race date not in chart range — check if it falls within range
+            const sorted = [...dates].sort();
+            if (sorted.length > 1 && r.date >= sorted[0] && r.date <= sorted[sorted.length-1]) {{
+                annots['race_'+i] = {{
+                    type: 'line', xMin: r.date, xMax: r.date, borderColor: pColors[r.priority] || '#fbbf24',
+                    borderWidth: r.priority === 'A' ? 2 : 1.5, borderDash: pDash[r.priority] || [6,3],
+                    label: {{ display: true, content: r.name, position: 'start', backgroundColor: 'rgba(15,17,23,0.85)',
+                        color: pColors[r.priority] || '#fbbf24', font: {{ size: 10, family: "'DM Sans'" }},
+                        padding: {{x:4,y:2}}, borderRadius: 3 }}
+                }};
+            }}
+        }}
+    }});
+    return annots;
+}}
+</script>
     <h1>🏃 Paul Collyer</h1>
     <div class="dash-sub">{datetime.now().strftime("%A %d %B %Y, %H:%M")}</div>
     
@@ -2492,7 +2581,8 @@ def generate_html(stats, rf_data, volume_data, ctl_atl_data, ctl_atl_lookup, rfl
                         suggestedMin: Math.min(...{json.dumps(rfl_trend_values)}.filter(v => v !== null)) - 5,
                         suggestedMax: Math.max(...{json.dumps(rfl_trend_values)}.filter(v => v !== null)) + 5
                     }}
-                }}
+                }},
+                annotation: {{ annotations: raceAnnotations({json.dumps(rfl_trend_dates)}) }}
             }}
         }});
         
@@ -2647,7 +2737,8 @@ def generate_html(stats, rf_data, volume_data, ctl_atl_data, ctl_atl_lookup, rfl
                         min: 50,
                         suggestedMax: 100
                     }}
-                }}
+                }},
+                annotation: {{ annotations: raceAnnotations(rfData['all'].dates) }}
             }}
         }});
         
@@ -2693,6 +2784,7 @@ def generate_html(stats, rf_data, volume_data, ctl_atl_data, ctl_atl_lookup, rfl
             rfChart.data.datasets[1].borderColor = mc.trend;
             rfChart.options.scales.y.min = settings.yMin;
             rfChart.options.scales.x.ticks.maxTicksLimit = settings.ticks;
+            rfChart.options.plugins.annotation = {{ annotations: raceAnnotations(d.dates) }};
             
             rfChart.update();
         }}
@@ -2782,7 +2874,8 @@ def generate_html(stats, rf_data, volume_data, ctl_atl_data, ctl_atl_lookup, rfl
                 scales: {{
                     x: {{ display: true, ticks: {{ maxTicksLimit: 5, maxRotation: 0, font: {{ size: 10 }} }} }},
                     y: {{ display: true, ticks: {{ font: {{ size: 10 }} }} }}
-                }}
+                }},
+                annotation: {{ annotations: raceAnnotations(ctlAtlData['90'].dates) }}
             }}
         }});
         
@@ -2796,6 +2889,7 @@ def generate_html(stats, rf_data, volume_data, ctl_atl_data, ctl_atl_lookup, rfl
                 ctlAtlChart.data.datasets[1].data = ctlAtlData[range].atl;
                 ctlAtlChart.data.datasets[2].data = ctlAtlData[range].ctlProj;
                 ctlAtlChart.data.datasets[3].data = ctlAtlData[range].atlProj;
+                ctlAtlChart.options.plugins.annotation = {{ annotations: raceAnnotations(ctlAtlData[range].dates) }};
                 ctlAtlChart.update();
             }}
         }});
@@ -3241,7 +3335,26 @@ def generate_html(stats, rf_data, volume_data, ctl_atl_data, ctl_atl_lookup, rfl
                                 font: {{ size: 10 }}
                             }}
                         }}
-                    }}
+                    }},
+                    annotation: {{ annotations: (function() {{
+                        const pColors = {{'A': '#f87171', 'B': '#fbbf24', 'C': '#555'}};
+                        const pDash = {{'A': [], 'B': [6,3], 'C': [3,3]}};
+                        const a = {{}};
+                        PLANNED_RACES.forEach((r, i) => {{
+                            a['race_'+i] = {{
+                                type: 'line', xMin: r.date, xMax: r.date,
+                                borderColor: pColors[r.priority] || '#fbbf24',
+                                borderWidth: r.priority === 'A' ? 2 : 1.5,
+                                borderDash: pDash[r.priority] || [6,3],
+                                label: {{ display: true, content: r.name, position: 'start',
+                                    backgroundColor: 'rgba(15,17,23,0.85)',
+                                    color: pColors[r.priority] || '#fbbf24',
+                                    font: {{ size: 10, family: "'DM Sans'" }},
+                                    padding: {{x:4,y:2}}, borderRadius: 3 }}
+                            }};
+                        }});
+                        return a;
+                    }})() }}
                 }}
             }});
         }}
@@ -3373,7 +3486,26 @@ def generate_html(stats, rf_data, volume_data, ctl_atl_data, ctl_atl_lookup, rfl
                                 font: {{ size: 10 }}
                             }}
                         }}
-                    }}
+                    }},
+                    annotation: {{ annotations: (function() {{
+                        const pColors = {{'A': '#f87171', 'B': '#fbbf24', 'C': '#555'}};
+                        const pDash = {{'A': [], 'B': [6,3], 'C': [3,3]}};
+                        const a = {{}};
+                        PLANNED_RACES.forEach((r, i) => {{
+                            a['race_'+i] = {{
+                                type: 'line', xMin: r.date, xMax: r.date,
+                                borderColor: pColors[r.priority] || '#fbbf24',
+                                borderWidth: r.priority === 'A' ? 2 : 1.5,
+                                borderDash: pDash[r.priority] || [6,3],
+                                label: {{ display: true, content: r.name, position: 'start',
+                                    backgroundColor: 'rgba(15,17,23,0.85)',
+                                    color: pColors[r.priority] || '#fbbf24',
+                                    font: {{ size: 10, family: "'DM Sans'" }},
+                                    padding: {{x:4,y:2}}, borderRadius: 3 }}
+                            }};
+                        }});
+                        return a;
+                    }})() }}
                 }}
             }});
         }}

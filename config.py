@@ -65,7 +65,7 @@ if _ATHLETE_CONFIG:
     ATHLETE_LTHR = _ATHLETE_CONFIG.lthr
     ATHLETE_MAX_HR = _ATHLETE_CONFIG.max_hr
     PLANNED_RACES = [
-        {'name': r.name, 'date': r.date, 'distance_km': r.distance_km}
+        {'name': r.name, 'date': r.date, 'distance_km': r.distance_km, 'priority': r.priority}
         for r in _ATHLETE_CONFIG.planned_races
     ]
     
@@ -85,8 +85,8 @@ else:
     ATHLETE_LTHR = 178
     ATHLETE_MAX_HR = 192
     PLANNED_RACES = [
-        {'name': '5K London', 'date': '2026-02-27', 'distance_km': 5.0},
-        {'name': 'HM Stockholm', 'date': '2026-04-25', 'distance_km': 21.097},
+        {'name': '5K London', 'date': '2026-02-27', 'distance_km': 5.0, 'priority': 'A'},
+        {'name': 'HM Stockholm', 'date': '2026-04-25', 'distance_km': 21.097, 'priority': 'A'},
     ]
     
     STRYD_MASS_HISTORY = [
