@@ -423,7 +423,7 @@ function raceAnnotations(dates) {
 
 </script>
     <h1>🏃 Paul Collyer</h1>
-    <div class="dash-sub">Sunday 15 February 2026, 18:39</div>
+    <div class="dash-sub">Sunday 15 February 2026, 18:45</div>
     
     <!-- Phase 2: Mode Toggle -->
     <div class="mode-toggle" style="display:flex;gap:6px;margin:10px 0 8px;align-items:center;">
@@ -562,9 +562,9 @@ function raceAnnotations(dates) {
                 <span class="rd">2026-02-21 · 6d</span>
             </div>
             <div class="rs">
-                <div class="power-only"><div class="rv" style="color:var(--accent)" id="race-pw-0">347W</div><div class="rl">Target</div><div class="rx">±10W</div></div>
-                <div class="pace-target" style="display:none"><div class="rv" style="color:#4ade80" id="race-pace-0">3:59/km</div><div class="rl">Target pace</div></div>
-                <div><div class="rv" id="race-pred-0">19:58</div><div class="rl">Predicted</div><div class="rx power-only">3:59/km</div></div>
+                <div class="power-only"><div class="rv" style="color:var(--accent)" id="race-pw-0">350W</div><div class="rl">Target</div><div class="rx">±10W</div></div>
+                <div class="pace-target" style="display:none"><div class="rv" style="color:#4ade80" id="race-pace-0">3:57/km</div><div class="rl">Target pace</div></div>
+                <div><div class="rv" id="race-pred-0">19:48</div><div class="rl">Predicted</div><div class="rx power-only">3:57/km</div></div>
                 <div><div class="rv" id="spec14_0">—</div><div class="rl">14d at effort</div></div>
                 <div><div class="rv" id="spec28_0">—</div><div class="rl">28d at effort</div></div>
             </div>
@@ -575,9 +575,9 @@ function raceAnnotations(dates) {
                 <span class="rd">2026-02-27 · 12d</span>
             </div>
             <div class="rs">
-                <div class="power-only"><div class="rv" style="color:var(--accent)" id="race-pw-1">347W</div><div class="rl">Target</div><div class="rx">±10W</div></div>
-                <div class="pace-target" style="display:none"><div class="rv" style="color:#4ade80" id="race-pace-1">3:59/km</div><div class="rl">Target pace</div></div>
-                <div><div class="rv" id="race-pred-1">19:58</div><div class="rl">Predicted</div><div class="rx power-only">3:59/km</div></div>
+                <div class="power-only"><div class="rv" style="color:var(--accent)" id="race-pw-1">350W</div><div class="rl">Target</div><div class="rx">±10W</div></div>
+                <div class="pace-target" style="display:none"><div class="rv" style="color:#4ade80" id="race-pace-1">3:57/km</div><div class="rl">Target pace</div></div>
+                <div><div class="rv" id="race-pred-1">19:48</div><div class="rl">Predicted</div><div class="rx power-only">3:57/km</div></div>
                 <div><div class="rv" id="spec14_1">—</div><div class="rl">14d at effort</div></div>
                 <div><div class="rv" id="spec28_1">—</div><div class="rl">28d at effort</div></div>
             </div>
@@ -944,7 +944,7 @@ function raceAnnotations(dates) {
     </div>
     
     <div class="footer">
-        Updated: 2026-02-15 18:39<br>
+        Updated: 2026-02-15 18:45<br>
         Data through: 2026-02-15
     </div>
     
@@ -2109,8 +2109,8 @@ function raceAnnotations(dates) {
         
         // Update race readiness cards (predicted time, target power/pace)
         const _surfF = {'indoor_track':{pw:1.0,re:1.04},'track':{pw:1.0,re:1.02},'road':{pw:1.0,re:1.0},'trail':{pw:0.95,re:0.97},'undulating_trail':{pw:0.90,re:0.95}};
-        function _roadCpF(d){return 1.1491-0.0657*Math.log(Math.max(d,1));};
-        PLANNED_RACES.forEach((race, idx) => {
+        const _pdA=[[3,1.07],[5,1.05],[10,1.00],[21.097,0.95],[42.195,0.90]];
+        function _roadCpF(d){d=Math.max(d,1);const ld=Math.log(d);if(ld<=Math.log(_pdA[0][0]))return _pdA[0][1];if(ld>=Math.log(_pdA[_pdA.length-1][0]))return _pdA[_pdA.length-1][1];for(let i=0;i<_pdA.length-1;i++){const l0=Math.log(_pdA[i][0]),l1=Math.log(_pdA[i+1][0]);if(ld>=l0&&ld<=l1){const f=(ld-l0)/(l1-l0);return _pdA[i][1]+f*(_pdA[i+1][1]-_pdA[i][1]);}}return 1.0;};        PLANNED_RACES.forEach((race, idx) => {
             const dist = race.distance_km || 5.0;
             const sf = _surfF[race.surface||'road'] || _surfF.road;
             const factor = _roadCpF(dist) * sf.pw;
