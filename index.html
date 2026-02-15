@@ -423,7 +423,7 @@ function raceAnnotations(dates) {
 
 </script>
     <h1>🏃 Paul Collyer</h1>
-    <div class="dash-sub">Sunday 15 February 2026, 19:08</div>
+    <div class="dash-sub">Sunday 15 February 2026, 19:35</div>
     
     <!-- Phase 2: Mode Toggle -->
     <div class="mode-toggle" style="display:flex;gap:6px;margin:10px 0 8px;align-items:center;">
@@ -944,7 +944,7 @@ function raceAnnotations(dates) {
     </div>
     
     <div class="footer">
-        Updated: 2026-02-15 19:08<br>
+        Updated: 2026-02-15 19:35<br>
         Data through: 2026-02-15
     </div>
     
@@ -1103,7 +1103,9 @@ function raceAnnotations(dates) {
                 predHm: '1:32:17',
                 predMara: '3:17:01',
                 pred5k_s: 1187,
-                predHm_s: 5537 },
+                pred10k_s: 2493,
+                predHm_s: 5537,
+                predMara_s: 11821 },
             gap: { rfl: '89.3', ag: '77.4',
                 cp: 332,
                 pred5k: '19:49',
@@ -1111,7 +1113,9 @@ function raceAnnotations(dates) {
                 predHm: '1:32:26',
                 predMara: '3:17:20',
                 pred5k_s: 1189,
-                predHm_s: 5546 },
+                pred10k_s: 2497,
+                predHm_s: 5546,
+                predMara_s: 11840 },
             sim: { rfl: '90.0', ag: '78.0',
                 cp: 335,
                 pred5k: '19:41',
@@ -1119,7 +1123,9 @@ function raceAnnotations(dates) {
                 predHm: '1:31:46',
                 predMara: '3:15:55',
                 pred5k_s: 1181,
-                predHm_s: 5506 }
+                pred10k_s: 2479,
+                predHm_s: 5506,
+                predMara_s: 11755 }
         };
         
         // v51: Generate per-point colours (red for races, blue for training)
@@ -2110,7 +2116,10 @@ function raceAnnotations(dates) {
         // Update race readiness cards (predicted time, target power/pace)
         const _surfF = {'indoor_track':{pw:1.0,re:1.04},'track':{pw:1.0,re:1.02},'road':{pw:1.0,re:1.0},'trail':{pw:0.95,re:0.97},'undulating_trail':{pw:0.90,re:0.95}};
         const _pdA=[[3,1.07],[5,1.05],[10,1.00],[21.097,0.95],[42.195,0.90]];
-        function _roadCpF(d){d=Math.max(d,1);const ld=Math.log(d);if(ld<=Math.log(_pdA[0][0]))return _pdA[0][1];if(ld>=Math.log(_pdA[_pdA.length-1][0]))return _pdA[_pdA.length-1][1];for(let i=0;i<_pdA.length-1;i++){const l0=Math.log(_pdA[i][0]),l1=Math.log(_pdA[i+1][0]);if(ld>=l0&&ld<=l1){const f=(ld-l0)/(l1-l0);return _pdA[i][1]+f*(_pdA[i+1][1]-_pdA[i][1]);}}return 1.0;};        PLANNED_RACES.forEach((race, idx) => {
+        function _roadCpF(d){d=Math.max(d,1);const ld=Math.log(d);if(ld<=Math.log(_pdA[0][0]))return _pdA[0][1];if(ld>=Math.log(_pdA[_pdA.length-1][0]))return _pdA[_pdA.length-1][1];for(let i=0;i<_pdA.length-1;i++){const l0=Math.log(_pdA[i][0]),l1=Math.log(_pdA[i+1][0]);if(ld>=l0&&ld<=l1){const f=(ld-l0)/(l1-l0);return _pdA[i][1]+f*(_pdA[i+1][1]-_pdA[i][1]);}}return 1.0;};
+        // Map distance_key to modeStats raw seconds keys
+        const _stepbKeyMap = {'5K':'pred5k_s','10K':'pred10k_s','HM':'predHm_s','Mara':'predMara_s'};
+        PLANNED_RACES.forEach((race, idx) => {
             const dist = race.distance_km || 5.0;
             const sf = _surfF[race.surface||'road'] || _surfF.road;
             const factor = _roadCpF(dist) * sf.pw;
@@ -2119,10 +2128,18 @@ function raceAnnotations(dates) {
             // Update power target
             const pwEl = document.getElementById('race-pw-' + idx);
             if (pwEl) pwEl.textContent = pw + 'W';
-            // Update predicted time using RE
-            const re = (ms.re_p90 || 0.914) * sf.re;
-            const speed = (pw / 76.0) * re;
-            const t = speed > 0 ? Math.round(dist * 1000 / speed) : 0;
+            // For standard road distances, use StepB predictions (matches stats grid)
+            // For non-standard distances or non-road surfaces, use continuous model
+            const stepbKey = _stepbKeyMap[race.distance_key];
+            const stepbSecs = (stepbKey && (race.surface||'road')==='road') ? ms[stepbKey] : 0;
+            let t;
+            if (stepbSecs && stepbSecs > 0) {
+                t = stepbSecs;
+            } else {
+                const re = (ZONE_RE || 0.914) * sf.re;
+                const speed = (pw / 76.0) * re;
+                t = speed > 0 ? Math.round(dist * 1000 / speed) : 0;
+            }
             const predEl = document.getElementById('race-pred-' + idx);
             if (predEl && t > 0) {
                 const hrs = Math.floor(t / 3600);
