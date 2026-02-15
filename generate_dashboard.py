@@ -784,10 +784,26 @@ def get_alert_data(df):
         if col in df.columns and latest.get(col, False):
             defn = alert_defs.get(col, {})
             detail = ''
-            if col == 'Alert_5' and pd.notna(latest.get('Easy_RFL_Gap')):
-                detail = f" (gap {latest['Easy_RFL_Gap']*100:.1f}%)"
+            if col == 'Alert_1':
+                # Find run ~28d ago for RFL drop / CTL rise context
+                try:
+                    cutoff = latest['date'] - pd.Timedelta(days=28)
+                    earlier = df[df['date'] <= cutoff]
+                    if len(earlier) > 0:
+                        j = earlier.iloc[-1]
+                        rfl_drop = (j['RFL_Trend'] - latest['RFL_Trend']) * 100
+                        ctl_rise = latest['CTL'] - j['CTL']
+                        detail = f" (RFL -{rfl_drop:.1f}%, CTL +{ctl_rise:.0f})"
+                except Exception:
+                    pass
+            elif col == 'Alert_1b':
+                detail = " (RFL below 90d peak at race distance)"
             elif col == 'Alert_2' and pd.notna(latest.get('TSB')):
                 detail = f" (TSB {latest['TSB']:.0f})"
+            elif col == 'Alert_3b' and pd.notna(latest.get('Easy_RF_z')):
+                detail = f" (z={latest['Easy_RF_z']:.1f})"
+            elif col == 'Alert_5' and pd.notna(latest.get('Easy_RFL_Gap')):
+                detail = f" (gap {latest['Easy_RFL_Gap']*100:.1f}%)"
             alerts.append({
                 'name': defn.get('name', col),
                 'level': defn.get('level', 'info'),

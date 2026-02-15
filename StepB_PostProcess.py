@@ -1267,6 +1267,60 @@ def calc_alert_columns(df: pd.DataFrame) -> pd.DataFrame:
                 a5_count += 1
         print(f"  Alert 5 (easy RF gap): {a5_count} runs flagged")
     
+    # --- Build Alert_Text column: human-readable summary, blank if no alerts ---
+    df['Alert_Text'] = ''
+    rfl_vals = pd.to_numeric(df.get('RFL_Trend'), errors='coerce').values if 'RFL_Trend' in df.columns else np.full(n, np.nan)
+    ctl_vals = pd.to_numeric(df.get('CTL'), errors='coerce').values if 'CTL' in df.columns else np.full(n, np.nan)
+    tsb_vals = pd.to_numeric(df.get('TSB'), errors='coerce').values if 'TSB' in df.columns else np.full(n, np.nan)
+    ez_z_vals = pd.to_numeric(df.get('Easy_RF_z'), errors='coerce').values if 'Easy_RF_z' in df.columns else np.full(n, np.nan)
+    ez_gap_vals = pd.to_numeric(df.get('Easy_RFL_Gap'), errors='coerce').values if 'Easy_RFL_Gap' in df.columns else np.full(n, np.nan)
+    
+    text_col_idx = df.columns.get_loc('Alert_Text')
+    for i in range(n):
+        parts = []
+        
+        if df.iat[i, df.columns.get_loc('Alert_1')]:
+            # Find run ~28 days ago for context
+            cutoff = dates[i] - np.timedelta64(ALERT1_WINDOW_DAYS, 'D')
+            earlier = np.where((dates[:i] <= cutoff))[0]
+            if len(earlier) > 0:
+                j = earlier[-1]
+                rfl_drop = (rfl_vals[j] - rfl_vals[i]) * 100 if np.isfinite(rfl_vals[i]) and np.isfinite(rfl_vals[j]) else 0
+                ctl_rise = ctl_vals[i] - ctl_vals[j] if np.isfinite(ctl_vals[i]) and np.isfinite(ctl_vals[j]) else 0
+                parts.append(f"Training more scoring worse (RFL -{rfl_drop:.1f}%, CTL +{ctl_rise:.0f})")
+            else:
+                parts.append("Training more scoring worse")
+        
+        if df.iat[i, df.columns.get_loc('Alert_1b')]:
+            parts.append("Taper not working")
+        
+        if df.iat[i, df.columns.get_loc('Alert_2')]:
+            t = tsb_vals[i]
+            if np.isfinite(t):
+                parts.append(f"Deep fatigue (TSB {t:.0f})")
+            else:
+                parts.append("Deep fatigue")
+        
+        if df.iat[i, df.columns.get_loc('Alert_3b')]:
+            z = ez_z_vals[i]
+            if np.isfinite(z):
+                parts.append(f"Easy run outlier (z={z:.1f})")
+            else:
+                parts.append("Easy run outlier")
+        
+        if df.iat[i, df.columns.get_loc('Alert_5')]:
+            g = ez_gap_vals[i]
+            if np.isfinite(g):
+                parts.append(f"Easy RF divergence ({g*100:.1f}%)")
+            else:
+                parts.append("Easy RF divergence")
+        
+        if parts:
+            df.iat[i, text_col_idx] = ' | '.join(parts)
+    
+    alert_text_count = (df['Alert_Text'] != '').sum()
+    print(f"  Alert_Text populated: {alert_text_count} rows")
+    
     # Summary
     any_alert = df[['Alert_1', 'Alert_1b', 'Alert_2', 'Alert_3b', 'Alert_5']].any(axis=1)
     total_flagged = any_alert.sum()
@@ -4811,7 +4865,7 @@ def main() -> int:
         "weight_kg",
         # v51: Easy RF metrics and alerts
         "Easy_RF_EMA", "Easy_RF_z", "RFL_Trend_Delta", "Easy_RFL_Gap",
-        "Alert_1", "Alert_1b", "Alert_2", "Alert_3b", "Alert_5",
+        "Alert_1", "Alert_1b", "Alert_2", "Alert_3b", "Alert_5", "Alert_Text",
         "parkrun", "surface",
         # Phase 2: GAP RF parallel columns
         "RF_gap_median", "RF_gap_adj", "RF_gap_Trend", "RFL_gap", "RFL_gap_Trend", "PS_gap",
