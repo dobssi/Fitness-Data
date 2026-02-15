@@ -1477,7 +1477,7 @@ def _generate_zone_html(zone_data):
     _priority_labels = {'A': 'A RACE', 'B': 'B RACE', 'C': 'C RACE'}
     _taper_days = {'A': 14, 'B': 7, 'C': 0}
     
-    for race in PLANNED_RACES_DASH:
+    for race_idx, race in enumerate(PLANNED_RACES_DASH):
         key = race['distance_key']
         priority = race.get('priority', 'B')
         factor = RACE_POWER_FACTORS_DASH.get(key, 1.0)
@@ -1532,12 +1532,12 @@ def _generate_zone_html(zone_data):
                 <span class="rd">{race['date']} · {days_str}</span>
             </div>
             <div class="rs">
-                <div class="power-only"><div class="rv" style="color:var(--accent)" id="race-pw-{key}">{pw}W</div><div class="rl">Target</div><div class="rx">±{band}W</div></div>
-                <div class="pace-target" style="display:none"><div class="rv" style="color:#4ade80" id="race-pace-{key}">{pace_str}</div><div class="rl">Target pace</div></div>
-                <div><div class="rv" id="race-pred-{key}">{t_str}</div><div class="rl">Predicted</div><div class="rx power-only">{pace_str}</div></div>
+                <div class="power-only"><div class="rv" style="color:var(--accent)" id="race-pw-{race_idx}">{pw}W</div><div class="rl">Target</div><div class="rx">±{band}W</div></div>
+                <div class="pace-target" style="display:none"><div class="rv" style="color:#4ade80" id="race-pace-{race_idx}">{pace_str}</div><div class="rl">Target pace</div></div>
+                <div><div class="rv" id="race-pred-{race_idx}">{t_str}</div><div class="rl">Predicted</div><div class="rx power-only">{pace_str}</div></div>
                 <div><div class="rv" style="color:{'#4ade80' if _rfl_proj_per_day >= 0 else '#f87171'}">{proj_direction} {proj_rfl_pct}</div><div class="rl">RFL at race</div></div>
-                <div><div class="rv" id="spec14_{key}">—</div><div class="rl">14-day</div><div class="rx">at effort</div></div>
-                <div><div class="rv" id="spec28_{key}">—</div><div class="rl">28-day</div><div class="rx">at effort</div></div>
+                <div><div class="rv" id="spec14_{race_idx}">—</div><div class="rl">14-day</div><div class="rx">at effort</div></div>
+                <div><div class="rv" id="spec28_{race_idx}">—</div><div class="rl">28-day</div><div class="rx">at effort</div></div>
             </div>
             <div style="margin-top:6px">{taper_html}</div>
         </div>'''
@@ -1648,7 +1648,7 @@ def _generate_zone_html(zone_data):
       // HR/Power zone fallback: assign all time to primary zone
       const result={{}};zones.forEach(z=>result[z.id]=0);const mins=r.duration_min||0,v=valFor(r,mode),zid=assignZ(v,zones,false);if(result[zid]!==undefined)result[zid]=mins;return result;
     }}
-    function calcSpecificity(){{const today=new Date();const c14=new Date(today);c14.setDate(c14.getDate()-14);const c28=new Date(today);c28.setDate(c28.getDate()-28);const useGAP=(typeof currentMode!=='undefined'&&currentMode==='gap');const zones=useGAP?RACE_PACE_Z:RACE_PW_Z;const modeKey='race';const targets=[{{key:'5K'}},{{key:'HM'}}];targets.forEach(tgt=>{{let m14=0,m28=0;ZONE_RUNS.forEach(r=>{{const d=new Date(r.date);if(d<c28)return;const est=getZoneMins(r,modeKey,zones);const mins=est[tgt.key]||0;if(d>=c14)m14+=mins;m28+=mins;}});const e14=document.getElementById('spec14_'+tgt.key),e28=document.getElementById('spec28_'+tgt.key);if(e14)e14.innerHTML=Math.round(m14)+'<span style="font-size:0.75rem;color:var(--text-dim)">min</span>';if(e28)e28.innerHTML=Math.round(m28)+'<span style="font-size:0.75rem;color:var(--text-dim)">min</span>';}});}}calcSpecificity();
+    function calcSpecificity(){{const today=new Date();const c14=new Date(today);c14.setDate(c14.getDate()-14);const c28=new Date(today);c28.setDate(c28.getDate()-28);const useGAP=(typeof currentMode!=='undefined'&&currentMode==='gap');const zones=useGAP?RACE_PACE_Z:RACE_PW_Z;const modeKey='race';PLANNED_RACES.forEach((tgt,idx)=>{{let m14=0,m28=0;ZONE_RUNS.forEach(r=>{{const d=new Date(r.date);if(d<c28)return;const est=getZoneMins(r,modeKey,zones);const mins=est[tgt.distance_key]||0;if(d>=c14)m14+=mins;m28+=mins;}});const e14=document.getElementById('spec14_'+idx),e28=document.getElementById('spec28_'+idx);if(e14)e14.innerHTML=Math.round(m14)+'<span style="font-size:0.75rem;color:var(--text-dim)">min</span>';if(e28)e28.innerHTML=Math.round(m28)+'<span style="font-size:0.75rem;color:var(--text-dim)">min</span>';}});}}calcSpecificity();
     // Weekly zone bars
     function weekKey(ds){{const d=new Date(ds),day=d.getDay(),m=new Date(d);m.setDate(d.getDate()-((day+6)%7));return m.toISOString().slice(0,10);}}
     function fmtWk(s){{const d=new Date(s),tmp=new Date(d.valueOf());tmp.setDate(tmp.getDate()+3-(tmp.getDay()+6)%7);const w1=new Date(tmp.getFullYear(),0,4);const wk=1+Math.round(((tmp-w1)/864e5-3+(w1.getDay()+6)%7)/7);return'W'+String(wk).padStart(2,'0')+'/'+String(tmp.getFullYear()).slice(-2);}}
@@ -2132,30 +2132,34 @@ function raceAnnotations(dates) {{
     const pDash = {{'A': [], 'B': [6,3], 'C': [3,3]}};
     const annots = {{}};
     if (!dates || dates.length === 0) return annots;
-    PLANNED_RACES.forEach((r, i) => {{
+    // Find only the NEXT upcoming race
+    const upcoming = PLANNED_RACES.filter(r => {{
         const rd = new Date(r.date + 'T00:00:00');
-        if (rd < _today || rd > _14dFromNow) return;
-        // Try both date formats
-        const short = _isoToShort(r.date);
-        const medium = _isoToMedium(r.date);
-        let matchLabel = null;
-        if (dates.includes(short)) matchLabel = short;
-        else if (dates.includes(medium)) matchLabel = medium;
-        if (matchLabel) {{
-            annots['race_'+i] = {{
-                type: 'line', xMin: matchLabel, xMax: matchLabel,
-                borderColor: pColors[r.priority] || '#fbbf24',
-                borderWidth: r.priority === 'A' ? 2 : 1.5,
-                borderDash: pDash[r.priority] || [6,3],
-                label: {{ display: true, content: r.name, position: 'start',
-                    backgroundColor: 'rgba(15,17,23,0.85)',
-                    color: pColors[r.priority] || '#fbbf24',
-                    font: {{ size: 10, family: "'DM Sans'" }},
-                    padding: {{x:4,y:2}}, borderRadius: 3
-                }}
-            }};
-        }}
-    }});
+        return rd >= _today;
+    }}).sort((a,b) => a.date.localeCompare(b.date));
+    if (upcoming.length === 0) return annots;
+    const r = upcoming[0];
+    const rd = new Date(r.date + 'T00:00:00');
+    if (rd > _14dFromNow) return annots;
+    const short = _isoToShort(r.date);
+    const medium = _isoToMedium(r.date);
+    let matchLabel = null;
+    if (dates.includes(short)) matchLabel = short;
+    else if (dates.includes(medium)) matchLabel = medium;
+    if (matchLabel) {{
+        annots['race_next'] = {{
+            type: 'line', xMin: matchLabel, xMax: matchLabel,
+            borderColor: pColors[r.priority] || '#fbbf24',
+            borderWidth: r.priority === 'A' ? 2 : 1.5,
+            borderDash: pDash[r.priority] || [6,3],
+            label: {{ display: true, content: r.name, position: 'start',
+                backgroundColor: 'rgba(15,17,23,0.85)',
+                color: pColors[r.priority] || '#fbbf24',
+                font: {{ size: 10, family: "'DM Sans'" }},
+                padding: {{x:4,y:2}}, borderRadius: 3
+            }}
+        }};
+    }}
     return annots;
 }}
 
@@ -3666,19 +3670,23 @@ function raceAnnotations(dates) {{
         
         // Update race readiness cards (predicted time, target power/pace)
         const raceCfg = {{
+            'Sub-5K': {{ factor: 1.07, dist: 3.0 }},
             '5K': {{ factor: 1.05, dist: 5.0 }},
-            'HM': {{ factor: 0.95, dist: 21.097 }}
+            '10K': {{ factor: 1.00, dist: 10.0 }},
+            'HM': {{ factor: 0.95, dist: 21.097 }},
+            'Mara': {{ factor: 0.90, dist: 42.195 }}
         }};
-        ['5K', 'HM'].forEach(key => {{
-            const cfg = raceCfg[key];
+        PLANNED_RACES.forEach((race, idx) => {{
+            const key = race.distance_key;
+            const cfg = raceCfg[key] || {{ factor: 1.0, dist: 5.0 }};
             const mcp = ms.cp;
             const pw = Math.round(mcp * cfg.factor);
             // Update power target
-            const pwEl = document.getElementById('race-pw-' + key);
+            const pwEl = document.getElementById('race-pw-' + idx);
             if (pwEl) pwEl.textContent = pw + 'W';
-            // Update predicted time
-            const predKey = key === '5K' ? 'pred5k_s' : 'predHm_s';
-            const predEl = document.getElementById('race-pred-' + key);
+            // Update predicted time - use closest available prediction
+            const predKey = (key === '5K' || key === 'Sub-5K') ? 'pred5k_s' : 'predHm_s';
+            const predEl = document.getElementById('race-pred-' + idx);
             if (predEl && ms[predKey]) {{
                 const t = Math.round(ms[predKey]);
                 const hrs = Math.floor(t / 3600);
@@ -3687,7 +3695,7 @@ function raceAnnotations(dates) {{
                 predEl.textContent = hrs > 0 ? hrs + ':' + String(mins).padStart(2,'0') + ':' + String(secs).padStart(2,'0') : mins + ':' + String(secs).padStart(2,'0');
             }}
             // Update pace target
-            const paceEl = document.getElementById('race-pace-' + key);
+            const paceEl = document.getElementById('race-pace-' + idx);
             if (paceEl && ms[predKey]) {{
                 const pace = ms[predKey] / cfg.dist;
                 const pm = Math.floor(pace / 60);
