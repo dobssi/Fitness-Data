@@ -1734,6 +1734,12 @@ def generate_html(stats, rf_data, volume_data, ctl_atl_data, ctl_atl_lookup, rfl
     ctl_atl_dates_1095, ctl_values_1095, atl_values_1095, ctl_proj_1095, atl_proj_1095 = unpack_ctl_atl(ctl_atl_1095)
     ctl_atl_dates_1825, ctl_values_1825, atl_values_1825, ctl_proj_1825, atl_proj_1825 = unpack_ctl_atl(ctl_atl_1825)
     
+    # Build planned races JSON for JS injection (outside f-string to avoid dict/brace conflicts)
+    _planned_races_json = json.dumps([
+        {'name': r['name'], 'date': r['date'], 'priority': r.get('priority', 'B'), 'distance_key': r['distance_key']}
+        for r in PLANNED_RACES_DASH
+    ])
+    
     html = f'''<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -2104,7 +2110,7 @@ def generate_html(stats, rf_data, volume_data, ctl_atl_data, ctl_atl_lookup, rfl
 </head>
 <body>
 <script>Chart.defaults.color="#8b90a0";Chart.defaults.borderColor="rgba(255,255,255,0.04)";Chart.defaults.font.family="'DM Sans',sans-serif";Chart.defaults.plugins.legend.labels.padding=10;
-const PLANNED_RACES = {json.dumps([{{'name': r['name'], 'date': r['date'], 'priority': r.get('priority', 'B'), 'distance_key': r['distance_key']}} for r in PLANNED_RACES_DASH])};
+const PLANNED_RACES = {_planned_races_json};
 function raceAnnotations(dates) {{
     const pColors = {{'A': '#f87171', 'B': '#fbbf24', 'C': '#555'}};
     const pDash = {{'A': [], 'B': [6,3], 'C': [3,3]}};
