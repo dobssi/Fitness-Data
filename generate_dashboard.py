@@ -166,15 +166,14 @@ def load_and_process_data():
         # Phase 2: GAP and Sim predictions for dashboard mode toggle
         for mode in ('gap', 'sim'):
             mode_preds = {}
-            for dist, col in [('5k', f'pred_5k_s_{mode}'), ('10k', f'pred_10k_s_{mode}'),
-                               ('Half Marathon', f'pred_hm_s_{mode}'), ('Marathon', f'pred_marathon_s_{mode}')]:
+            for dist, col, raw_key in [('5k', f'pred_5k_s_{mode}', '5k_raw'),
+                                       ('10k', f'pred_10k_s_{mode}', '10k_raw'),
+                                       ('Half Marathon', f'pred_hm_s_{mode}', 'hm_raw'),
+                                       ('Marathon', f'pred_marathon_s_{mode}', 'marathon_raw')]:
                 val = latest.get(col)
                 if pd.notna(val):
                     mode_preds[dist] = format_seconds(val)
-                    if dist == '5k':
-                        mode_preds['5k_raw'] = int(val)
-                    elif dist == 'Half Marathon':
-                        mode_preds['hm_raw'] = int(val)
+                    mode_preds[raw_key] = int(val)
             race_predictions[f'_mode_{mode}'] = mode_preds
             
             cp_mode = latest.get(f'CP_{mode}')
@@ -2713,7 +2712,9 @@ function raceAnnotations(dates) {{
                 predHm: '{format_race_time(stats["race_predictions"].get("Half Marathon", "-"))}',
                 predMara: '{format_race_time(stats["race_predictions"].get("Marathon", "-"))}',
                 pred5k_s: {stats["race_predictions"].get("5k_raw", 0)},
-                predHm_s: {stats["race_predictions"].get("hm_raw", 0)} }},
+                pred10k_s: {stats["race_predictions"].get("10k_raw", 0)},
+                predHm_s: {stats["race_predictions"].get("hm_raw", 0)},
+                predMara_s: {stats["race_predictions"].get("marathon_raw", 0)} }},
             gap: {{ rfl: '{stats.get("latest_rfl_gap", "-")}', ag: '{stats["race_predictions"].get("_ag_gap") or "-"}',
                 cp: {round(PEAK_CP_WATTS_DASH * float(stats.get("latest_rfl_gap", 0)) / 100) if stats.get("latest_rfl_gap", "-") != "-" else 0},
                 pred5k: '{format_race_time(stats["race_predictions"].get("_mode_gap", dict()).get("5k", "-"))}',
@@ -2721,7 +2722,9 @@ function raceAnnotations(dates) {{
                 predHm: '{format_race_time(stats["race_predictions"].get("_mode_gap", dict()).get("Half Marathon", "-"))}',
                 predMara: '{format_race_time(stats["race_predictions"].get("_mode_gap", dict()).get("Marathon", "-"))}',
                 pred5k_s: {stats["race_predictions"].get("_mode_gap", dict()).get("5k_raw", 0)},
-                predHm_s: {stats["race_predictions"].get("_mode_gap", dict()).get("hm_raw", 0)} }},
+                pred10k_s: {stats["race_predictions"].get("_mode_gap", dict()).get("10k_raw", 0)},
+                predHm_s: {stats["race_predictions"].get("_mode_gap", dict()).get("hm_raw", 0)},
+                predMara_s: {stats["race_predictions"].get("_mode_gap", dict()).get("marathon_raw", 0)} }},
             sim: {{ rfl: '{stats.get("latest_rfl_sim", "-")}', ag: '{stats["race_predictions"].get("_ag_sim") or "-"}',
                 cp: {round(PEAK_CP_WATTS_DASH * float(stats.get("latest_rfl_sim", 0)) / 100) if stats.get("latest_rfl_sim", "-") != "-" else 0},
                 pred5k: '{format_race_time(stats["race_predictions"].get("_mode_sim", dict()).get("5k", "-"))}',
@@ -2729,7 +2732,9 @@ function raceAnnotations(dates) {{
                 predHm: '{format_race_time(stats["race_predictions"].get("_mode_sim", dict()).get("Half Marathon", "-"))}',
                 predMara: '{format_race_time(stats["race_predictions"].get("_mode_sim", dict()).get("Marathon", "-"))}',
                 pred5k_s: {stats["race_predictions"].get("_mode_sim", dict()).get("5k_raw", 0)},
-                predHm_s: {stats["race_predictions"].get("_mode_sim", dict()).get("hm_raw", 0)} }}
+                pred10k_s: {stats["race_predictions"].get("_mode_sim", dict()).get("10k_raw", 0)},
+                predHm_s: {stats["race_predictions"].get("_mode_sim", dict()).get("hm_raw", 0)},
+                predMara_s: {stats["race_predictions"].get("_mode_sim", dict()).get("marathon_raw", 0)} }}
         }};
         
         // v51: Generate per-point colours (red for races, blue for training)
@@ -3720,7 +3725,10 @@ function raceAnnotations(dates) {{
         // Update race readiness cards (predicted time, target power/pace)
         const _surfF = {{'indoor_track':{{pw:1.0,re:1.04}},'track':{{pw:1.0,re:1.02}},'road':{{pw:1.0,re:1.0}},'trail':{{pw:0.95,re:0.97}},'undulating_trail':{{pw:0.90,re:0.95}}}};
         const _pdA=[[3,1.07],[5,1.05],[10,1.00],[21.097,0.95],[42.195,0.90]];
-        function _roadCpF(d){{d=Math.max(d,1);const ld=Math.log(d);if(ld<=Math.log(_pdA[0][0]))return _pdA[0][1];if(ld>=Math.log(_pdA[_pdA.length-1][0]))return _pdA[_pdA.length-1][1];for(let i=0;i<_pdA.length-1;i++){{const l0=Math.log(_pdA[i][0]),l1=Math.log(_pdA[i+1][0]);if(ld>=l0&&ld<=l1){{const f=(ld-l0)/(l1-l0);return _pdA[i][1]+f*(_pdA[i+1][1]-_pdA[i][1]);}}}}return 1.0;}};        PLANNED_RACES.forEach((race, idx) => {{
+        function _roadCpF(d){{d=Math.max(d,1);const ld=Math.log(d);if(ld<=Math.log(_pdA[0][0]))return _pdA[0][1];if(ld>=Math.log(_pdA[_pdA.length-1][0]))return _pdA[_pdA.length-1][1];for(let i=0;i<_pdA.length-1;i++){{const l0=Math.log(_pdA[i][0]),l1=Math.log(_pdA[i+1][0]);if(ld>=l0&&ld<=l1){{const f=(ld-l0)/(l1-l0);return _pdA[i][1]+f*(_pdA[i+1][1]-_pdA[i][1]);}}}}return 1.0;}};
+        // Map distance_key to modeStats raw seconds keys
+        const _stepbKeyMap = {{'5K':'pred5k_s','10K':'pred10k_s','HM':'predHm_s','Mara':'predMara_s'}};
+        PLANNED_RACES.forEach((race, idx) => {{
             const dist = race.distance_km || 5.0;
             const sf = _surfF[race.surface||'road'] || _surfF.road;
             const factor = _roadCpF(dist) * sf.pw;
@@ -3729,10 +3737,18 @@ function raceAnnotations(dates) {{
             // Update power target
             const pwEl = document.getElementById('race-pw-' + idx);
             if (pwEl) pwEl.textContent = pw + 'W';
-            // Update predicted time using RE
-            const re = (ms.re_p90 || 0.914) * sf.re;
-            const speed = (pw / {ATHLETE_MASS_KG_DASH}) * re;
-            const t = speed > 0 ? Math.round(dist * 1000 / speed) : 0;
+            // For standard road distances, use StepB predictions (matches stats grid)
+            // For non-standard distances or non-road surfaces, use continuous model
+            const stepbKey = _stepbKeyMap[race.distance_key];
+            const stepbSecs = (stepbKey && (race.surface||'road')==='road') ? ms[stepbKey] : 0;
+            let t;
+            if (stepbSecs && stepbSecs > 0) {{
+                t = stepbSecs;
+            }} else {{
+                const re = (ZONE_RE || 0.914) * sf.re;
+                const speed = (pw / {ATHLETE_MASS_KG_DASH}) * re;
+                t = speed > 0 ? Math.round(dist * 1000 / speed) : 0;
+            }}
             const predEl = document.getElementById('race-pred-' + idx);
             if (predEl && t > 0) {{
                 const hrs = Math.floor(t / 3600);
