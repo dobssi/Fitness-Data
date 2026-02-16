@@ -1239,18 +1239,19 @@ def get_zone_data(df):
     else:
         re_p90 = 0.92
     
-    # Zone boundaries — 5-zone model anchored to Lactate Threshold
-    # LT power derived from CP via Riegel: LT = CP × (40/60)^(1/1.06 - 1) ≈ 0.956 × CP
-    LT_POWER = round(current_cp * 0.956)
-    RF_THR = current_cp / LTHR_DASH
-    # HR zones (5): Z1 Easy, Z2 Aerobic, Z3 Tempo (up to LT), Z4 Threshold, Z5 Max
-    hr_bounds = [0, 140, 157, 178, 184, 9999]
+    # Zone boundaries — 5-zone model, RF×HR anchored
+    # Power zones derived from RF ratio (CP/LTHR) × HR boundary
+    # This ensures HR and power zones correspond to the same physiological intensity
+    RF_THR = current_cp / LTHR_DASH  # RF at lactate threshold
+    # HR zones (5): Z1 Easy, Z2 Aerobic, Z3 Tempo, Z4 Threshold, Z5 Max
+    hr_bounds = [0, 140, 155, 169, 178, 9999]
     hr_znames = ['Z1', 'Z2', 'Z3', 'Z4', 'Z5']
-    # Power zones (5): LT-anchored
-    pw_z12 = round(LT_POWER * 0.75)  # ~240W
-    pw_z23 = round(LT_POWER * 0.88)  # ~282W
-    pw_z45 = round(current_cp * 1.07)  # ~358W — above 5K effort
-    pw_bounds = [0, pw_z12, pw_z23, LT_POWER, pw_z45, 9999]
+    # Power zones (5): RF×HR anchored — boundaries shift with fitness
+    pw_z12 = round(RF_THR * 140)
+    pw_z23 = round(RF_THR * 155)
+    pw_z34 = round(RF_THR * 169)
+    pw_z45 = round(RF_THR * 178)  # = current_cp by definition
+    pw_bounds = [0, pw_z12, pw_z23, pw_z34, pw_z45, 9999]
     pw_znames = ['Z1', 'Z2', 'Z3', 'Z4', 'Z5']
     # Race power zones: contiguous midpoint bands
     m_pw = current_cp * 0.90
@@ -1456,14 +1457,15 @@ def _generate_zone_html(zone_data, stats=None):
     zone_names = ['Z1', 'Z2', 'Z3', 'Z4', 'Z5']
     zone_labels = ['Easy', 'Aerobic', 'Tempo', 'Threshold', 'Max']
     zone_colors = ['#3b82f6', '#22c55e', '#eab308', '#f97316', '#ef4444']
-    # Power zones: LT-anchored
-    lt_pw = round(cp * 0.956)
-    pw_z12 = round(lt_pw * 0.75)
-    pw_z23 = round(lt_pw * 0.88)
-    pw_z45 = round(cp * 1.07)
-    hr_ranges =   ['<140',      '140–157',      '157–178',      '178–184',      '>184']
-    pw_strs =     [f'<{pw_z12}', f'{pw_z12}–{pw_z23}', f'{pw_z23}–{lt_pw}', f'{lt_pw}–{pw_z45}', f'>{pw_z45}']
-    pct_strs =    [f'<{round(pw_z12/cp*100)}', f'{round(pw_z12/cp*100)}–{round(pw_z23/cp*100)}', f'{round(pw_z23/cp*100)}–{round(lt_pw/cp*100)}', f'{round(lt_pw/cp*100)}–{round(pw_z45/cp*100)}', f'>{round(pw_z45/cp*100)}']
+    # Power zones: RF×HR anchored
+    rf_thr = cp / LTHR_DASH
+    pw_z12 = round(rf_thr * 140)
+    pw_z23 = round(rf_thr * 155)
+    pw_z34 = round(rf_thr * 169)
+    pw_z45 = cp  # RF×178 = CP by definition
+    hr_ranges =   ['<140',      '140–155',      '155–169',      '169–178',      '>178']
+    pw_strs =     [f'<{pw_z12}', f'{pw_z12}–{pw_z23}', f'{pw_z23}–{pw_z34}', f'{pw_z34}–{pw_z45}', f'>{pw_z45}']
+    pct_strs =    [f'<{round(pw_z12/cp*100)}', f'{round(pw_z12/cp*100)}–{round(pw_z23/cp*100)}', f'{round(pw_z23/cp*100)}–{round(pw_z34/cp*100)}', f'{round(pw_z34/cp*100)}–{round(pw_z45/cp*100)}', f'>{round(pw_z45/cp*100)}']
     effort_hints = ['', 'easy–Mara', 'Mara–10K', '10K–5K', '>5K']
     combined_rows = ''
     for i in range(5):
@@ -1612,7 +1614,7 @@ def _generate_zone_html(zone_data, stats=None):
     
     return f'''
     <div class="card" id="zone-table-card">
-        <h2>Training Zones <span class="badge" id="zone-badge">LT {lt_pw}W · CP {cp}W · LTHR {LTHR_DASH} · Max ~{MAX_HR_DASH}</span></h2>
+        <h2>Training Zones <span class="badge" id="zone-badge">CP {cp}W · LTHR {LTHR_DASH} · Max ~{MAX_HR_DASH}</span></h2>
         <table class="zt"><thead><tr><th>Zone</th><th></th><th>HR</th><th class="power-only">Power</th><th class="power-only pct-col">%CP</th></tr></thead><tbody>{combined_rows}</tbody></table>
     </div>
 
@@ -1662,20 +1664,21 @@ def _generate_zone_html(zone_data, stats=None):
     const ZONE_CP={cp};const ZONE_PEAK_CP={PEAK_CP_WATTS_DASH};const ZONE_MASS={ATHLETE_MASS_KG_DASH};const ZONE_RE={re_p90};const ZONE_LTHR={LTHR_DASH};const ZONE_MAXHR={MAX_HR_DASH};
     const HR_Z=[
       {{id:'Z1',name:'Easy',lo:0,hi:140,c:'#3b82f6'}},
-      {{id:'Z2',name:'Aerobic',lo:140,hi:157,c:'#22c55e'}},
-      {{id:'Z3',name:'Tempo',lo:157,hi:178,c:'#eab308'}},
-      {{id:'Z4',name:'Threshold',lo:178,hi:184,c:'#f97316'}},
-      {{id:'Z5',name:'Max',lo:184,hi:9999,c:'#ef4444'}}
+      {{id:'Z2',name:'Aerobic',lo:140,hi:155,c:'#22c55e'}},
+      {{id:'Z3',name:'Tempo',lo:155,hi:169,c:'#eab308'}},
+      {{id:'Z4',name:'Threshold',lo:169,hi:178,c:'#f97316'}},
+      {{id:'Z5',name:'Max',lo:178,hi:9999,c:'#ef4444'}}
     ];
-    const LT_PW=Math.round(ZONE_CP*0.956);
-    const PW_Z12=Math.round(LT_PW*0.75);
-    const PW_Z23=Math.round(LT_PW*0.88);
-    const PW_Z45=Math.round(ZONE_CP*1.07);
+    const RF_THR=ZONE_CP/ZONE_LTHR;
+    const PW_Z12=Math.round(RF_THR*140);
+    const PW_Z23=Math.round(RF_THR*155);
+    const PW_Z34=Math.round(RF_THR*169);
+    const PW_Z45=ZONE_CP;
     const PW_Z=[
       {{id:'Z1',name:'Easy',lo:0,hi:PW_Z12,c:'#3b82f6'}},
       {{id:'Z2',name:'Aerobic',lo:PW_Z12,hi:PW_Z23,c:'#22c55e'}},
-      {{id:'Z3',name:'Tempo',lo:PW_Z23,hi:LT_PW,c:'#eab308'}},
-      {{id:'Z4',name:'Threshold',lo:LT_PW,hi:PW_Z45,c:'#f97316'}},
+      {{id:'Z3',name:'Tempo',lo:PW_Z23,hi:PW_Z34,c:'#eab308'}},
+      {{id:'Z4',name:'Threshold',lo:PW_Z34,hi:PW_Z45,c:'#f97316'}},
       {{id:'Z5',name:'Max',lo:PW_Z45,hi:9999,c:'#ef4444'}}
     ];
     const RACE_CFG={{}};
@@ -3737,8 +3740,7 @@ function raceAnnotations(dates) {{
                 zb.textContent = 'LTHR ' + ZONE_LTHR + ' · Max ~' + ZONE_MAXHR;
             }} else {{
                 const modeCP = mode === 'sim' ? Math.round(ZONE_PEAK_CP * parseFloat(modeStats.sim.rfl) / 100) : ZONE_CP;
-                const modeLT = Math.round(modeCP * 0.956);
-                zb.textContent = 'LT ' + modeLT + 'W · CP ' + modeCP + 'W · LTHR ' + ZONE_LTHR + ' · Max ~' + ZONE_MAXHR;
+                zb.textContent = 'CP ' + modeCP + 'W · LTHR ' + ZONE_LTHR + ' · Max ~' + ZONE_MAXHR;
             }}
         }}
         
