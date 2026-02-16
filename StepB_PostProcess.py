@@ -9,7 +9,7 @@
 #   - Easy_RFL_Gap: normalised Easy_RF_EMA minus RFL_Trend (divergence metric)
 #   - Alert system (console output): Alert 1 (CTL up/RFL down), Alert 1b
 #     (taper quality), Alert 2 (deep TSB), Alert 3b (easy outlier),
-#     Alert 5 (easy RF divergence). All thresholds in config.py.
+#     Alert 3b (easy run outlier). All thresholds in config.py.
 #
 # Changelist v50 (2026-02-06):
 #   - Fast cache index: uses _cache_index.json via build_cache_index_fast()
@@ -303,7 +303,7 @@ try:
                         ALERT1_RFL_DROP, ALERT1_CTL_RISE, ALERT1_WINDOW_DAYS,
                         ALERT1B_RFL_GAP, ALERT1B_PEAK_WINDOW_DAYS, ALERT1B_RACE_WINDOW_DAYS,
                         ALERT2_TSB_THRESHOLD, ALERT2_COUNT, ALERT2_WINDOW,
-                        ALERT3B_Z_THRESHOLD, ALERT5_GAP_THRESHOLD,
+                        ALERT3B_Z_THRESHOLD,
                         # Phase 2: GAP mode
                         GAP_RE_CONSTANT)
 except ImportError:
@@ -340,7 +340,6 @@ except ImportError:
     ALERT2_COUNT = 3
     ALERT2_WINDOW = 5
     ALERT3B_Z_THRESHOLD = -2.0
-    ALERT5_GAP_THRESHOLD = -0.03
     GAP_RE_CONSTANT = 0.92
 
 RF_CONSTANTS = {
@@ -1193,13 +1192,12 @@ def calc_alert_columns(df: pd.DataFrame) -> pd.DataFrame:
       Bit 1 (2)  - Alert 1b: Taper not working (RFL below 90-day peak near race)
       Bit 2 (4)  - Alert 2:  Sustained deep-negative TSB (3 of last 5 runs < -15)
       Bit 3 (8)  - Alert 3b: Easy run outlier (z < -2.0 on this easy run)
-      Bit 4 (16) - Alert 5:  Easy RF / RFL_Trend gap < -3%
     
     Output columns per mode suffix ('', '_gap', '_sim'):
-      Alert_Mask{suffix}  - int bitmask (0-31)
+      Alert_Mask{suffix}  - int bitmask (0-15)
       Alert_Text{suffix}  - human-readable summary
     
-    Also writes legacy bool columns (Alert_1..Alert_5) from the Stryd mask
+    Also writes legacy bool columns (Alert_1..Alert_3b) from the Stryd mask
     for backward compatibility with any code that reads them.
     """
     print("\n=== Calculating alert columns (bitmask, 3 modes) ===")
@@ -1230,14 +1228,14 @@ def calc_alert_columns(df: pd.DataFrame) -> pd.DataFrame:
             if np.sum(window_deep) >= ALERT2_COUNT:
                 a2_flags[i] = True
     
-    # Mode definitions: (suffix, rfl_col, ez_z_col, ez_gap_col, ez_ema_col)
+    # Mode definitions: (suffix, rfl_col, ez_z_col)
     modes = [
-        ('',     'RFL_Trend',     'Easy_RF_z',     'Easy_RFL_Gap',     'Easy_RF_EMA'),
-        ('_gap', 'RFL_gap_Trend', 'Easy_RF_z_gap', 'Easy_RFL_Gap_gap', 'Easy_RF_EMA_gap'),
-        ('_sim', 'RFL_sim_Trend', 'Easy_RF_z_sim', 'Easy_RFL_Gap_sim', 'Easy_RF_EMA_sim'),
+        ('',     'RFL_Trend',     'Easy_RF_z'),
+        ('_gap', 'RFL_gap_Trend', 'Easy_RF_z_gap'),
+        ('_sim', 'RFL_sim_Trend', 'Easy_RF_z_sim'),
     ]
     
-    for suffix, rfl_col, ez_z_col, ez_gap_col, ez_ema_col in modes:
+    for suffix, rfl_col, ez_z_col in modes:
         mask_col = f'Alert_Mask{suffix}'
         text_col = f'Alert_Text{suffix}'
         df[mask_col] = 0
@@ -1245,11 +1243,6 @@ def calc_alert_columns(df: pd.DataFrame) -> pd.DataFrame:
         
         rfl = pd.to_numeric(df.get(rfl_col), errors='coerce').values if rfl_col in df.columns else np.full(n, np.nan)
         ez_z = pd.to_numeric(df.get(ez_z_col), errors='coerce').values if ez_z_col in df.columns else np.full(n, np.nan)
-        ez_gap = pd.to_numeric(df.get(ez_gap_col), errors='coerce').values if ez_gap_col in df.columns else np.full(n, np.nan)
-        ez_ema = pd.to_numeric(df.get(ez_ema_col), errors='coerce').values if ez_ema_col in df.columns else np.full(n, np.nan)
-        
-        # Pre-compute easy run indices for Alert 5 slope check
-        easy_indices = np.where(np.isfinite(ez_z))[0]
         
         race_flags = df.get('race_flag', pd.Series(dtype='float64')).values if 'race_flag' in df.columns else np.zeros(n)
         dist_km = df.get('distance_km', pd.Series(dtype='float64')).values if 'distance_km' in df.columns else np.zeros(n)
@@ -1257,7 +1250,7 @@ def calc_alert_columns(df: pd.DataFrame) -> pd.DataFrame:
         mask_idx = df.columns.get_loc(mask_col)
         text_idx = df.columns.get_loc(text_col)
         
-        a_counts = [0, 0, 0, 0, 0]  # per bit
+        a_counts = [0, 0, 0, 0]  # per bit (0-3)
         
         for i in range(n):
             bits = 0
@@ -1325,23 +1318,6 @@ def calc_alert_columns(df: pd.DataFrame) -> pd.DataFrame:
                 parts.append(f"Easy run outlier (z={ez_z[i]:.1f})")
                 a_counts[3] += 1
             
-            # Bit 4 (16): Alert 5 — Easy RF divergence (only on easy runs, EMA not recovering)
-            if np.isfinite(ez_gap[i]) and ez_gap[i] < ALERT5_GAP_THRESHOLD and np.isfinite(ez_z[i]):
-                # Only fire if Easy RF EMA is not rising vs previous easy run
-                pos = np.searchsorted(easy_indices, i)
-                fire = False
-                if pos >= 2 and np.isfinite(ez_ema[i]):
-                    prev_ema = ez_ema[easy_indices[pos - 1]]
-                    prev2_ema = ez_ema[easy_indices[pos - 2]]
-                    # Fire if EMA dropped from both of the last 2 easy runs
-                    if np.isfinite(prev_ema) and np.isfinite(prev2_ema):
-                        if ez_ema[i] <= prev_ema and prev_ema <= prev2_ema:
-                            fire = True
-                if fire:
-                    bits |= 16
-                    parts.append(f"Easy RF divergence ({ez_gap[i]*100:.1f}%)")
-                    a_counts[4] += 1
-            
             if bits:
                 df.iat[i, mask_idx] = int(bits)
                 df.iat[i, text_idx] = ' | '.join(parts)
@@ -1349,7 +1325,7 @@ def calc_alert_columns(df: pd.DataFrame) -> pd.DataFrame:
         mode_label = suffix.replace('_', '').upper() if suffix else 'Stryd'
         total = sum(1 for i in range(n) if df.iat[i, mask_idx] > 0)
         print(f"  {mode_label}: A1={a_counts[0]} A1b={a_counts[1]} A2={a_counts[2]} "
-              f"A3b={a_counts[3]} A5={a_counts[4]} | total={total} ({100*total/n:.1f}%)")
+              f"A3b={a_counts[3]} | total={total} ({100*total/n:.1f}%)")
     
     # Legacy bool columns from Stryd mask for backward compatibility
     mask_stryd = df['Alert_Mask'].values
@@ -1357,7 +1333,6 @@ def calc_alert_columns(df: pd.DataFrame) -> pd.DataFrame:
     df['Alert_1b'] = (mask_stryd & 2).astype(bool)
     df['Alert_2'] = (mask_stryd & 4).astype(bool)
     df['Alert_3b'] = (mask_stryd & 8).astype(bool)
-    df['Alert_5'] = (mask_stryd & 16).astype(bool)
     df['Alert_Text'] = df['Alert_Text']  # Already the Stryd text (suffix='')
     
     return df
@@ -1417,17 +1392,6 @@ def get_current_alerts(df: pd.DataFrame) -> list:
                 'icon': '(!)',
                 'message': f"Last easy run z={z:.1f} vs baseline.",
             })
-    
-    if latest.get('Alert_5', False):
-        gap = latest.get('Easy_RFL_Gap', np.nan)
-        rfl_t = latest.get('RFL_Trend', np.nan)
-        alerts.append({
-            'alert': 'Alert 5: Easy RF divergence',
-            'level': 'concern',
-            'icon': '!!',
-            'message': (f"Easy RF {abs(gap)*100:.1f}% below RFL Trend ({rfl_t*100:.1f}%). "
-                        f"Early fatigue signal."),
-        })
     
     return alerts
 
@@ -4900,7 +4864,7 @@ def main() -> int:
         # v51: Easy RF metrics and alerts
         "Easy_RF_EMA", "Easy_RF_z", "RFL_Trend_Delta", "Easy_RFL_Gap",
         "Alert_Mask", "Alert_Text",
-        "Alert_1", "Alert_1b", "Alert_2", "Alert_3b", "Alert_5",
+        "Alert_1", "Alert_1b", "Alert_2", "Alert_3b",
         "parkrun", "surface",
         # Phase 2: GAP RF parallel columns
         "RF_gap_median", "RF_gap_adj", "RF_gap_Trend", "RFL_gap", "RFL_gap_Trend", "PS_gap",

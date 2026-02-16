@@ -774,7 +774,6 @@ def get_alert_data(df):
         1: {'name': 'Taper not working', 'level': 'concern', 'icon': '⚠️'},
         2: {'name': 'Deep fatigue', 'level': 'watch', 'icon': '👀'},
         3: {'name': 'Easy run outlier', 'level': 'watch', 'icon': '👀'},
-        4: {'name': 'Easy RF divergence', 'level': 'concern', 'icon': '⚠️'},
     }
     
     result = {'stryd': [], 'gap': [], 'sim': []}
@@ -785,19 +784,19 @@ def get_alert_data(df):
     latest = df.iloc[-1]
     
     mode_configs = [
-        ('stryd', '', 'RFL_Trend', 'Easy_RF_z', 'Easy_RFL_Gap'),
-        ('gap', '_gap', 'RFL_gap_Trend', 'Easy_RF_z_gap', 'Easy_RFL_Gap_gap'),
-        ('sim', '_sim', 'RFL_sim_Trend', 'Easy_RF_z_sim', 'Easy_RFL_Gap_sim'),
+        ('stryd', '', 'RFL_Trend', 'Easy_RF_z'),
+        ('gap', '_gap', 'RFL_gap_Trend', 'Easy_RF_z_gap'),
+        ('sim', '_sim', 'RFL_sim_Trend', 'Easy_RF_z_sim'),
     ]
     
-    for mode_name, suffix, rfl_col, ez_z_col, ez_gap_col in mode_configs:
+    for mode_name, suffix, rfl_col, ez_z_col in mode_configs:
         mask_col = f'Alert_Mask{suffix}'
         mask = int(latest.get(mask_col, 0)) if mask_col in df.columns else 0
         if not mask:
             continue
         
         alerts = []
-        for bit in range(5):
+        for bit in range(4):
             if not (mask & (1 << bit)):
                 continue
             defn = ALERT_DEFS[bit]
@@ -819,8 +818,6 @@ def get_alert_data(df):
                 detail = f" (TSB {latest['TSB']:.0f})"
             elif bit == 3 and pd.notna(latest.get(ez_z_col)):  # Alert 3b: z-score
                 detail = f" (z={latest[ez_z_col]:.1f})"
-            elif bit == 4 and pd.notna(latest.get(ez_gap_col)):  # Alert 5: gap
-                detail = f" (gap {latest[ez_gap_col]*100:.1f}%)"
             alerts.append({
                 'name': defn['name'],
                 'level': defn['level'],
