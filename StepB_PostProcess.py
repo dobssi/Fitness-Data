@@ -69,7 +69,7 @@
 #       - Previously applied 100% heat adjustment to all runs
 #     * Power Score heat adjustment scales with full run duration
 #       - Full effect at 90 mins, capped at 150%
-#       - Formula: ps_heat_adj = 1 + (Temp_Adj - 1) * min(1.5, duration/90min)
+#       - Formula: ps_temp_adj = 1 + (Temp_Adj - 1) * min(1.5, duration/90min)
 #     * Temp_Adj column still stores full value (for diagnostics/Power Score)
 #   - Power Score now uses distance (not time) for Riegel factor
 #     * Prevents slower finishers getting undeserved boost at same distance
@@ -351,6 +351,8 @@ RF_CONSTANTS = {
     'temp_baseline': 10,  # °C - no adjustment below this
     'temp_factor_1': 0.003,  # Penalty per °C (10-20°C range)
     'temp_factor_2': 0.01,  # Penalty per °C (above 20°C)
+    'temp_cold_threshold': 5,  # °C below which cold penalty applies
+    'temp_cold_factor': 0.0015,  # Penalty per °C below cold threshold (~half of mild heat)
     'temp_extreme_threshold': 25,  # °C above which quadratic term kicks in
     'temp_extreme_k': 0.0015,  # Quadratic coefficient: k × (temp - threshold)²
     'min_acclimatized_temp': 16,
@@ -586,7 +588,12 @@ def load_era_adjusters(csv_path: str) -> dict:
 def calc_temp_adj(temp_c: float, humidity_pct: float, acclimatized_temp: float = None) -> float:
     """
     Calculate temperature/humidity adjustment factor.
-    Returns multiplier > 1.0 for hot/humid conditions.
+    Returns multiplier > 1.0 for hot/humid OR cold conditions (U-shaped).
+    
+    Cold (<5°C): vasoconstriction, muscle stiffness, increased air density.
+    Penalty ~half the rate of mild heat, matching asymmetric research.
+    Neutral (5°C to base_temp): no penalty.
+    Hot (>base_temp): progressive heat penalty with humidity and extreme terms.
     """
     if not RF_CONSTANTS['temp_adj_enabled']:
         return 1.0
@@ -601,7 +608,11 @@ def calc_temp_adj(temp_c: float, humidity_pct: float, acclimatized_temp: float =
     # min_acclimatized_temp is 16 in BFW
     base_temp = max(acclimatized_temp, RF_CONSTANTS['min_acclimatized_temp'])
     
-    # Temperature penalty
+    # Cold penalty: below cold_threshold (5°C)
+    cold_thr = RF_CONSTANTS['temp_cold_threshold']
+    cold_penalty = max(0, (cold_thr - temp_c)) * RF_CONSTANTS['temp_cold_factor']
+    
+    # Heat penalty: above base_temp
     if temp_c <= base_temp:
         temp_penalty = 0.0
     elif base_temp >= 20:
@@ -627,7 +638,7 @@ def calc_temp_adj(temp_c: float, humidity_pct: float, acclimatized_temp: float =
     extreme_k = RF_CONSTANTS['temp_extreme_k']
     extreme_penalty = extreme_k * max(0, temp_c - extreme_thr) ** 2
     
-    return 1.0 + temp_penalty + humid_penalty + extreme_penalty
+    return 1.0 + cold_penalty + temp_penalty + humid_penalty + extreme_penalty
 
 
 def calc_terrain_adj(undulation_score: float) -> float:
@@ -4162,11 +4173,20 @@ def main() -> int:
             # v45: Duration-scaled heat adjustment for Power Score
             # Heat impact scales with duration: full effect at heat_reference_mins, capped at heat_max_multiplier
             # Short races (5K, 10K) get less heat adjustment than long races (HM, marathon)
+            # Cold penalty is NOT duration-scaled (vasoconstriction/stiffness are immediate, don't compound)
             heat_ref_s = RF_CONSTANTS['heat_reference_mins'] * 60.0
             ps_heat_multiplier = min(RF_CONSTANTS['heat_max_multiplier'], moving_time_s / heat_ref_s)
-            ps_heat_adj = 1.0 + (temp_adj - 1.0) * ps_heat_multiplier
+            cold_thr = RF_CONSTANTS['temp_cold_threshold']
+            run_temp = row.get('avg_temp_c', 10.0)
+            if run_temp is not None and np.isfinite(run_temp) and run_temp < cold_thr:
+                cold_part = max(0, (cold_thr - run_temp)) * RF_CONSTANTS['temp_cold_factor']
+                heat_part = 0.0
+            else:
+                cold_part = 0.0
+                heat_part = temp_adj - 1.0  # everything above 1.0 is heat+humidity+extreme
+            ps_temp_adj = 1.0 + cold_part + heat_part * ps_heat_multiplier
             
-            power_score = adj_power * distance_factor * ps_heat_adj
+            power_score = adj_power * distance_factor * ps_temp_adj
             dfm.at[i, 'Power_Score'] = power_score
             
             # Phase 2: GAP Power Score (same formula but using speed-based power, no era adj)
@@ -4176,7 +4196,7 @@ def main() -> int:
             _ps_rho = air_density_kg_m3(float(temp_adj), 1013.25, 0.6)  # approximate
             gap_avg_power += 0.5 * 0.24 * 1.225 * avg_speed_mps ** 3
             # No era adjustment (GAP is hardware-independent)
-            gap_power_score = gap_avg_power * distance_factor * ps_heat_adj
+            gap_power_score = gap_avg_power * distance_factor * ps_temp_adj
             dfm.at[i, 'PS_gap'] = gap_power_score
             
             # Phase 2: SIM Power Score (uses athlete-specific RE model)
@@ -4184,7 +4204,7 @@ def main() -> int:
             if pd.notna(sim_re) and sim_re > 0:
                 sim_avg_power = avg_speed_mps * float(args.mass_kg) / sim_re
                 sim_avg_power += 0.5 * 0.24 * 1.225 * avg_speed_mps ** 3
-                sim_power_score = sim_avg_power * distance_factor * ps_heat_adj
+                sim_power_score = sim_avg_power * distance_factor * ps_temp_adj
                 dfm.at[i, 'PS_sim'] = sim_power_score
         
         if pd.notna(rf_raw) and rf_raw > 0 and np.isfinite(total_adj):
