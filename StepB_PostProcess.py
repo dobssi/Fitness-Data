@@ -1223,14 +1223,14 @@ def calc_alert_columns(df: pd.DataFrame) -> pd.DataFrame:
             if np.sum(window_deep) >= ALERT2_COUNT:
                 a2_flags[i] = True
     
-    # Mode definitions: (suffix, rfl_col, ez_z_col, ez_gap_col)
+    # Mode definitions: (suffix, rfl_col, ez_z_col, ez_gap_col, ez_ema_col)
     modes = [
-        ('',     'RFL_Trend',     'Easy_RF_z',     'Easy_RFL_Gap'),
-        ('_gap', 'RFL_gap_Trend', 'Easy_RF_z_gap', 'Easy_RFL_Gap_gap'),
-        ('_sim', 'RFL_sim_Trend', 'Easy_RF_z_sim', 'Easy_RFL_Gap_sim'),
+        ('',     'RFL_Trend',     'Easy_RF_z',     'Easy_RFL_Gap',     'Easy_RF_EMA'),
+        ('_gap', 'RFL_gap_Trend', 'Easy_RF_z_gap', 'Easy_RFL_Gap_gap', 'Easy_RF_EMA_gap'),
+        ('_sim', 'RFL_sim_Trend', 'Easy_RF_z_sim', 'Easy_RFL_Gap_sim', 'Easy_RF_EMA_sim'),
     ]
     
-    for suffix, rfl_col, ez_z_col, ez_gap_col in modes:
+    for suffix, rfl_col, ez_z_col, ez_gap_col, ez_ema_col in modes:
         mask_col = f'Alert_Mask{suffix}'
         text_col = f'Alert_Text{suffix}'
         df[mask_col] = 0
@@ -1239,6 +1239,10 @@ def calc_alert_columns(df: pd.DataFrame) -> pd.DataFrame:
         rfl = pd.to_numeric(df.get(rfl_col), errors='coerce').values if rfl_col in df.columns else np.full(n, np.nan)
         ez_z = pd.to_numeric(df.get(ez_z_col), errors='coerce').values if ez_z_col in df.columns else np.full(n, np.nan)
         ez_gap = pd.to_numeric(df.get(ez_gap_col), errors='coerce').values if ez_gap_col in df.columns else np.full(n, np.nan)
+        ez_ema = pd.to_numeric(df.get(ez_ema_col), errors='coerce').values if ez_ema_col in df.columns else np.full(n, np.nan)
+        
+        # Pre-compute easy run indices for Alert 5 slope check
+        easy_indices = np.where(np.isfinite(ez_z))[0]
         
         race_flags = df.get('race_flag', pd.Series(dtype='float64')).values if 'race_flag' in df.columns else np.zeros(n)
         dist_km = df.get('distance_km', pd.Series(dtype='float64')).values if 'distance_km' in df.columns else np.zeros(n)
@@ -1314,11 +1318,19 @@ def calc_alert_columns(df: pd.DataFrame) -> pd.DataFrame:
                 parts.append(f"Easy run outlier (z={ez_z[i]:.1f})")
                 a_counts[3] += 1
             
-            # Bit 4 (16): Alert 5 — Easy RF divergence
-            if np.isfinite(ez_gap[i]) and ez_gap[i] < ALERT5_GAP_THRESHOLD:
-                bits |= 16
-                parts.append(f"Easy RF divergence ({ez_gap[i]*100:.1f}%)")
-                a_counts[4] += 1
+            # Bit 4 (16): Alert 5 — Easy RF divergence (only on easy runs, EMA declining)
+            if np.isfinite(ez_gap[i]) and ez_gap[i] < ALERT5_GAP_THRESHOLD and np.isfinite(ez_z[i]):
+                # Only fire if Easy RF EMA is flat or declining over last 5 easy runs
+                ema_declining = False
+                pos = np.searchsorted(easy_indices, i)
+                if pos >= 5 and np.isfinite(ez_ema[i]):
+                    ema_5_ago = ez_ema[easy_indices[pos - 5]]
+                    if np.isfinite(ema_5_ago) and ez_ema[i] <= ema_5_ago:
+                        ema_declining = True
+                if ema_declining:
+                    bits |= 16
+                    parts.append(f"Easy RF divergence ({ez_gap[i]*100:.1f}%)")
+                    a_counts[4] += 1
             
             if bits:
                 df.iat[i, mask_idx] = int(bits)
