@@ -298,7 +298,7 @@ try:
                         TERRAIN_LINEAR_SLOPE, TERRAIN_LINEAR_CAP, TERRAIN_STRAVA_ELEV_MIN,
                         DURATION_PENALTY_DAMPING,
                         # v51: Easy RF & Alert parameters
-                        EASY_RF_HR_MIN, EASY_RF_NP_CP_MAX, EASY_RF_VI_MAX, EASY_RF_DIST_MIN_KM,
+                        EASY_RF_HR_MIN, EASY_RF_HR_MAX, EASY_RF_LTHR, EASY_RF_VI_MAX, EASY_RF_DIST_MIN_KM,
                         EASY_RF_EMA_SPAN, EASY_RF_Z_WINDOW,
                         ALERT1_RFL_DROP, ALERT1_CTL_RISE, ALERT1_WINDOW_DAYS,
                         ALERT1B_RFL_GAP, ALERT1B_PEAK_WINDOW_DAYS, ALERT1B_RACE_WINDOW_DAYS,
@@ -324,7 +324,8 @@ except ImportError:
     DURATION_PENALTY_DAMPING = 0.33
     # v51 fallbacks
     EASY_RF_HR_MIN = 120
-    EASY_RF_NP_CP_MAX = 0.85
+    EASY_RF_HR_MAX = 148       # Lower half of Z2 (Z2 = 140-155, midpoint = 148)
+    EASY_RF_LTHR = 178         # For deriving power boundary from HR boundary
     EASY_RF_VI_MAX = 1.10
     EASY_RF_DIST_MIN_KM = 4.0
     EASY_RF_EMA_SPAN = 15
@@ -1072,14 +1073,20 @@ def calc_easy_rf_metrics(df: pd.DataFrame) -> pd.DataFrame:
     
     # --- Easy run mask (v51: power-based ceiling replaces HR ceiling) ---
     # nPower < 85% CP captures genuine easy efforts even with elevated HR (post-illness, heat)
-    # VI cap (nPower/avg_power < 1.10) excludes interval sessions with low average power
-    # CP may not be populated yet, so derive from RFL_Trend * PEAK_CP_WATTS
+    # Easy run mask: HR <= lower half of Z2 OR nPower < same boundary in power terms
+    # OR logic: either condition sufficient — protects against warm-weather HR drift
+    # and against structured sessions with low avg power but high HR
     from config import PEAK_CP_WATTS as _peak_cp
     cp_series = df['RFL_Trend'] * _peak_cp
+    rf_thr_series = cp_series / EASY_RF_LTHR  # per-row RF at threshold
+    mid_z2_power = rf_thr_series * EASY_RF_HR_MAX  # power at HR ceiling
+    
+    hr_easy = (df['avg_hr'] >= EASY_RF_HR_MIN) & (df['avg_hr'] <= EASY_RF_HR_MAX)
+    has_power = df['npower_w'].notna() & (df['avg_power_w'] > 0) & (cp_series > 0)
+    power_easy = has_power & (df['npower_w'] < mid_z2_power) & ((df['npower_w'] / df['avg_power_w']) < EASY_RF_VI_MAX)
+    
     easy_mask = (
-        (df['npower_w'].notna()) & (df['avg_power_w'] > 0) & (cp_series > 0) &
-        (df['npower_w'] < cp_series * EASY_RF_NP_CP_MAX) &
-        ((df['npower_w'] / df['avg_power_w']) < EASY_RF_VI_MAX) &
+        (hr_easy | power_easy) &
         (df['avg_hr'] >= EASY_RF_HR_MIN) &
         (df['distance_km'] >= EASY_RF_DIST_MIN_KM) &
         (df['race_flag'] != 1) &
@@ -1318,16 +1325,19 @@ def calc_alert_columns(df: pd.DataFrame) -> pd.DataFrame:
                 parts.append(f"Easy run outlier (z={ez_z[i]:.1f})")
                 a_counts[3] += 1
             
-            # Bit 4 (16): Alert 5 — Easy RF divergence (only on easy runs, EMA declining)
+            # Bit 4 (16): Alert 5 — Easy RF divergence (only on easy runs, EMA not recovering)
             if np.isfinite(ez_gap[i]) and ez_gap[i] < ALERT5_GAP_THRESHOLD and np.isfinite(ez_z[i]):
-                # Only fire if Easy RF EMA is flat or declining over last 5 easy runs
-                ema_declining = False
+                # Only fire if Easy RF EMA is not rising vs previous easy run
                 pos = np.searchsorted(easy_indices, i)
-                if pos >= 5 and np.isfinite(ez_ema[i]):
-                    ema_5_ago = ez_ema[easy_indices[pos - 5]]
-                    if np.isfinite(ema_5_ago) and ez_ema[i] <= ema_5_ago:
-                        ema_declining = True
-                if ema_declining:
+                fire = False
+                if pos >= 2 and np.isfinite(ez_ema[i]):
+                    prev_ema = ez_ema[easy_indices[pos - 1]]
+                    prev2_ema = ez_ema[easy_indices[pos - 2]]
+                    # Fire if EMA dropped from both of the last 2 easy runs
+                    if np.isfinite(prev_ema) and np.isfinite(prev2_ema):
+                        if ez_ema[i] <= prev_ema and prev_ema <= prev2_ema:
+                            fire = True
+                if fire:
                     bits |= 16
                     parts.append(f"Easy RF divergence ({ez_gap[i]*100:.1f}%)")
                     a_counts[4] += 1
