@@ -4015,14 +4015,20 @@ def main() -> int:
         # Calculate full Temp_Adj (stored for diagnostics and Power Score)
         temp_adj_full = calc_temp_adj(temp_c, humidity_pct, temp_trend)
         
-        # v45: Scale Temp_Adj for RF based on RF window duration
+        # v45: Scale heat portion of Temp_Adj for RF based on RF window duration
         # RF is measured early in the run, so heat hasn't fully accumulated yet
-        # Use same formula as Power Score: heat_mult = duration / reference_mins, but fixed at RF window
-        # Window midpoint = warmup_skip (10min) + half the window duration
+        # Cold penalty is NOT duration-scaled (vasoconstriction/stiffness are immediate)
         rf_window_mid_mins = (600.0 + RF_CONSTANTS['rf_window_duration_s'] / 2.0) / 60.0
         heat_ref_mins = RF_CONSTANTS['heat_reference_mins']
         rf_heat_multiplier = rf_window_mid_mins / heat_ref_mins
-        temp_adj_for_rf = 1.0 + (temp_adj_full - 1.0) * rf_heat_multiplier
+        cold_thr = RF_CONSTANTS['temp_cold_threshold']
+        if temp_c is not None and np.isfinite(temp_c) and temp_c < cold_thr:
+            cold_part_rf = max(0, (cold_thr - temp_c)) * RF_CONSTANTS['temp_cold_factor']
+            heat_part_rf = 0.0
+        else:
+            cold_part_rf = 0.0
+            heat_part_rf = temp_adj_full - 1.0  # everything above 1.0 is heat+humidity+extreme
+        temp_adj_for_rf = 1.0 + cold_part_rf + heat_part_rf * rf_heat_multiplier
         
         # v45: Use RF window terrain metrics (not whole run) for terrain_adj
         # Also gate by uphill/downhill ratio to exclude hill intervals
