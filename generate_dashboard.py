@@ -1172,20 +1172,13 @@ def get_age_grade_data(df):
 # ============================================================================
 # v51.7: ZONE & RACE CONFIGURATION
 # ============================================================================
-try:
-    from config import PEAK_CP_WATTS as _cfg_cp, ATHLETE_MASS_KG as _cfg_mass
-    from config import ATHLETE_LTHR as _cfg_lthr, ATHLETE_MAX_HR as _cfg_maxhr
-    from config import PLANNED_RACES as _cfg_races
-    PEAK_CP_WATTS_DASH = _cfg_cp
-    ATHLETE_MASS_KG_DASH = _cfg_mass
-    LTHR_DASH = _cfg_lthr
-    MAX_HR_DASH = _cfg_maxhr
-except ImportError:
-    PEAK_CP_WATTS_DASH = 370
-    ATHLETE_MASS_KG_DASH = 76.0
-    LTHR_DASH = 178
-    MAX_HR_DASH = 192
-    _cfg_races = None
+from config import PEAK_CP_WATTS as _cfg_cp, ATHLETE_MASS_KG as _cfg_mass
+from config import ATHLETE_LTHR as _cfg_lthr, ATHLETE_MAX_HR as _cfg_maxhr
+from config import PLANNED_RACES as _cfg_races
+PEAK_CP_WATTS_DASH = _cfg_cp
+ATHLETE_MASS_KG_DASH = _cfg_mass
+LTHR_DASH = _cfg_lthr
+MAX_HR_DASH = _cfg_maxhr
 
 RACE_POWER_FACTORS_DASH = {
     'Sub-5K': 1.07, '5K': 1.05, '10K': 1.00, 'HM': 0.95, 'Mara': 0.90,
@@ -2756,7 +2749,7 @@ function raceAnnotations(dates) {{
         // Phase 2: Mode data for stats switching
         const modeStats = {{
             stryd: {{ rfl: '{stats["latest_rfl"]}', ag: '{stats["age_grade"] or "-"}',
-                cp: {round(PEAK_CP_WATTS_DASH * float(stats["latest_rfl"]) / 100) if stats["latest_rfl"] != "-" else 0},
+                cp: {zone_data['current_cp'] if zone_data else (round(PEAK_CP_WATTS_DASH * float(stats["latest_rfl"]) / 100) if stats["latest_rfl"] != "-" else 0)},
                 pred5k: '{format_race_time(stats["race_predictions"].get("5k", "-"))}',
                 pred10k: '{format_race_time(stats["race_predictions"].get("10k", "-"))}',
                 predHm: '{format_race_time(stats["race_predictions"].get("Half Marathon", "-"))}',

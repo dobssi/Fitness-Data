@@ -53,8 +53,10 @@ class StrydConfig:
     
     @classmethod
     def from_dict(cls, d: Dict[str, Any]) -> StrydConfig:
+        if "peak_cp_watts" not in d:
+            raise ValueError("Stryd config requires 'peak_cp_watts' in athlete.yml")
         return cls(
-            peak_cp_watts=float(d.get("peak_cp_watts", 372)),
+            peak_cp_watts=float(d["peak_cp_watts"]),
             eras=d.get("eras", {}),
             mass_corrections=[StrydMassCorrection.from_dict(mc) for mc in d.get("mass_corrections", [])],
             re_reference_era=str(d.get("re_reference_era", "s4"))
@@ -213,9 +215,9 @@ class AthleteConfig:
     power: PowerConfig
     data: DataSourceConfig
     pipeline: PipelineConfig
-    timezone: str = "Europe/Stockholm"
-    lthr: int = 178
-    max_hr: int = 192
+    timezone: str = "UTC"
+    lthr: int = 0      # Required in YAML — no sensible generic default
+    max_hr: int = 0    # Required in YAML — no sensible generic default
     planned_races: List[PlannedRace] = field(default_factory=list)
     
     # Convenience properties
@@ -295,80 +297,42 @@ class AthleteConfig:
         raw_races = data.get("planned_races", [])
         planned_races = [PlannedRace.from_dict(r) for r in raw_races] if raw_races else []
         
+        # Validate required athlete fields
+        _required = {"mass_kg": "body mass in kg", "lthr": "lactate threshold HR", "max_hr": "maximum HR"}
+        for field_name, desc in _required.items():
+            if field_name not in athlete_data:
+                raise ValueError(f"athlete.yml requires '{field_name}' ({desc}) under 'athlete:'")
+        
         return cls(
             name=str(athlete_data.get("name", "Unknown")),
-            mass_kg=float(athlete_data.get("mass_kg", 76.0)),
+            mass_kg=float(athlete_data["mass_kg"]),
             date_of_birth=str(athlete_data.get("date_of_birth", "1970-01-01")),
             gender=str(athlete_data.get("gender", "male")),
             power=PowerConfig.from_dict(data.get("power", {})),
             data=DataSourceConfig.from_dict(data.get("data", {})),
             pipeline=PipelineConfig.from_dict(data.get("pipeline", {})),
-            timezone=str(athlete_data.get("timezone", "Europe/Stockholm")),
-            lthr=int(athlete_data.get("lthr", 178)),
-            max_hr=int(athlete_data.get("max_hr", 192)),
+            timezone=str(athlete_data.get("timezone", "UTC")),
+            lthr=int(athlete_data["lthr"]),
+            max_hr=int(athlete_data["max_hr"]),
             planned_races=planned_races,
-        )
-    
-    @classmethod
-    def load_v51_defaults(cls) -> AthleteConfig:
-        """
-        Load v51 hardcoded defaults for backward compatibility.
-        This returns Paul's configuration as it exists in v51 config.py.
-        """
-        return cls(
-            name="Paul",
-            mass_kg=76.0,
-            date_of_birth="1969-05-27",
-            gender="male",
-            power=PowerConfig(
-                mode="stryd",
-                stryd=StrydConfig(
-                    peak_cp_watts=372,
-                    eras={
-                        "pre_stryd": "1900-01-01",
-                        "v1": "2017-05-05",
-                        "repl": "2017-09-12",
-                        "air": "2019-09-07",
-                        "s4": "2023-01-03",
-                        "s5": "2025-12-17",
-                    },
-                    mass_corrections=[
-                        StrydMassCorrection("2017-07-08", "2017-09-10", 77.0),
-                        StrydMassCorrection("2017-09-11", "2019-09-06", 79.0),
-                    ],
-                    re_reference_era="s4"
-                ),
-                gap=None
-            ),
-            data=DataSourceConfig(
-                source="intervals",
-                intervals_athlete_id=os.getenv("INTERVALS_ATHLETE_ID"),
-                intervals_api_key=os.getenv("INTERVALS_API_KEY")
-            ),
-            pipeline=PipelineConfig(),
-            timezone="Europe/Stockholm",
-            lthr=178,
-            max_hr=192,
-            planned_races=[
-                PlannedRace("5K London", "2026-02-27", 5.0, "A", "road"),
-                PlannedRace("HM Stockholm", "2026-04-25", 21.097, "A", "road"),
-            ],
         )
 
 
 # Convenience function for backward compatibility
 def load_athlete_config(yaml_path: Optional[str] = None) -> AthleteConfig:
     """
-    Load athlete configuration.
+    Load athlete configuration from YAML file.
     
     Args:
-        yaml_path: Path to athlete.yml. If None, loads v51 defaults.
+        yaml_path: Path to athlete.yml. If None, raises error.
         
     Returns:
         AthleteConfig instance
     """
     if yaml_path is None:
-        return AthleteConfig.load_v51_defaults()
+        raise FileNotFoundError(
+            "No athlete.yml path provided. The pipeline requires an athlete.yml configuration file."
+        )
     return AthleteConfig.load(yaml_path)
 
 
@@ -379,7 +343,12 @@ if __name__ == "__main__":
     if len(sys.argv) > 1:
         config = AthleteConfig.load(sys.argv[1])
     else:
-        config = AthleteConfig.load_v51_defaults()
+        # Try default location
+        if Path("athlete.yml").exists():
+            config = AthleteConfig.load("athlete.yml")
+        else:
+            print("Usage: python athlete_config.py <path_to_athlete.yml>")
+            sys.exit(1)
     
     print(f"Athlete: {config.name}")
     print(f"Power mode: {config.power_mode}")

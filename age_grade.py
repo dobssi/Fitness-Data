@@ -18,10 +18,7 @@ import os
 from pathlib import Path
 
 # Import central config
-try:
-    from config import PEAK_CP_WATTS
-except ImportError:
-    PEAK_CP_WATTS = 370  # Fallback — must match config.py
+from config import PEAK_CP_WATTS, ATHLETE_MASS_KG
 
 # Load data files
 _DATA_DIR = Path(__file__).parent
@@ -387,7 +384,7 @@ def calc_age_grade_time(age_grade_pct: float, distance_km: float, age: int,
 
 
 def calc_race_prediction(rfl_trend: float, distance: str, re_p90: float, 
-                         peak_cp: float = PEAK_CP_WATTS, mass_kg: float = 76.0) -> float:
+                         peak_cp: float = None, mass_kg: float = None) -> float:
     """
     Calculate predicted race time from current fitness.
     
@@ -406,6 +403,10 @@ def calc_race_prediction(rfl_trend: float, distance: str, re_p90: float,
     So: time = distance / speed = distance / ((CP * factor / mass) * RE)
     """
     # Current CP based on fitness
+    if peak_cp is None:
+        peak_cp = PEAK_CP_WATTS
+    if mass_kg is None:
+        mass_kg = ATHLETE_MASS_KG
     current_cp = rfl_trend * peak_cp
     
     # Power for this distance

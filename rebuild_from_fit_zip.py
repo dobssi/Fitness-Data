@@ -513,7 +513,11 @@ class SkipFitFile(Exception):
     """Raised to skip non-running or otherwise unsupported FIT files."""
     pass
 
-WEIGHT_KG_DEFAULT = 76.0
+try:
+    from config import ATHLETE_MASS_KG as _CFG_MASS
+    WEIGHT_KG_DEFAULT = _CFG_MASS
+except (ImportError, FileNotFoundError):
+    WEIGHT_KG_DEFAULT = 76.0  # Only used if run standalone without config
 PWR_DEAD_WKG = 2.5
 SPD_DEAD_MS = 0.3
 

@@ -289,61 +289,24 @@ HR_CV_THRESHOLD = 12.0  # If power:HR ratio CV > this %, mark HR as unreliable a
 # ============================================================================
 
 # Import central config for shared constants
-try:
-    from config import (PEAK_CP_WATTS, POWER_SCORE_RIEGEL_K, POWER_SCORE_REFERENCE_DIST_KM,
-                        POWER_SCORE_RF_DIVISOR, POWER_SCORE_FACTOR_BOOST,
-                        POWER_SCORE_AIR_THRESHOLD, POWER_SCORE_AIR_EXCESS_FACTOR,
-                        CTL_TIME_CONSTANT, ATL_TIME_CONSTANT, RF_TREND_WINDOW,
-                        RF_WINDOW_DURATION_S,
-                        TERRAIN_LINEAR_SLOPE, TERRAIN_LINEAR_CAP, TERRAIN_STRAVA_ELEV_MIN,
-                        DURATION_PENALTY_DAMPING,
-                        # v51: Easy RF & Alert parameters
-                        EASY_RF_HR_MIN, EASY_RF_HR_MAX, EASY_RF_LTHR, EASY_RF_VI_MAX, EASY_RF_DIST_MIN_KM,
-                        EASY_RF_EMA_SPAN, EASY_RF_Z_WINDOW,
-                        ALERT1_RFL_DROP, ALERT1_CTL_RISE, ALERT1_WINDOW_DAYS,
-                        ALERT1B_RFL_GAP, ALERT1B_PEAK_WINDOW_DAYS, ALERT1B_RACE_WINDOW_DAYS,
-                        ALERT2_TSB_THRESHOLD, ALERT2_COUNT, ALERT2_WINDOW,
-                        ALERT3B_Z_THRESHOLD,
-                        # Phase 2: GAP mode
-                        GAP_RE_CONSTANT,
-                        # Athlete parameters
-                        ATHLETE_MAX_HR)
-except ImportError:
-    PEAK_CP_WATTS = 370  # Fallback — must match config.py
-    POWER_SCORE_RIEGEL_K = 0.08
-    POWER_SCORE_REFERENCE_DIST_KM = 5.0
-    POWER_SCORE_RF_DIVISOR = 184  # v51: raised from 180 to reduce PS floor bias (+0.7% excess)
-    POWER_SCORE_FACTOR_BOOST = 0.5
-    POWER_SCORE_AIR_THRESHOLD = 0.04
-    POWER_SCORE_AIR_EXCESS_FACTOR = 0.5
-    CTL_TIME_CONSTANT = 42
-    ATL_TIME_CONSTANT = 7
-    RF_TREND_WINDOW = 42
-    RF_WINDOW_DURATION_S = 2400.0
-    TERRAIN_LINEAR_SLOPE = 0.002
-    TERRAIN_LINEAR_CAP = 0.05
-    TERRAIN_STRAVA_ELEV_MIN = 8.0
-    DURATION_PENALTY_DAMPING = 0.33
-    # v51 fallbacks
-    EASY_RF_HR_MIN = 120
-    EASY_RF_HR_MAX = 148       # Lower half of Z2 (Z2 = 140-155, midpoint = 148)
-    EASY_RF_LTHR = 178         # For deriving power boundary from HR boundary
-    EASY_RF_VI_MAX = 1.10
-    EASY_RF_DIST_MIN_KM = 4.0
-    EASY_RF_EMA_SPAN = 15
-    EASY_RF_Z_WINDOW = 30
-    ALERT1_RFL_DROP = 0.02
-    ALERT1_CTL_RISE = 3.0
-    ALERT1_WINDOW_DAYS = 28
-    ALERT1B_RFL_GAP = 0.02
-    ALERT1B_PEAK_WINDOW_DAYS = 90
-    ALERT1B_RACE_WINDOW_DAYS = 7
-    ALERT2_TSB_THRESHOLD = -15
-    ALERT2_COUNT = 3
-    ALERT2_WINDOW = 5
-    ALERT3B_Z_THRESHOLD = -2.0
-    GAP_RE_CONSTANT = 0.92
-    ATHLETE_MAX_HR = 192
+from config import (PEAK_CP_WATTS, POWER_SCORE_RIEGEL_K, POWER_SCORE_REFERENCE_DIST_KM,
+                    POWER_SCORE_RF_DIVISOR, POWER_SCORE_FACTOR_BOOST,
+                    POWER_SCORE_AIR_THRESHOLD, POWER_SCORE_AIR_EXCESS_FACTOR,
+                    CTL_TIME_CONSTANT, ATL_TIME_CONSTANT, RF_TREND_WINDOW,
+                    RF_WINDOW_DURATION_S,
+                    TERRAIN_LINEAR_SLOPE, TERRAIN_LINEAR_CAP, TERRAIN_STRAVA_ELEV_MIN,
+                    DURATION_PENALTY_DAMPING,
+                    # v51: Easy RF & Alert parameters
+                    EASY_RF_HR_MIN, EASY_RF_HR_MAX, EASY_RF_LTHR, EASY_RF_VI_MAX, EASY_RF_DIST_MIN_KM,
+                    EASY_RF_EMA_SPAN, EASY_RF_Z_WINDOW,
+                    ALERT1_RFL_DROP, ALERT1_CTL_RISE, ALERT1_WINDOW_DAYS,
+                    ALERT1B_RFL_GAP, ALERT1B_PEAK_WINDOW_DAYS, ALERT1B_RACE_WINDOW_DAYS,
+                    ALERT2_TSB_THRESHOLD, ALERT2_COUNT, ALERT2_WINDOW,
+                    ALERT3B_Z_THRESHOLD,
+                    # Phase 2: GAP mode
+                    GAP_RE_CONSTANT,
+                    # Athlete parameters
+                    ATHLETE_MASS_KG, ATHLETE_LTHR, ATHLETE_MAX_HR)
 
 RF_CONSTANTS = {
     # Rolling periods
@@ -392,6 +355,7 @@ RF_CONSTANTS = {
     'peak_cp_watts': PEAK_CP_WATTS,  # From config.py
     'lthr': EASY_RF_LTHR,  # Lactate threshold HR (for bootstrap_peak_speed training fallback)
     'max_hr': ATHLETE_MAX_HR,  # Max HR (for bootstrap_peak_speed auto-detection threshold)
+    'gap_re_constant': GAP_RE_CONSTANT,  # Generic running economy for GAP mode
     
     # Duration adjustment (boost long efforts to compensate for cardiac drift)
     'duration_adj_enabled': True,
@@ -476,8 +440,8 @@ VALID_SURFACES = {'TRACK', 'INDOOR_TRACK', 'TRAIL', 'SNOW', 'HEAVY_SNOW'}
 # ============================================================================
 
 def bootstrap_peak_speed(df: pd.DataFrame, rfl_col: str = 'RFL_gap_Trend',
-                         mass_kg: float = 76.0, re_generic: float = 0.92,
-                         lthr: float = 178.0, max_hr: float = 192.0,
+                         mass_kg: float = None, re_generic: float = None,
+                         lthr: float = None, max_hr: float = None,
                          exclude_parkruns: bool = True) -> tuple:
     """
     Auto-calculate peak threshold speed from available data.
@@ -905,7 +869,7 @@ def calc_intensity_adj(avg_power: float, rfl_trend: float, undulation_score: flo
         return 1.0
     
     # Calculate current CP from peak CP and RFL_Trend
-    peak_cp = RF_CONSTANTS.get('peak_cp_watts', 370)
+    peak_cp = RF_CONSTANTS['peak_cp_watts']
     current_cp = peak_cp * rfl_trend
     
     if current_cp <= 0:
@@ -4833,9 +4797,9 @@ def main() -> int:
             # Bootstrap GAP peak_speed from race data
             gap_peak_speed, gap_peak_cp, gap_n_races, gap_method = bootstrap_peak_speed(
                 dfm, rfl_col='RFL_gap_Trend', mass_kg=mass_kg,
-                re_generic=RF_CONSTANTS.get('gap_re_constant', 0.92),
-                lthr=RF_CONSTANTS.get('lthr', 178.0),
-                max_hr=RF_CONSTANTS.get('max_hr', 192.0),
+                re_generic=RF_CONSTANTS['gap_re_constant'],
+                lthr=RF_CONSTANTS['lthr'],
+                max_hr=RF_CONSTANTS['max_hr'],
                 exclude_parkruns=True
             )
             if gap_peak_speed is not None:
@@ -4849,7 +4813,7 @@ def main() -> int:
             else:
                 # Fallback: use Stryd PEAK_CP (only if no race data AND no training data)
                 gap_peak_cp = PEAK_CP_WATTS
-                gap_peak_speed = PEAK_CP_WATTS * RF_CONSTANTS.get('gap_re_constant', 0.92) / mass_kg
+                gap_peak_speed = PEAK_CP_WATTS * RF_CONSTANTS['gap_re_constant'] / mass_kg
                 gap_method = 'fallback'
                 print(f"  GAP bootstrap: no data, falling back to Stryd PEAK_CP={PEAK_CP_WATTS}W")
             
