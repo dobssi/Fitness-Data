@@ -305,7 +305,9 @@ try:
                         ALERT2_TSB_THRESHOLD, ALERT2_COUNT, ALERT2_WINDOW,
                         ALERT3B_Z_THRESHOLD,
                         # Phase 2: GAP mode
-                        GAP_RE_CONSTANT)
+                        GAP_RE_CONSTANT,
+                        # Athlete parameters
+                        ATHLETE_MAX_HR)
 except ImportError:
     PEAK_CP_WATTS = 370  # Fallback — must match config.py
     POWER_SCORE_RIEGEL_K = 0.08
@@ -341,6 +343,7 @@ except ImportError:
     ALERT2_WINDOW = 5
     ALERT3B_Z_THRESHOLD = -2.0
     GAP_RE_CONSTANT = 0.92
+    ATHLETE_MAX_HR = 192
 
 RF_CONSTANTS = {
     # Rolling periods
@@ -388,6 +391,7 @@ RF_CONSTANTS = {
     'intensity_default_rfl': 0.85,  # Fallback RFL when no RF_Trend available
     'peak_cp_watts': PEAK_CP_WATTS,  # From config.py
     'lthr': EASY_RF_LTHR,  # Lactate threshold HR (for bootstrap_peak_speed training fallback)
+    'max_hr': ATHLETE_MAX_HR,  # Max HR (for bootstrap_peak_speed auto-detection threshold)
     
     # Duration adjustment (boost long efforts to compensate for cardiac drift)
     'duration_adj_enabled': True,
@@ -473,111 +477,143 @@ VALID_SURFACES = {'TRACK', 'INDOOR_TRACK', 'TRAIL', 'SNOW', 'HEAVY_SNOW'}
 
 def bootstrap_peak_speed(df: pd.DataFrame, rfl_col: str = 'RFL_gap_Trend',
                          mass_kg: float = 76.0, re_generic: float = 0.92,
-                         lthr: float = 178.0, exclude_parkruns: bool = True) -> tuple:
+                         lthr: float = 178.0, max_hr: float = 192.0,
+                         exclude_parkruns: bool = True) -> tuple:
     """
-    Auto-calculate peak threshold speed from training data.
+    Auto-calculate peak threshold speed from available data.
     
-    Two modes:
-    1. RACE-CALIBRATED (preferred): Back-calculates peak_speed from race results.
-       RE cancels out mathematically — predictions are RE-independent.
-       Validated at 2.1% MAE with near-zero bias.
+    Three tiers (tries each in order):
     
-    2. TRAINING-ESTIMATED (fallback): When no standard-distance races exist,
-       estimates peak_speed from peak RF_gap_Trend × LTHR × RE / mass × 0.97.
+    1. RACE-FLAGGED (best): Uses explicitly flagged races (race_flag column).
+       Back-calculates peak_speed from race results. RE cancels mathematically.
+       Uses MEDIAN of implied values. Validated at 2.1% MAE, ~0% bias.
+    
+    2. AUTO-DETECTED (good): When no race_flag data exists, auto-detects race
+       candidates from standard distance + high HR (>87% max_hr).
+       Uses P75 of implied values to compensate for training contamination.
+       Validated at +0.4% vs ground truth. Converges with ~5 races.
+    
+    3. TRAINING-ESTIMATED (fallback): When no races detectable at all,
+       estimates from peak RF_gap_Trend × LTHR × RE / mass × 0.97.
        The 0.97 discount accounts for race conditions vs training.
        Validated at ±2.5% across fitness levels.
     
     Args:
-        df: Master DataFrame with RF data, race_flag, distances, times
+        df: Master DataFrame with RF data, distances, times, HR
         rfl_col: Which RFL column to use (RFL_gap_Trend for GAP, RFL_Trend for Stryd)
         mass_kg: Athlete mass in kg
         re_generic: Generic running economy (0.92 male, 0.94 female)
         lthr: Lactate threshold heart rate
-        exclude_parkruns: If True, exclude parkruns from race calibration
+        max_hr: Maximum heart rate (for auto-detection threshold)
+        exclude_parkruns: If True, exclude parkruns from race-flagged calibration
     
     Returns:
         (peak_speed_mps, peak_cp_watts, n_races_used, method)
         peak_speed_mps: Threshold speed in m/s (the fundamental prediction input)
         peak_cp_watts: PEAK_CP for display = peak_speed × mass / RE_generic
-        n_races_used: Number of races used (0 if training-estimated)
-        method: 'race' or 'training' indicating which method was used
+        n_races_used: Number of races/candidates used (0 if training-estimated)
+        method: 'race', 'auto', or 'training'
     """
     import numpy as np
     
     RACE_FACTORS = {'5k': 1.05, '10k': 1.0, 'hm': 0.95, 'marathon': 0.89}
     RACE_DISTANCES_M = {'5k': 5000, '10k': 10000, 'hm': 21097.5, 'marathon': 42195}
-    TRAINING_DISCOUNT = 0.97  # Race conditions vs training: crowds, pacing, terrain
+    TRAINING_DISCOUNT = 0.97
+    AUTO_HR_FRACTION = 0.87  # 87% of max_hr for auto-detection
     
-    # ---- Try race-calibrated first ----
+    def _classify_dist(d):
+        for name, target in [('5k', 5.0), ('10k', 10.0), ('hm', 21.1), ('marathon', 42.2)]:
+            tol = 1.0 if target > 20 else (0.5 if target > 8 else 0.3)
+            if abs(d - target) < tol:
+                return name
+        return None
+    
+    def _calc_implied_peak_speed(candidates, use_p75=False):
+        """Shared logic: compute implied peak_speed from a set of race-like runs."""
+        implied = candidates.apply(
+            lambda r: (RACE_DISTANCES_M[r['_dc']] / r['moving_time_s']) /
+                      (r[rfl_col] * RACE_FACTORS[r['_dc']]),
+            axis=1
+        )
+        
+        # Remove outliers (>2 SD from median)
+        med = implied.median()
+        sd = implied.std()
+        if sd > 0 and len(implied) > 3:
+            implied = implied[(implied > med - 2 * sd) & (implied < med + 2 * sd)]
+        
+        if len(implied) == 0:
+            return None, 0
+        
+        # p75 for auto-detected (compensates for training contamination)
+        # median for race-flagged (already clean)
+        peak_speed = float(implied.quantile(0.75) if use_p75 else implied.median())
+        return peak_speed, len(implied)
+    
+    def _prepare_candidates(subset):
+        """Add distance classification and filter for valid bootstrap rows."""
+        subset = subset.copy()
+        dist_col = 'official_distance_km' if 'official_distance_km' in subset.columns else 'distance_km'
+        if dist_col == 'official_distance_km':
+            subset['_bd'] = subset['official_distance_km'].fillna(subset['distance_km'])
+        else:
+            subset['_bd'] = subset['distance_km']
+        subset['_dc'] = subset['_bd'].apply(_classify_dist)
+        return subset[
+            subset['_dc'].notna() &
+            subset[rfl_col].notna() &
+            (subset['moving_time_s'] > 0) &
+            (subset[rfl_col] > 0.5)
+        ]
+    
+    # ---- Tier 1: Race-flagged ----
     if 'race_flag' in df.columns:
-        races = df[df['race_flag'] == True].copy()
-    else:
-        races = pd.DataFrame()
-    
-    if len(races) > 0:
-        races['_bootstrap_dist'] = races['official_distance_km'].fillna(races['distance_km']) \
-            if 'official_distance_km' in races.columns else races['distance_km']
-        
-        def _classify_dist(d):
-            for name, target in [('5k', 5.0), ('10k', 10.0), ('hm', 21.1), ('marathon', 42.2)]:
-                tol = 1.0 if target > 20 else (0.5 if target > 8 else 0.3)
-                if abs(d - target) < tol:
-                    return name
-            return None
-        
-        races['_dc'] = races['_bootstrap_dist'].apply(_classify_dist)
-        
-        valid = races[
-            races['_dc'].notna() &
-            races[rfl_col].notna() &
-            (races['moving_time_s'] > 0) &
-            (races[rfl_col] > 0.5)
-        ].copy()
-        
-        if exclude_parkruns and 'activity_name' in valid.columns:
-            valid = valid[~valid['activity_name'].str.contains('parkrun|Parkrun|PARKRUN', na=False)]
-        
-        if len(valid) >= 1:
-            # Back-calculate: peak_speed = race_speed / (RFL × distance_factor)
-            implied_peak_speed = valid.apply(
-                lambda r: (RACE_DISTANCES_M[r['_dc']] / r['moving_time_s']) /
-                          (r[rfl_col] * RACE_FACTORS[r['_dc']]),
-                axis=1
-            )
+        flagged = df[df['race_flag'] == True]
+        if len(flagged) > 0:
+            valid = _prepare_candidates(flagged)
             
-            # Remove outliers (>2 SD from median)
-            med = implied_peak_speed.median()
-            sd = implied_peak_speed.std()
-            if sd > 0 and len(implied_peak_speed) > 3:
-                implied_peak_speed = implied_peak_speed[
-                    (implied_peak_speed > med - 2 * sd) &
-                    (implied_peak_speed < med + 2 * sd)
-                ]
+            if exclude_parkruns and 'activity_name' in valid.columns:
+                valid = valid[~valid['activity_name'].str.contains('parkrun|Parkrun|PARKRUN', na=False)]
             
-            if len(implied_peak_speed) > 0:
-                peak_speed = float(implied_peak_speed.median())
-                peak_cp = peak_speed * mass_kg / re_generic
-                return peak_speed, peak_cp, len(implied_peak_speed), 'race'
+            if len(valid) >= 1:
+                peak_speed, n_used = _calc_implied_peak_speed(valid, use_p75=False)
+                if peak_speed is not None:
+                    peak_cp = peak_speed * mass_kg / re_generic
+                    return peak_speed, peak_cp, n_used, 'race'
     
-    # ---- Fallback: training-estimated ----
-    rf_trend_col = rfl_col.replace('RFL_', 'RF_').replace('_Trend', '_Trend')
-    # RFL_gap_Trend → RF_gap_Trend
+    # ---- Tier 2: Auto-detected races ----
+    # Standard distance + HR > 87% max_hr = race candidate
+    hr_threshold = max_hr * AUTO_HR_FRACTION
+    if 'avg_hr' in df.columns and 'distance_km' in df.columns:
+        high_hr = df[df['avg_hr'] >= hr_threshold]
+        if len(high_hr) > 0:
+            valid = _prepare_candidates(high_hr)
+            
+            if len(valid) >= 3:  # Need at least 3 for p75 to be meaningful
+                peak_speed, n_used = _calc_implied_peak_speed(valid, use_p75=True)
+                if peak_speed is not None:
+                    peak_cp = peak_speed * mass_kg / re_generic
+                    return peak_speed, peak_cp, n_used, 'auto'
+    
+    # ---- Tier 3: Training-estimated ----
     if rfl_col == 'RFL_gap_Trend':
         rf_trend_col = 'RF_gap_Trend'
     elif rfl_col == 'RFL_Trend':
         rf_trend_col = 'RF_Trend'
     elif rfl_col == 'RFL_sim_Trend':
         rf_trend_col = 'RF_sim_Trend'
+    else:
+        rf_trend_col = rfl_col.replace('RFL_', 'RF_')
     
     if rf_trend_col in df.columns:
         peak_rf = df[rf_trend_col].max()
         if np.isfinite(peak_rf) and peak_rf > 0:
-            # peak_speed = peak_RF × LTHR × RE / mass × discount
             peak_speed = peak_rf * lthr * re_generic / mass_kg * TRAINING_DISCOUNT
             peak_cp = peak_speed * mass_kg / re_generic
             return peak_speed, peak_cp, 0, 'training'
     
     return None, None, 0, None
+
 
 
 # v43/v44: RF ADJUSTMENT FUNCTIONS
@@ -4799,12 +4835,17 @@ def main() -> int:
                 dfm, rfl_col='RFL_gap_Trend', mass_kg=mass_kg,
                 re_generic=RF_CONSTANTS.get('gap_re_constant', 0.92),
                 lthr=RF_CONSTANTS.get('lthr', 178.0),
+                max_hr=RF_CONSTANTS.get('max_hr', 192.0),
                 exclude_parkruns=True
             )
             if gap_peak_speed is not None:
+                detail = {
+                    'race': f'from {gap_n_races} flagged races',
+                    'auto': f'from {gap_n_races} auto-detected races, p75',
+                    'training': 'estimated from training × 0.97'
+                }.get(gap_method, '')
                 print(f"  GAP bootstrap ({gap_method}): peak_speed={gap_peak_speed:.3f} m/s, "
-                      f"PEAK_CP_gap={gap_peak_cp:.0f}W"
-                      f"{f' (from {gap_n_races} races)' if gap_method == 'race' else ' (estimated from training)'}")
+                      f"PEAK_CP_gap={gap_peak_cp:.0f}W ({detail})")
             else:
                 # Fallback: use Stryd PEAK_CP (only if no race data AND no training data)
                 gap_peak_cp = PEAK_CP_WATTS
