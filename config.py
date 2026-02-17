@@ -119,7 +119,7 @@ if _ATHLETE_CONFIG:
 else:
     # v51 defaults (Stryd mode)
     POWER_MODE = "stryd"
-    PEAK_CP_WATTS = 372
+    PEAK_CP_WATTS = 370
     STRYD_ERA_DATES = {
         "pre_stryd": "1900-01-01",
         "v1": "2017-05-05",

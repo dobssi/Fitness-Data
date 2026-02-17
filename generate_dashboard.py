@@ -1181,7 +1181,7 @@ try:
     LTHR_DASH = _cfg_lthr
     MAX_HR_DASH = _cfg_maxhr
 except ImportError:
-    PEAK_CP_WATTS_DASH = 372
+    PEAK_CP_WATTS_DASH = 370
     ATHLETE_MASS_KG_DASH = 76.0
     LTHR_DASH = 178
     MAX_HR_DASH = 192

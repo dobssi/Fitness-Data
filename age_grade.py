@@ -21,7 +21,7 @@ from pathlib import Path
 try:
     from config import PEAK_CP_WATTS
 except ImportError:
-    PEAK_CP_WATTS = 372  # Fallback — must match config.py
+    PEAK_CP_WATTS = 370  # Fallback — must match config.py
 
 # Load data files
 _DATA_DIR = Path(__file__).parent
@@ -396,7 +396,7 @@ def calc_race_prediction(rfl_trend: float, distance: str, re_p90: float,
         distance: '5k', '10k', 'hm', or 'marathon'
         re_p90: 90th percentile running efficiency (RE_avg units, typically 0.85-1.05)
                 Higher RE = more efficient = faster
-        peak_cp: Peak critical power in watts (default 372)
+        peak_cp: Peak critical power in watts (default 370)
         mass_kg: Runner's mass in kg (default 76)
     
     Returns:

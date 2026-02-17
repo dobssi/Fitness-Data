@@ -51,7 +51,7 @@ power:
   
   # Stryd-specific settings (only used when mode = "stryd")
   stryd:
-    peak_cp_watts: 372    # Peak Critical Power at 100% RFL (tuned to race results)
+    peak_cp_watts: 370    # Peak Critical Power at 100% RFL (tuned to race results, was 372)
     
     # Era transition dates (hardware changes)
     # Format: era_name: "YYYY-MM-DD"
