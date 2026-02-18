@@ -1,0 +1,178 @@
+# .github/workflows/ian_pipeline.yml
+# Pipeline for Ian Lilley — GAP mode, manual dispatch
+#
+# Triggers:
+#   - Manual (workflow_dispatch) with mode selection
+#
+# Secrets required (same as Paul's pipeline):
+#   DROPBOX_TOKEN / DROPBOX_REFRESH_TOKEN / DROPBOX_APP_KEY / DROPBOX_APP_SECRET
+#
+# Dropbox structure: /Running and Cycling/DataPipeline/athletes/IanLilley/
+#   data/fits.zip, data/activities.csv
+#   output/Master_FULL.xlsx, output/Master_FULL_post.xlsx, etc.
+
+name: Ian Pipeline
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: 'Pipeline mode'
+        type: choice
+        options:
+          - FULL
+          - FROM_STEPB
+          - DASHBOARD
+        default: FROM_STEPB
+
+concurrency:
+  group: ian-pipeline
+  cancel-in-progress: false
+
+jobs:
+  pipeline:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+
+    env:
+      DROPBOX_TOKEN: ${{ secrets.DROPBOX_TOKEN }}
+      DROPBOX_REFRESH_TOKEN: ${{ secrets.DROPBOX_REFRESH_TOKEN }}
+      DROPBOX_APP_KEY: ${{ secrets.DROPBOX_APP_KEY }}
+      DROPBOX_APP_SECRET: ${{ secrets.DROPBOX_APP_SECRET }}
+      ATHLETE_DIR: athletes/IanLilley
+      DB_BASE: /Running and Cycling/DataPipeline/athletes/IanLilley
+      TZ_LOCAL: Europe/London
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          pip install --upgrade pip
+          pip install -r requirements.txt
+
+      # ─── Create directories ─────────────────────────────────
+      - name: Create directories
+        run: |
+          mkdir -p ${{ env.ATHLETE_DIR }}/data
+          mkdir -p ${{ env.ATHLETE_DIR }}/output/persec_cache
+          mkdir -p ${{ env.ATHLETE_DIR }}/output/dashboard
+
+      # ─── Restore persec cache ───────────────────────────────
+      - name: Restore persec cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.ATHLETE_DIR }}/output/persec_cache
+          key: ian-persec-${{ github.run_number }}
+          restore-keys: |
+            ian-persec-
+
+      # ─── Download data from Dropbox ─────────────────────────
+      - name: Download data from Dropbox
+        run: |
+          python ci/dropbox_sync.py download \
+            --dropbox-base "${{ env.DB_BASE }}" \
+            --local-prefix "${{ env.ATHLETE_DIR }}" \
+            --items data/fits.zip \
+                    data/activities.csv \
+                    output/Master_FULL.xlsx \
+                    output/Master_FULL_post.xlsx \
+                    output/activity_overrides.xlsx \
+                    output/_weather_cache_openmeteo/openmeteo_cache.sqlite \
+            --cache-dir ${{ env.ATHLETE_DIR }}/output/persec_cache
+        continue-on-error: true
+
+      # ─── Step 1: Rebuild from FIT files ─────────────────────
+      - name: Rebuild from FIT files
+        if: ${{ github.event.inputs.mode == 'FULL' }}
+        run: |
+          python rebuild_from_fit_zip.py \
+            --fit-zip ${{ env.ATHLETE_DIR }}/data/fits.zip \
+            --template master_template.xlsx \
+            --out ${{ env.ATHLETE_DIR }}/output/Master_FULL.xlsx \
+            --persec-cache-dir ${{ env.ATHLETE_DIR }}/output/persec_cache \
+            --strava ${{ env.ATHLETE_DIR }}/data/activities.csv \
+            --override-file ${{ env.ATHLETE_DIR }}/output/activity_overrides.xlsx \
+            --tz ${{ env.TZ_LOCAL }} \
+            --weight 87.0
+
+      # ─── Step 2: Add GAP simulated power ────────────────────
+      - name: Add GAP power
+        if: ${{ github.event.inputs.mode == 'FULL' }}
+        run: |
+          python add_gap_power.py \
+            --master ${{ env.ATHLETE_DIR }}/output/Master_FULL.xlsx \
+            --cache-dir ${{ env.ATHLETE_DIR }}/output/persec_cache \
+            --out ${{ env.ATHLETE_DIR }}/output/Master_FULL.xlsx \
+            --mass-kg 87.0 \
+            --re-constant 0.92
+
+      # ─── Step 3: StepB post-processing ──────────────────────
+      - name: StepB post-processing
+        if: ${{ github.event.inputs.mode != 'DASHBOARD' }}
+        run: |
+          python StepB_PostProcess.py \
+            --master ${{ env.ATHLETE_DIR }}/output/Master_FULL.xlsx \
+            --persec-cache-dir ${{ env.ATHLETE_DIR }}/output/persec_cache \
+            --out ${{ env.ATHLETE_DIR }}/output/Master_FULL_post.xlsx \
+            --model-json re_model_generic.json \
+            --override-file ${{ env.ATHLETE_DIR }}/output/activity_overrides.xlsx \
+            --athlete-data ${{ env.ATHLETE_DIR }}/athlete_data.csv \
+            --mass-kg 87.0 \
+            --tz ${{ env.TZ_LOCAL }} \
+            --runner-dob "1971-11-27" \
+            --runner-gender male \
+            --strava ${{ env.ATHLETE_DIR }}/data/activities.csv \
+            --progress-every 50
+
+      # ─── Step 4: Generate dashboard ─────────────────────────
+      - name: Generate dashboard
+        env:
+          MASTER_FILE: ${{ env.ATHLETE_DIR }}/output/Master_FULL_post.xlsx
+          OUTPUT_FILE: ${{ env.ATHLETE_DIR }}/output/dashboard/index.html
+          ATHLETE_DATA_FILE: ${{ env.ATHLETE_DIR }}/athlete_data.csv
+          ATHLETE_CONFIG_PATH: ${{ env.ATHLETE_DIR }}/athlete.yml
+        run: python generate_dashboard.py
+        continue-on-error: true
+
+      # ─── Upload results to Dropbox ──────────────────────────
+      - name: Upload results to Dropbox
+        run: |
+          python ci/dropbox_sync.py upload \
+            --dropbox-base "${{ env.DB_BASE }}" \
+            --local-prefix "${{ env.ATHLETE_DIR }}" \
+            --items output/Master_FULL.xlsx \
+                    output/Master_FULL_post.xlsx \
+                    output/activity_overrides.xlsx \
+                    output/dashboard/index.html \
+                    output/_weather_cache_openmeteo/openmeteo_cache.sqlite \
+            --cache-dir ${{ env.ATHLETE_DIR }}/output/persec_cache
+
+      # ─── Summary ────────────────────────────────────────────
+      - name: Summary
+        if: always()
+        run: |
+          echo "## Ian Pipeline Run Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- **Mode:** ${{ github.event.inputs.mode }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Status:** ${{ job.status }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Time:** $(date -u +%Y-%m-%dT%H:%M:%SZ)" >> $GITHUB_STEP_SUMMARY
+          
+          MASTER="${{ env.ATHLETE_DIR }}/output/Master_FULL_post.xlsx"
+          if [ -f "$MASTER" ]; then
+            SIZE=$(stat -c%s "$MASTER" 2>/dev/null || echo "?")
+            echo "- **Master size:** $SIZE bytes" >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          CACHE="${{ env.ATHLETE_DIR }}/output/persec_cache"
+          if [ -d "$CACHE" ]; then
+            COUNT=$(find "$CACHE" -name "*.npz" | wc -l)
+            echo "- **NPZ cache:** $COUNT files" >> $GITHUB_STEP_SUMMARY
+          fi
