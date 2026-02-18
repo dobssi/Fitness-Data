@@ -67,7 +67,7 @@ jobs:
 
       # ─── Restore persec cache ───────────────────────────────
       - name: Restore persec cache
-        uses: actions/cache@v4
+        uses: actions/cache/restore@v4
         with:
           path: ${{ env.ATHLETE_DIR }}/output/persec_cache
           key: ian-persec-${{ github.run_number }}
@@ -142,8 +142,17 @@ jobs:
         run: python generate_dashboard.py
         continue-on-error: true
 
+      # ─── Save persec cache (even on failure) ─────────────────
+      - name: Save persec cache
+        uses: actions/cache/save@v4
+        if: always()
+        with:
+          path: ${{ env.ATHLETE_DIR }}/output/persec_cache
+          key: ian-persec-${{ github.run_number }}
+
       # ─── Upload results to Dropbox ──────────────────────────
       - name: Upload results to Dropbox
+        if: always()
         run: |
           python ci/dropbox_sync.py upload \
             --dropbox-base "${{ env.DB_BASE }}" \
