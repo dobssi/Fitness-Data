@@ -469,10 +469,13 @@ def main():
                         help="Use full tar.gz mode instead of incremental sync")
     parser.add_argument("--dropbox-base", default=DROPBOX_BASE,
                         help=f"Dropbox base path (default: {DROPBOX_BASE})")
+    parser.add_argument("--local-prefix", default="",
+                        help="Local path prefix for items (e.g. athletes/IanLilley)")
     args = parser.parse_args()
     
     token = get_token()
     base = args.dropbox_base
+    lp = args.local_prefix.rstrip("/\\") if args.local_prefix else ""
     success = 0
     failed = 0
     
@@ -481,7 +484,9 @@ def main():
         
         for item in args.items:
             remote = f"{base}/{item}"
-            ok = dropbox_download(remote, item, token)
+            local = f"{lp}/{item}" if lp else item
+            os.makedirs(os.path.dirname(local) or ".", exist_ok=True)
+            ok = dropbox_download(remote, local, token)
             if ok:
                 success += 1
             else:
@@ -512,9 +517,10 @@ def main():
         print(f"\nUploading to Dropbox ({base})...")
         
         for item in args.items:
-            if os.path.exists(item):
+            local = f"{lp}/{item}" if lp else item
+            if os.path.exists(local):
                 remote = f"{base}/{item}"
-                ok = dropbox_upload(item, remote, token)
+                ok = dropbox_upload(local, remote, token)
                 if ok:
                     success += 1
                 else:
