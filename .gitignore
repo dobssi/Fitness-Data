@@ -15,7 +15,7 @@ re_model_s4_*.json
 stryd_serial_map.json
 
 # Cache directories
-persec_cache_*/
+persec_cache*/
 _weather_cache_openmeteo/
 *.sqlite
 
@@ -42,9 +42,11 @@ activities.csv
 
 # =============================================================================
 # Multi-athlete data (large files stay on Dropbox, config tracked)
+# Only athletes/*/athlete.yml is tracked
 # =============================================================================
 athletes/*/data/
 athletes/*/output/
+athletes/*/persec_cache/
 
 # =============================================================================
 # Generated output
@@ -61,7 +63,7 @@ __pycache__/
 *.pyo
 *.egg-info/
 dist/
-build/
+nbuild/
 .venv/
 venv/
 
