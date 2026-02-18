@@ -21,7 +21,13 @@ if not exist ".git" (
 
 REM ── Refresh index (pick up .gitignore changes) ──
 git rm -r --cached . >nul 2>&1
-git add -A
+git add -A 2>nul
+
+REM ── Show what will be committed ──
+echo.
+echo === Files staged ===
+git diff --cached --stat
+echo.
 
 REM ── Safety: check for large files (>50 MB) before committing ──
 set "LARGE_FOUND=0"

@@ -46,6 +46,9 @@ PIPELINE_FILES = [
     "add_gap_power.py",
     "run_multi_mode_pipeline.py",
     "test_phase_1_2.py",
+    # Multi-athlete support
+    "re_model_generic.json",
+    "master_template.xlsx",
     # CI
     "ci/dropbox_sync.py",
     "ci/apply_run_metadata.py",
@@ -62,10 +65,17 @@ EXTRA_PATTERNS = [
     "*.md",
 ]
 
-# Directories to include recursively
+# Directories to include recursively (athlete configs only, not data/output)
 INCLUDE_DIRS = [
     "ci",
     ".github",
+]
+
+# Athlete config files to include (not data, output, or FIT files)
+ATHLETE_CONFIG_FILES = [
+    "athlete.yml",
+    "activity_overrides.xlsx",
+    "athlete_data.csv",
 ]
 
 # Files/dirs to exclude
@@ -73,7 +83,11 @@ EXCLUDE = {
     ".git", "__pycache__", "node_modules", ".env",
     "persec_cache_FULL", "TotalHistory.zip",
     "Master_FULL_GPSQ_ID.xlsx", "Master_FULL_GPSQ_ID_post.xlsx",
+    "Master_FULL.xlsx", "Master_FULL_post.xlsx",
     "venv", ".venv",
+    # Athlete data (too large for checkpoint)
+    "data", "output", "fits", "fits.zip",
+    "persec_cache",
 }
 
 
@@ -111,6 +125,23 @@ def collect_files(base_dir):
                     rel = os.path.relpath(full, base_dir)
                     if not should_exclude(rel):
                         files.add(rel)
+
+    # Scan athletes/ folder for config files only (not data/output)
+    athletes_dir = os.path.join(base_dir, "athletes")
+    if os.path.isdir(athletes_dir):
+        for athlete_name in os.listdir(athletes_dir):
+            athlete_path = os.path.join(athletes_dir, athlete_name)
+            if not os.path.isdir(athlete_path):
+                continue
+            for cfg_file in ATHLETE_CONFIG_FILES:
+                cfg_path = os.path.join(athlete_path, cfg_file)
+                if os.path.exists(cfg_path):
+                    rel = os.path.relpath(cfg_path, base_dir)
+                    files.add(rel)
+            # Also include any .bat files in athlete folder
+            for bat in glob.glob(os.path.join(athlete_path, "*.bat")):
+                rel = os.path.relpath(bat, base_dir)
+                files.add(rel)
 
     return sorted(files)
 

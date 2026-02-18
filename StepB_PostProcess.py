@@ -304,7 +304,7 @@ from config import (PEAK_CP_WATTS, POWER_SCORE_RIEGEL_K, POWER_SCORE_REFERENCE_D
                     ALERT2_TSB_THRESHOLD, ALERT2_COUNT, ALERT2_WINDOW,
                     ALERT3B_Z_THRESHOLD,
                     # Phase 2: GAP mode
-                    GAP_RE_CONSTANT,
+                    GAP_RE_CONSTANT, POWER_MODE,
                     # Athlete parameters
                     ATHLETE_MASS_KG, ATHLETE_LTHR, ATHLETE_MAX_HR)
 
@@ -1237,20 +1237,23 @@ def calc_easy_rf_metrics(df: pd.DataFrame) -> pd.DataFrame:
         z_scores = (easy_rf_vals - rolling_mean) / rolling_std.replace(0, np.nan)
         df.loc[easy_mask, 'Easy_RF_z'] = z_scores
     
-    # --- RFL_Trend_Delta (run-to-run change) ---
-    df['RFL_Trend_Delta'] = np.nan
-    if 'RFL_Trend' in df.columns:
-        rfl_trend = df['RFL_Trend'].copy()
-        df['RFL_Trend_Delta'] = rfl_trend - rfl_trend.shift(1)
-        # Report distribution
-        valid_delta = df['RFL_Trend_Delta'].dropna()
-        if len(valid_delta) > 50:
-            p5 = valid_delta.quantile(0.05)
-            p95 = valid_delta.quantile(0.95)
-            big_boost = (valid_delta > 0.01).sum()
-            big_drag = (valid_delta < -0.01).sum()
-            print(f"  RFL_Trend_Delta: P5={p5*100:.2f}%, P95={p95*100:.2f}%, "
-                  f"big boosts={big_boost}, big drags={big_drag}")
+    # --- RFL_Trend_Delta (run-to-run change) — all three modes ---
+    for rfl_col, delta_col in [('RFL_Trend', 'RFL_Trend_Delta'),
+                                ('RFL_gap_Trend', 'RFL_gap_Trend_Delta'),
+                                ('RFL_sim_Trend', 'RFL_sim_Trend_Delta')]:
+        df[delta_col] = np.nan
+        if rfl_col in df.columns:
+            rfl_trend = df[rfl_col].copy()
+            df[delta_col] = rfl_trend - rfl_trend.shift(1)
+    # Report distribution for primary mode
+    valid_delta = df['RFL_Trend_Delta'].dropna()
+    if len(valid_delta) > 50:
+        p5 = valid_delta.quantile(0.05)
+        p95 = valid_delta.quantile(0.95)
+        big_boost = (valid_delta > 0.01).sum()
+        big_drag = (valid_delta < -0.01).sum()
+        print(f"  RFL_Trend_Delta: P5={p5*100:.2f}%, P95={p95*100:.2f}%, "
+              f"big boosts={big_boost}, big drags={big_drag}")
     
     # --- Easy_RFL_Gap (normalised Easy RF EMA minus RFL_Trend) ---
     df['Easy_RFL_Gap'] = np.nan
@@ -4073,9 +4076,14 @@ def main() -> int:
 
     # --- v43: Rolling RF calculations ---
     # First, calculate era adjusters from fresh RE_avg values
-    print("\n=== v43: Calculating era adjusters from fresh RE_avg ===")
-    era_adjusters = calculate_era_adjusters_from_data(dfm)
-    export_era_adjusters_csv(era_adjusters, era_csv_path)
+    if POWER_MODE == 'gap':
+        print("\n=== Skipping era adjusters (GAP mode — no Stryd power) ===")
+        era_adjusters = {}
+        dfm['Era_Adj'] = 1.0
+    else:
+        print("\n=== v43: Calculating era adjusters from fresh RE_avg ===")
+        era_adjusters = calculate_era_adjusters_from_data(dfm)
+        export_era_adjusters_csv(era_adjusters, era_csv_path)
     
     # Recalculate adjustment columns with correct era adjusters
     print("  Recalculating adjustment factors...")
@@ -4189,20 +4197,24 @@ def main() -> int:
             terrain_adj = calc_terrain_adj(undulation_for_adj)
         
         elevation_adj = calc_elevation_adj(elev_gain_per_km)
-        # v51.7: GAP-calibrated era adjustments (independent physics cross-check)
-        # Original regression-based values under-corrected older eras by 1-5%
-        # GAP power (physics-only, no hardware) provides independent calibration reference
-        GAP_ERA_OVERRIDES = {'v1': 1.097, 'repl': 1.054, 'air': 1.030, 's4': 1.000, 's5': 0.994}
-        _gap_era_override = GAP_ERA_OVERRIDES.get(str(era_id).lower().strip())
-        if _gap_era_override is not None:
-            power_adj_to_s4 = _gap_era_override
-        else:
-            power_adj_to_s4 = pd.to_numeric(row.get('power_adjuster_to_S4', np.nan), errors='coerce')
-        era_adj = calc_era_adj(era_id, era_adjusters, power_adj_to_s4=power_adj_to_s4)
-        # v51.6: Sim power is already S4-calibrated — don't apply Stryd-era correction
-        # for runs outside the primary sim eras (those have their own calibration path)
-        if str(row.get('power_source', '')) == 'sim_v1' and era_id not in ('pre_stryd', 'v1_late'):
+        # Era adjustment: skip entirely for GAP mode (no Stryd power to calibrate)
+        if POWER_MODE == 'gap':
             era_adj = 1.0
+        else:
+            # v51.7: GAP-calibrated era adjustments (independent physics cross-check)
+            # Original regression-based values under-corrected older eras by 1-5%
+            # GAP power (physics-only, no hardware) provides independent calibration reference
+            GAP_ERA_OVERRIDES = {'v1': 1.097, 'repl': 1.054, 'air': 1.030, 's4': 1.000, 's5': 0.994}
+            _gap_era_override = GAP_ERA_OVERRIDES.get(str(era_id).lower().strip())
+            if _gap_era_override is not None:
+                power_adj_to_s4 = _gap_era_override
+            else:
+                power_adj_to_s4 = pd.to_numeric(row.get('power_adjuster_to_S4', np.nan), errors='coerce')
+            era_adj = calc_era_adj(era_id, era_adjusters, power_adj_to_s4=power_adj_to_s4)
+            # v51.6: Sim power is already S4-calibrated — don't apply Stryd-era correction
+            # for runs outside the primary sim eras (those have their own calibration path)
+            if str(row.get('power_source', '')) == 'sim_v1' and era_id not in ('pre_stryd', 'v1_late'):
+                era_adj = 1.0
         # Own_Adj is just surface_adj
         surface_adj = pd.to_numeric(row.get('surface_adj', 1.0), errors='coerce')
         own_adj = surface_adj if surface_adj and np.isfinite(surface_adj) else 1.0
@@ -4688,9 +4700,10 @@ def main() -> int:
     dfm = calc_rolling_metrics(dfm)
     
     # Recalculate TSS with RFL now available
-    print("  Recalculating TSS with RFL...")
+    _tss_rfl_col = 'RFL_gap' if POWER_MODE == 'gap' and 'RFL_gap' in dfm.columns else 'RFL'
+    print(f"  Recalculating TSS with RFL (using {_tss_rfl_col})...")
     for i, row in dfm.iterrows():
-        rfl = row.get('RFL')
+        rfl = row.get(_tss_rfl_col)
         if pd.notna(rfl) and rfl > 0:
             moving_time_s = pd.to_numeric(row.get('moving_time_s', np.nan), errors='coerce')
             avg_hr = row.get('avg_hr')
@@ -4979,7 +4992,7 @@ def main() -> int:
     for c in ("Easy_RF_z", "Easy_RF_z_gap", "Easy_RF_z_sim", "Easy_RFL_Gap", "Easy_RFL_Gap_gap", "Easy_RFL_Gap_sim"):
         if c in dfm.columns:
             dfm[c] = pd.to_numeric(dfm[c], errors="coerce").round(3)
-    for c in ("RFL_Trend_Delta",):
+    for c in ("RFL_Trend_Delta", "RFL_gap_Trend_Delta", "RFL_sim_Trend_Delta"):
         if c in dfm.columns:
             dfm[c] = pd.to_numeric(dfm[c], errors="coerce").round(4)
     for c in ("weight_kg",):
@@ -5054,9 +5067,11 @@ def main() -> int:
         "parkrun", "surface",
         # Phase 2: GAP RF parallel columns
         "RF_gap_median", "RF_gap_adj", "RF_gap_Trend", "RFL_gap", "RFL_gap_Trend", "PS_gap",
+        "RFL_gap_Trend_Delta",
         "Easy_RF_EMA_gap", "Easy_RF_z_gap", "Easy_RFL_Gap_gap",
         "Alert_Mask_gap", "Alert_Text_gap",
         "RF_sim_median", "RF_sim_adj", "RF_sim_Trend", "RFL_sim", "RFL_sim_Trend", "PS_sim",
+        "RFL_sim_Trend_Delta",
         "Easy_RF_EMA_sim", "Easy_RF_z_sim", "Easy_RFL_Gap_sim",
         "Alert_Mask_sim", "Alert_Text_sim",
         # v43 Age grade and race predictions (Stryd)

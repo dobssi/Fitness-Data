@@ -1,0 +1,9 @@
+{
+  "version": "generic_gap",
+  "mu": {"v": 3.0, "v2": 9.0, "g": 0.0, "abs_g": 0.02, "wa": 0.0, "wa_v": 0.0, "g_v": 0.0},
+  "sd": {"v": 1.0, "v2": 6.0, "g": 0.05, "abs_g": 0.02, "wa": 1.0, "wa_v": 3.0, "g_v": 0.15},
+  "coef": {"bias": -0.0834, "v": 0.0, "v2": 0.0, "g": 0.0, "abs_g": 0.0, "wa": 0.0, "wa_v": 0.0, "g_v": 0.0},
+  "re_min": 0.50,
+  "re_max": 1.20,
+  "_note": "Generic model: all feature coefficients = 0, bias = ln(0.92) = -0.0834. Produces constant RE=0.92 for all inputs. Used for GAP-only athletes without Stryd."
+}

@@ -1,0 +1,77 @@
+# =============================================================================
+# ATHLETE CONFIGURATION — Ian Lilley (GAP Mode)
+# =============================================================================
+
+athlete:
+  name: "Ian Lilley"
+  mass_kg: 87.0
+  date_of_birth: "1971-11-27"
+  gender: "male"
+  timezone: "Europe/London"
+
+  # HR thresholds
+  # Max HR 175 from LFotM Feb 2025. LTHR: watch says 153, race avg 165.
+  # Using 157 as compromise — can refine once we see the data.
+  lthr: 157
+  max_hr: 175
+
+planned_races:
+  - name: "Burgess Parkrun"
+    date: "2026-02-28"
+    distance_km: 5.0
+    priority: C
+    surface: road
+  - name: "Paddock Wood Half"
+    date: "2026-03-08"
+    distance_km: 21.097
+    priority: A
+    surface: road
+
+power:
+  mode: "gap"
+
+  stryd:
+    peak_cp_watts: 370
+    eras: {}
+    mass_corrections: []
+    re_reference_era: "s4"
+
+  gap:
+    re_constant: 0.92
+
+data:
+  source: "fit_folder"
+  intervals:
+    athlete_id: ""
+    api_key: ""
+  fit_folder:
+    path: "./data/fits"
+  strava_export:
+    zip_path: ""
+
+pipeline:
+  rf_window_duration_s: 2400
+  rf_trend_window_days: 42
+  rf_trend_min_periods: 5
+  ctl_time_constant: 42
+  atl_time_constant: 7
+  temp_baseline_c: 10.0
+  easy_rf:
+    hr_min: 120
+    np_cp_max: 0.85
+    vi_max: 1.10
+    dist_min_km: 4.0
+    ema_span: 15
+    z_window: 30
+  alerts:
+    alert1_rfl_drop: 0.02
+    alert1_ctl_rise: 3.0
+    alert1_window_days: 28
+    alert1b_rfl_gap: 0.02
+    alert1b_peak_window_days: 90
+    alert1b_race_window_days: 7
+    alert2_tsb_threshold: -15
+    alert2_count: 3
+    alert2_window: 5
+    alert3b_z_threshold: -2.0
+    alert5_gap_threshold: -0.03

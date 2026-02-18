@@ -98,6 +98,13 @@ if POWER_MODE == "stryd":
     RE_REFERENCE_ERA = _ATHLETE_CONFIG.power.stryd.re_reference_era
 else:
     PEAK_CP_WATTS = _ATHLETE_CONFIG.power.gap.peak_cp_watts  # May be None initially
+    if PEAK_CP_WATTS is None:
+        # Placeholder for GAP mode before race calibration.
+        # StepB's bootstrap_peak_speed() will auto-calculate from race data.
+        # 300W is a neutral default for an average male runner (~4.0 W/kg at 75kg).
+        # The exact value doesn't matter much - RFL is relative to peak, and
+        # predictions are recalibrated by bootstrap anyway.
+        PEAK_CP_WATTS = 300
     STRYD_ERA_DATES = {}  # Not used in GAP mode
     RE_REFERENCE_ERA = "s4"  # Not used in GAP mode
 
@@ -161,7 +168,7 @@ EASY_RF_EMA_SPAN = _ATHLETE_CONFIG.pipeline.easy_rf_ema_span
 EASY_RF_Z_WINDOW = _ATHLETE_CONFIG.pipeline.easy_rf_z_window
 
 # Derived from athlete LTHR — these are computed, not configured
-EASY_RF_HR_MAX = round(ATHLETE_LTHR * 0.83)   # ~midpoint of Z2 (was hardcoded 148 for LTHR=178)
+EASY_RF_HR_MAX = _ATHLETE_CONFIG.pipeline.easy_rf_hr_max if _ATHLETE_CONFIG.pipeline.easy_rf_hr_max > 0 else round(ATHLETE_LTHR * 0.90)   # Top of Z2 (~90% LTHR). Override in athlete.yml easy_rf.hr_max
 EASY_RF_LTHR = ATHLETE_LTHR                    # Alias for backward compat in StepB
 
 # =============================================================================

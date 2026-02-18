@@ -136,6 +136,7 @@ class PipelineConfig:
     atl_time_constant: int = 7
     temp_baseline_c: float = 10.0
     easy_rf_hr_min: int = 120
+    easy_rf_hr_max: int = 0  # 0 = auto from LTHR (set in config.py)
     easy_rf_np_cp_max: float = 0.85
     easy_rf_vi_max: float = 1.10
     easy_rf_dist_min_km: float = 4.0
@@ -166,6 +167,7 @@ class PipelineConfig:
             atl_time_constant=int(d.get("atl_time_constant", 7)),
             temp_baseline_c=float(d.get("temp_baseline_c", 10.0)),
             easy_rf_hr_min=int(easy.get("hr_min", 120)),
+            easy_rf_hr_max=int(easy.get("hr_max", 0)),
             easy_rf_np_cp_max=float(easy.get("np_cp_max", 0.85)),
             easy_rf_vi_max=float(easy.get("vi_max", 1.10)),
             easy_rf_dist_min_km=float(easy.get("dist_min_km", 4.0)),

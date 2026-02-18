@@ -5,15 +5,18 @@
 
 # Basic profile
 athlete:
-  name: "Paul"
+  name: "Paul Collyer"
   mass_kg: 76.0           # Body mass for ALL pipeline calculations (constant, not daily weight)
   date_of_birth: "1969-05-27"
   gender: "male"          # Options: "male", "female"
   timezone: "Europe/Stockholm"
 
-  # HR thresholds (for zone calculations)
+# HR thresholds (for zone calculations)
   lthr: 178               # Lactate Threshold Heart Rate
   max_hr: 192             # Maximum Heart Rate
+zones:
+  hr_zones: [140, 155, 169, 178]
+  race_hr_zones: [163, 170, 175, 180, 184]
 
 # Planned races (for dashboard race readiness section)
 # Priority: A = goal race (full taper), B = important (light taper), C = training race (no taper)
@@ -118,6 +121,7 @@ pipeline:
   # Easy RF classification (for Easy RF EMA and alerts)
   easy_rf:
     hr_min: 120                   # Minimum avg HR for easy run
+    hr_max: 148                   # Maximum avg HR for easy run (default: LTHR * 0.90)
     np_cp_max: 0.85              # nPower < 85% CP (power mode only)
     vi_max: 1.10                 # Variability index cap
     dist_min_km: 4.0             # Minimum distance

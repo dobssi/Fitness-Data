@@ -1,0 +1,83 @@
+# =============================================================================
+# ATHLETE CONFIGURATION — GAP Mode (no power meter)
+# =============================================================================
+# Fill in your details below. Lines starting with # are comments.
+
+# Basic profile
+athlete:
+  name: "Athlete Name"        # Your name (shown on dashboard)
+  mass_kg: 70.0               # Body mass in kg (constant, not daily weight)
+  date_of_birth: "1990-01-01" # YYYY-MM-DD format
+  gender: "male"              # "male" or "female" (for age grading tables)
+  timezone: "Europe/London"   # Your timezone (for date display)
+
+  # HR thresholds (for zone calculations)
+  # If you don't know these, leave them and the pipeline will estimate from your data.
+  # max_hr: look at your hardest race or interval session for the highest HR recorded.
+  # lthr: roughly 93% of max_hr if unsure.
+  lthr: 165                   # Lactate Threshold Heart Rate
+  max_hr: 185                 # Maximum Heart Rate
+
+# Planned races (optional — for dashboard race readiness section)
+# Priority: A = goal race, B = important, C = training race
+# Surface: road, trail, undulating_trail, track, indoor_track
+planned_races: []
+  # Example:
+  # - name: "Spring Half Marathon"
+  #   date: "2026-05-01"
+  #   distance_km: 21.097
+  #   priority: A
+  #   surface: road
+
+# Power mode — GAP uses pace + heart rate, no power meter needed
+power:
+  mode: "gap"
+
+  stryd:
+    peak_cp_watts: 370        # Placeholder — auto-calculated from race results
+    eras: {}
+    mass_corrections: []
+    re_reference_era: "s4"
+
+  gap:
+    re_constant: 0.92         # Running economy constant (0.92 male, ~0.94 female)
+    # peak_cp_watts: null     # Auto-bootstrapped from first race result
+
+# Data source
+data:
+  source: "fit_folder"        # "fit_folder" for Strava/Garmin bulk exports
+  intervals:
+    athlete_id: ""
+    api_key: ""
+  fit_folder:
+    path: "./data/fits"
+  strava_export:
+    zip_path: ""
+
+# Pipeline parameters — defaults work well for most runners
+pipeline:
+  rf_window_duration_s: 2400
+  rf_trend_window_days: 42
+  rf_trend_min_periods: 5
+  ctl_time_constant: 42
+  atl_time_constant: 7
+  temp_baseline_c: 10.0
+  easy_rf:
+    hr_min: 120
+    np_cp_max: 0.85
+    vi_max: 1.10
+    dist_min_km: 4.0
+    ema_span: 15
+    z_window: 30
+  alerts:
+    alert1_rfl_drop: 0.02
+    alert1_ctl_rise: 3.0
+    alert1_window_days: 28
+    alert1b_rfl_gap: 0.02
+    alert1b_peak_window_days: 90
+    alert1b_race_window_days: 7
+    alert2_tsb_threshold: -15
+    alert2_count: 3
+    alert2_window: 5
+    alert3b_z_threshold: -2.0
+    alert5_gap_threshold: -0.03

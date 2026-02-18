@@ -40,9 +40,10 @@ import os
 # ============================================================================
 # CONFIGURATION
 # ============================================================================
-MASTER_FILE = r"Master_FULL_GPSQ_ID_post.xlsx"  # v43+ Master with RF/CTL columns
-ATHLETE_DATA_FILE = r"athlete_data.csv"  # Weight, non-running TSS
-OUTPUT_FILE = r"index.html"
+# Paths: env vars override defaults (for multi-athlete support)
+MASTER_FILE = os.environ.get("MASTER_FILE", r"Master_FULL_GPSQ_ID_post.xlsx")
+ATHLETE_DATA_FILE = os.environ.get("ATHLETE_DATA_FILE", r"athlete_data.csv")
+OUTPUT_FILE = os.environ.get("OUTPUT_FILE", r"index.html")
 
 # ============================================================================
 # DATA PROCESSING
@@ -219,10 +220,11 @@ def get_daily_ctl_atl_lookup(master_file):
         return {}
 
 
-def _calc_rfl_delta(df, days_back=14):
+def _calc_rfl_delta(df, days_back=14, mode='stryd'):
     """Calculate change in RFL_Trend vs N days ago.
     Returns delta in percentage points (e.g. +2.5 or -1.3), or None."""
-    rfl = pd.to_numeric(df.get('RFL_Trend'), errors='coerce')
+    rfl_col = {'gap': 'RFL_gap_Trend', 'sim': 'RFL_sim_Trend'}.get(mode, 'RFL_Trend')
+    rfl = pd.to_numeric(df.get(rfl_col), errors='coerce')
     dates = pd.to_datetime(df.get('date'), errors='coerce')
     if rfl.isna().all() or dates.isna().all():
         return None
@@ -289,7 +291,9 @@ def get_summary_stats(df):
         # v44.5: Use RFL_Trend (Power Score now affects RF_adj directly, no separate RFL_Combined)
         'latest_rf': round(latest.get('RF_Trend'), 2) if latest is not None and pd.notna(latest.get('RF_Trend')) else None,
         'latest_rfl': round((latest.get('RFL_Trend') or 0) * 100, 1) if latest is not None and pd.notna(latest.get('RFL_Trend')) else None,
-        'rfl_14d_delta': _calc_rfl_delta(df, 14),
+        'rfl_14d_delta': _calc_rfl_delta(df, 14, 'stryd'),
+        'rfl_14d_delta_gap': _calc_rfl_delta(df, 14, 'gap'),
+        'rfl_14d_delta_sim': _calc_rfl_delta(df, 14, 'sim'),
         'latest_hr': int(latest[hr_col]) if latest is not None and pd.notna(latest.get(hr_col)) else None,
         'latest_dist': round(latest[dist_col], 2) if latest is not None and pd.notna(latest.get(dist_col)) else None,
         # v51: Easy RF gap
@@ -299,6 +303,7 @@ def get_summary_stats(df):
         # Phase 2: GAP and Sim RFL for mode toggle
         'latest_rfl_gap': round((latest.get('RFL_gap_Trend') or 0) * 100, 1) if latest is not None and pd.notna(latest.get('RFL_gap_Trend')) else None,
         'latest_rfl_sim': round((latest.get('RFL_sim_Trend') or 0) * 100, 1) if latest is not None and pd.notna(latest.get('RFL_sim_Trend')) else None,
+        'first_year': df['date'].min().year if len(df) > 0 else '',
     }
     return stats
 
@@ -746,8 +751,10 @@ def get_recent_runs(df, n=10):
                 'rfl_gap': round(row['RFL_gap'] * 100, 1) if pd.notna(row.get('RFL_gap')) else None,
                 'rfl_sim': round(row['RFL_sim'] * 100, 1) if pd.notna(row.get('RFL_sim')) else None,
                 'race': is_race,
-                # v51: trend mover
+                # v51: trend mover — all three modes
                 'delta': round(row['RFL_Trend_Delta'] * 100, 2) if pd.notna(row.get('RFL_Trend_Delta')) else None,
+                'delta_gap': round(row['RFL_gap_Trend_Delta'] * 100, 2) if pd.notna(row.get('RFL_gap_Trend_Delta')) else None,
+                'delta_sim': round(row['RFL_sim_Trend_Delta'] * 100, 2) if pd.notna(row.get('RFL_sim_Trend_Delta')) else None,
             })
         
         return runs
@@ -1011,6 +1018,19 @@ def get_prediction_trend_data(df):
         time_col = 'elapsed_time_s' if 'elapsed_time_s' in dist_match.columns else 'moving_time_s'
         dist_match = dist_match[dist_match[time_col].notna() & (dist_match[time_col] > 0)].copy()
         
+        # Exclude races where GPS distance far exceeds official distance
+        # (activity includes warmup/cooldown, so elapsed time is meaningless for the race)
+        if 'distance_km' in dist_match.columns and 'official_distance_km' in dist_match.columns:
+            _before = len(dist_match)
+            dist_match = dist_match[
+                (dist_match['distance_km'].isna()) |
+                (dist_match['official_distance_km'].isna()) |
+                (dist_match['distance_km'] <= dist_match['official_distance_km'] * 1.3)
+            ]
+            _dropped = _before - len(dist_match)
+            if _dropped > 0:
+                print(f"  {dist_key}: excluded {_dropped} races with GPS distance >130% of official (warmup/cooldown included in activity)")
+        
         if len(dist_match) == 0:
             result[dist_key] = empty
             continue
@@ -1084,6 +1104,28 @@ def get_prediction_trend_data(df):
                 else:
                     mode_preds.append(None)
             result[dist_key][f'predicted_{mode}'] = mode_preds
+        
+        # Add full prediction trend line (weekly samples, all rows with predictions)
+        # This shows fitness trajectory even between races
+        pred_series = df[[pred_col, 'date']].dropna(subset=[pred_col])
+        pred_series = pred_series[pred_series[pred_col] > 0].copy()
+        if len(pred_series) > 0:
+            # Weekly mean, then 4-week rolling smooth to avoid spikes from single bad runs
+            pred_series = pred_series.set_index('date').resample('W').mean().dropna(subset=[pred_col]).reset_index()
+            pred_series[pred_col] = pred_series[pred_col].rolling(4, min_periods=1, center=True).mean()
+            result[dist_key]['trend_dates_iso'] = pred_series['date'].dt.strftime('%Y-%m-%d').tolist()
+            result[dist_key]['trend_values'] = [round(v, 0) for v in pred_series[pred_col].tolist()]
+            # GAP/Sim trend lines
+            for mode in ('gap', 'sim'):
+                mode_col = f'{pred_col}_{mode}'
+                if mode_col in df.columns:
+                    mode_series = df[[mode_col, 'date']].dropna(subset=[mode_col])
+                    mode_series = mode_series[mode_series[mode_col] > 0].copy()
+                    if len(mode_series) > 0:
+                        mode_series = mode_series.set_index('date').resample('W').mean().dropna(subset=[mode_col]).reset_index()
+                        mode_series[mode_col] = mode_series[mode_col].rolling(4, min_periods=1, center=True).mean()
+                        result[dist_key][f'trend_dates_iso_{mode}'] = mode_series['date'].dt.strftime('%Y-%m-%d').tolist()
+                        result[dist_key][f'trend_values_{mode}'] = [round(v, 0) for v in mode_series[mode_col].tolist()]
     
     return result
 
@@ -1097,8 +1139,17 @@ def get_age_grade_data(df):
     race_col = 'race_flag' if 'race_flag' in df.columns else 'Race'
     races = df[(df[race_col] == 1) & (df['age_grade_pct'].notna())].copy() if 'age_grade_pct' in df.columns else pd.DataFrame()
     
+    # Exclude races where GPS distance far exceeds official distance
+    if len(races) > 0 and 'distance_km' in races.columns and 'official_distance_km' in races.columns:
+        races = races[
+            (races['distance_km'].isna()) |
+            (races['official_distance_km'].isna()) |
+            (races['distance_km'] <= races['official_distance_km'] * 1.3)
+        ]
+    
     if len(races) == 0:
-        return {'dates': [], 'values': [], 'dist_labels': [], 'dist_codes': [], 'rolling_avg': []}
+        return {'dates': [], 'dates_iso': [], 'values': [], 'dist_labels': [], 'dist_codes': [],
+                'dist_sizes': [], 'is_parkrun': [], 'rolling_avg': []}
     
     # Categorise distances  
     def categorise_dist(row):
@@ -1175,7 +1226,45 @@ def get_age_grade_data(df):
 from config import PEAK_CP_WATTS as _cfg_cp, ATHLETE_MASS_KG as _cfg_mass
 from config import ATHLETE_LTHR as _cfg_lthr, ATHLETE_MAX_HR as _cfg_maxhr
 from config import PLANNED_RACES as _cfg_races
+from config import POWER_MODE as _cfg_power_mode
+from config import ATHLETE_NAME as _cfg_name
 PEAK_CP_WATTS_DASH = _cfg_cp
+
+# Load raw zone overrides from athlete.yml (not in dataclass — optional section)
+_zone_overrides = {}
+try:
+    import yaml as _yaml
+    from config import _ATHLETE_CONFIG
+    _yml_path = getattr(_ATHLETE_CONFIG, '_yaml_path', None)
+    if _yml_path is None:
+        import os as _os
+        _yml_path = _os.environ.get("ATHLETE_CONFIG_PATH", "athlete.yml")
+    with open(_yml_path, 'r') as _f:
+        _raw_yml = _yaml.safe_load(_f)
+    _zone_overrides = _raw_yml.get('zones', {})
+except Exception:
+    pass
+
+# --- Module-level zone boundaries (visible to get_zone_data AND _generate_zone_html) ---
+if _zone_overrides and 'hr_zones' in _zone_overrides:
+    _zb = _zone_overrides['hr_zones']
+    _z12_hr, _z23_hr, _z34_hr, _z45_hr = int(_zb[0]), int(_zb[1]), int(_zb[2]), int(_zb[3])
+else:
+    _z12_hr = round(_cfg_lthr * 0.81)
+    _z23_hr = round(_cfg_lthr * 0.90)
+    _z34_hr = round(_cfg_lthr * 0.955)
+    _z45_hr = _cfg_lthr
+
+if _zone_overrides and 'race_hr_zones' in _zone_overrides:
+    _rzb = _zone_overrides['race_hr_zones']
+    _rhr_mara, _rhr_hm, _rhr_10k, _rhr_5k, _rhr_sub5k = int(_rzb[0]), int(_rzb[1]), int(_rzb[2]), int(_rzb[3]), int(_rzb[4])
+else:
+    _hr_range = _cfg_maxhr - _cfg_lthr
+    _rhr_mara = round(_cfg_lthr * 0.92)
+    _rhr_hm = round(_cfg_lthr * 0.96)
+    _rhr_10k = _cfg_lthr
+    _rhr_5k = round(_cfg_lthr + _hr_range * 0.35)
+    _rhr_sub5k = round(_cfg_lthr + _hr_range * 0.70)
 ATHLETE_MASS_KG_DASH = _cfg_mass
 LTHR_DASH = _cfg_lthr
 MAX_HR_DASH = _cfg_maxhr
@@ -1217,7 +1306,11 @@ def get_zone_data(df):
     moving_col = 'moving_time_s' if 'moving_time_s' in recent.columns else 'Moving_s'
     dist_col = 'distance_km' if 'distance_km' in recent.columns else 'Distance_m'
     
-    current_rfl = float(df.iloc[-1].get('RFL_Trend', 0.90)) if len(df) > 0 else 0.90
+    # Use mode-appropriate RFL column
+    _rfl_col_name = {'gap': 'RFL_gap_Trend', 'sim': 'RFL_sim_Trend'}.get(_cfg_power_mode, 'RFL_Trend')
+    if _rfl_col_name not in df.columns:
+        _rfl_col_name = 'RFL_Trend'  # fallback
+    current_rfl = float(df.iloc[-1].get(_rfl_col_name, 0.90)) if len(df) > 0 else 0.90
     if pd.isna(current_rfl):
         current_rfl = 0.90
     current_cp = round(PEAK_CP_WATTS_DASH * current_rfl)
@@ -1231,16 +1324,15 @@ def get_zone_data(df):
     
     # Zone boundaries — 5-zone model, RF×HR anchored
     # Power zones derived from RF ratio (CP/LTHR) × HR boundary
-    # This ensures HR and power zones correspond to the same physiological intensity
+    # HR zone boundaries are module-level (_z12_hr etc) from athlete.yml or formula
     RF_THR = current_cp / LTHR_DASH  # RF at lactate threshold
-    # HR zones (5): Z1 Easy, Z2 Aerobic, Z3 Tempo, Z4 Threshold, Z5 Max
-    hr_bounds = [0, 140, 155, 169, 178, 9999]
+    hr_bounds = [0, _z12_hr, _z23_hr, _z34_hr, _z45_hr, 9999]
     hr_znames = ['Z1', 'Z2', 'Z3', 'Z4', 'Z5']
     # Power zones (5): RF×HR anchored — boundaries shift with fitness
-    pw_z12 = round(RF_THR * 140)
-    pw_z23 = round(RF_THR * 155)
-    pw_z34 = round(RF_THR * 169)
-    pw_z45 = round(RF_THR * 178)  # = current_cp by definition
+    pw_z12 = round(RF_THR * _z12_hr)
+    pw_z23 = round(RF_THR * _z23_hr)
+    pw_z34 = round(RF_THR * _z34_hr)
+    pw_z45 = round(RF_THR * _z45_hr)
     pw_bounds = [0, pw_z12, pw_z23, pw_z34, pw_z45, 9999]
     pw_znames = ['Z1', 'Z2', 'Z3', 'Z4', 'Z5']
     # Race power zones: contiguous midpoint bands
@@ -1250,8 +1342,8 @@ def get_zone_data(df):
     f_pw = current_cp * 1.05
     race_pw_bounds = [0, round(m_pw*0.93), round((m_pw+h_pw)/2), round((h_pw+t_pw)/2), round((t_pw+f_pw)/2), round(f_pw*1.05), 9999]
     race_pw_names = ['Other', 'Mara', 'HM', '10K', '5K', 'Sub-5K']
-    # Race HR zones: contiguous
-    race_hr_bounds = [0, 163, 170, 175, 180, 184, 9999]
+    # Race HR zones: from module-level (_rhr_mara etc) — athlete.yml or formula
+    race_hr_bounds = [0, _rhr_mara, _rhr_hm, _rhr_10k, _rhr_5k, _rhr_sub5k, 9999]
     race_hr_names = ['Other', 'Mara', 'HM', '10K', '5K', 'Sub-5K']
 
     # Race GAP pace zones (sec/km) — built from GAP predictions
@@ -1341,17 +1433,26 @@ def get_zone_data(df):
     
     # Find NPZ cache directory
     npz_dir = None
-    for candidate in ['persec_cache_FULL', '../persec_cache_FULL', 'persec_cache']:
+    _master_dir = os.path.dirname(os.path.abspath(MASTER_FILE))
+    for candidate in ['persec_cache_FULL', '../persec_cache_FULL', 'persec_cache',
+                       os.path.join(_master_dir, 'persec_cache_FULL'),
+                       os.path.join(_master_dir, 'persec_cache')]:
         if os.path.isdir(candidate):
             npz_dir = candidate
             break
     
     # Build index of available NPZ files by date prefix
     npz_index = {}
+    npz_by_date = {}  # date-only prefix -> list of paths (for fallback matching)
     if npz_dir:
         for fp in glob.glob(os.path.join(npz_dir, '*.npz')):
             base = os.path.basename(fp).replace('.npz', '')
             npz_index[base] = fp
+            date_prefix = base[:10]  # '2026-02-17'
+            if date_prefix not in npz_by_date:
+                npz_by_date[date_prefix] = []
+            npz_by_date[date_prefix].append(fp)
+        print(f"  NPZ cache: {npz_dir} ({len(npz_index)} files)")
     
     runs = []
     npz_hits = 0
@@ -1371,6 +1472,11 @@ def get_zone_data(df):
         run_date = row['date']
         run_id = run_date.strftime('%Y-%m-%d_%H-%M-%S')
         
+        # NPZ file lookup: try run_id column first (matches FIT filename),
+        # then date-based ID, then date-prefix fallback
+        master_run_id = str(row.get('run_id', '')).strip() if pd.notna(row.get('run_id')) else ''
+        npz_key = master_run_id.replace('&', '_').replace('?', '_').replace('=', '_') if master_run_id else ''
+        
         run_entry = {
             'date': run_date.strftime('%Y-%m-%d'),
             'name': str(name)[:60] if pd.notna(name) else '',
@@ -1383,7 +1489,15 @@ def get_zone_data(df):
         }
         
         # Try to load NPZ for per-second time-in-zone
-        npz_path = npz_index.get(run_id)
+        npz_path = npz_index.get(npz_key) if npz_key else None
+        if not npz_path:
+            npz_path = npz_index.get(run_id)
+        if not npz_path:
+            # Fallback: match by date prefix (for masters without time-of-day)
+            date_prefix = run_date.strftime('%Y-%m-%d')
+            candidates = npz_by_date.get(date_prefix, [])
+            if len(candidates) == 1:
+                npz_path = candidates[0]
         if npz_path:
             try:
                 npz_data = np.load(npz_path, allow_pickle=True)
@@ -1422,7 +1536,26 @@ def get_zone_data(df):
     
     print(f"  Zone data: {len(runs)} runs, {npz_hits} with NPZ, CP={current_cp}W (RFL={current_rfl:.4f}), RE_p90={re_p90}")
     
-    return {'runs': runs, 'current_cp': current_cp, 'current_rfl': round(current_rfl, 4), 're_p90': re_p90, 'gap_target_paces': gap_target_paces_local}
+    # RFL projection slope for race readiness cards
+    _rfl_proj_per_day = 0.0
+    _rfl_proj_col = {'gap': 'RFL_gap_Trend', 'sim': 'RFL_sim_Trend'}.get(_cfg_power_mode, 'RFL_Trend')
+    if _rfl_proj_col not in df.columns:
+        _rfl_proj_col = 'RFL_Trend'
+    try:
+        _rfl_col = df[_rfl_proj_col].dropna()
+        if len(_rfl_col) >= 10:
+            _recent_28 = _rfl_col.tail(28)
+            if len(_recent_28) >= 5:
+                _x = np.arange(len(_recent_28), dtype=float)
+                _y = _recent_28.values.astype(float)
+                _slope, _ = np.polyfit(_x, _y, 1)
+                _days_span = (df['date'].iloc[-1] - df['date'].iloc[-len(_recent_28)]).days
+                if _days_span > 0:
+                    _rfl_proj_per_day = _slope * len(_recent_28) / _days_span
+    except Exception:
+        pass
+    
+    return {'runs': runs, 'current_cp': current_cp, 'current_rfl': round(current_rfl, 4), 're_p90': re_p90, 'gap_target_paces': gap_target_paces_local, 'rfl_proj_per_day': _rfl_proj_per_day}
 
 
 # ============================================================================
@@ -1447,13 +1580,13 @@ def _generate_zone_html(zone_data, stats=None):
     zone_names = ['Z1', 'Z2', 'Z3', 'Z4', 'Z5']
     zone_labels = ['Easy', 'Aerobic', 'Tempo', 'Threshold', 'Max']
     zone_colors = ['#3b82f6', '#22c55e', '#eab308', '#f97316', '#ef4444']
-    # Power zones: RF×HR anchored
+    # Power zones: RF×HR anchored (using module-level zone boundaries)
     rf_thr = cp / LTHR_DASH
-    pw_z12 = round(rf_thr * 140)
-    pw_z23 = round(rf_thr * 155)
-    pw_z34 = round(rf_thr * 169)
-    pw_z45 = cp  # RF×178 = CP by definition
-    hr_ranges =   ['<140',      '140–155',      '155–169',      '169–178',      '>178']
+    pw_z12 = round(rf_thr * _z12_hr)
+    pw_z23 = round(rf_thr * _z23_hr)
+    pw_z34 = round(rf_thr * _z34_hr)
+    pw_z45 = cp  # RF×LTHR = CP by definition
+    hr_ranges =   [f'<{_z12_hr}', f'{_z12_hr}–{_z23_hr}', f'{_z23_hr}–{_z34_hr}', f'{_z34_hr}–{_z45_hr}', f'>{_z45_hr}']
     pw_strs =     [f'<{pw_z12}', f'{pw_z12}–{pw_z23}', f'{pw_z23}–{pw_z34}', f'{pw_z34}–{pw_z45}', f'>{pw_z45}']
     pct_strs =    [f'<{round(pw_z12/cp*100)}', f'{round(pw_z12/cp*100)}–{round(pw_z23/cp*100)}', f'{round(pw_z23/cp*100)}–{round(pw_z34/cp*100)}', f'{round(pw_z34/cp*100)}–{round(pw_z45/cp*100)}', f'>{round(pw_z45/cp*100)}']
     effort_hints = ['', 'easy–Mara', 'Mara–10K', '10K–5K', '>5K']
@@ -1467,22 +1600,8 @@ def _generate_zone_html(zone_data, stats=None):
     
     # Get current RFL trend and recent trajectory for projection
     _rfl_current = zone_data.get('current_rfl', 0.90)
-    # Simple linear projection: use last 28 days of RFL_Trend slope
-    _rfl_proj_per_day = 0.0  # default: flat
-    try:
-        _rfl_col = df['RFL_Trend'].dropna()
-        if len(_rfl_col) >= 10:
-            _recent_28 = _rfl_col.tail(28)
-            if len(_recent_28) >= 5:
-                _x = np.arange(len(_recent_28), dtype=float)
-                _y = _recent_28.values.astype(float)
-                _slope, _ = np.polyfit(_x, _y, 1)
-                # Convert per-run slope to per-day (approx runs per day)
-                _days_span = (df['date'].iloc[-1] - df['date'].iloc[-len(_recent_28)]).days
-                if _days_span > 0:
-                    _rfl_proj_per_day = _slope * len(_recent_28) / _days_span
-    except Exception:
-        pass
+    # RFL projection slope from zone_data (computed in get_zone_data where df is available)
+    _rfl_proj_per_day = zone_data.get('rfl_proj_per_day', 0.0)
     
     _priority_colors = {'A': '#f87171', 'B': '#fbbf24', 'C': '#8b90a0'}
     _priority_labels = {'A': 'A RACE', 'B': 'B RACE', 'C': 'C RACE'}
@@ -1514,6 +1633,134 @@ def _generate_zone_html(zone_data, stats=None):
                 return _pd_anchors[i][1] + frac * (_pd_anchors[i+1][1] - _pd_anchors[i][1])
         return 1.0
     
+    # Pre-compute specificity minutes for race cards (server-side for no-JS)
+    from datetime import date as _date_cls, timedelta as _td
+    from datetime import datetime as _dt
+    _today = _date_cls.today()
+    _c14 = _today - _td(days=14)
+    _c28 = _today - _td(days=28)
+    
+    _spec_zones_map = {
+        'Sub-5K': ['Sub-5K'],
+        '5K': ['Sub-5K', '5K'],
+        '10K': ['10K'],
+        'HM': ['HM'],
+        'Mara': ['Mara'],
+    }
+    
+    # Build race effort zones based on mode
+    # For Stryd: use power zones (npower field)
+    # For GAP: use pace zones (avg_pace_skm field, lower = faster)
+    # Fallback: HR zones
+    _use_power = (_cfg_power_mode == 'stryd' and cp > 0)
+    _use_pace = (_cfg_power_mode == 'gap')
+    
+    if _use_power:
+        # Power race zones: boundaries between adjacent race powers
+        _m_pw = round(cp * 0.90)  # marathon
+        _h_pw = round(cp * 0.95)  # HM
+        _t_pw = round(cp * 1.00)  # 10K
+        _f_pw = round(cp * 1.05)  # 5K
+        _above = round(_f_pw * 1.05)  # Sub-5K
+        # Zones: (id, lo_power, hi_power) — higher power = faster
+        _mh = round((_m_pw + _h_pw) / 2)
+        _ht = round((_h_pw + _t_pw) / 2)
+        _tf = round((_t_pw + _f_pw) / 2)
+        _spec_race_zones = [
+            ('Sub-5K', _above, 9999),
+            ('5K', _tf, _above),
+            ('10K', _ht, _tf),
+            ('HM', _mh, _ht),
+            ('Mara', round(_m_pw * 0.93), _mh),
+            ('Other', 0, round(_m_pw * 0.93)),
+        ]
+    elif _use_pace:
+        # Pace race zones (sec/km) — lower pace = faster
+        _p5 = gap_paces.get('5k', 240)
+        _p10 = gap_paces.get('10k', 252)
+        _ph = gap_paces.get('hm', 265)
+        _pm = gap_paces.get('marathon', 282)
+        _s5 = round(_p5 * 0.97)
+        _m5 = round((_p5 + _p10) / 2)
+        _mt = round((_p10 + _ph) / 2)
+        _mh_p = round((_ph + _pm) / 2)
+        _slow = round(_pm * 1.07)
+        # Pace zones: (id, lo_pace, hi_pace) — INVERTED: fast=low number
+        _spec_race_zones = [
+            ('Sub-5K', 0, _s5),
+            ('5K', _s5, _m5),
+            ('10K', _m5, _mt),
+            ('HM', _mt, _mh_p),
+            ('Mara', _mh_p, _slow),
+            ('Other', _slow, 9999),
+        ]
+    else:
+        # HR fallback
+        _spec_race_zones = [
+            ('Sub-5K', _rhr_sub5k, 9999),
+            ('5K', _rhr_5k, _rhr_sub5k),
+            ('10K', _rhr_10k, _rhr_5k),
+            ('HM', _rhr_hm, _rhr_10k),
+            ('Mara', _rhr_mara, _rhr_hm),
+            ('Other', 0, _rhr_mara),
+        ]
+    
+    _spec_values = {}
+    _runs_for_spec = zone_data['runs'] if zone_data else []
+    for race_idx_s, race_s in enumerate(PLANNED_RACES_DASH):
+        dk = race_s['distance_key']
+        at_or_above = _spec_zones_map.get(dk, [dk])
+        m14 = 0.0
+        m28 = 0.0
+        for r in _runs_for_spec:
+            rd = _dt.strptime(r['date'], '%Y-%m-%d').date()
+            if rd < _c28:
+                continue
+            mins = r.get('duration_min', 0) or 0
+            if mins <= 0:
+                continue
+            
+            if _use_power:
+                val = r.get('npower', 0) or 0
+                if val <= 0:
+                    continue
+                # Estimate: 15% at 110% power, 60% at avg, 25% at 88%
+                fracs = [(1.10, 0.15), (1.0, 0.60), (0.88, 0.25)]
+            elif _use_pace:
+                val = r.get('avg_pace_skm', 0) or 0
+                if val <= 0:
+                    continue
+                # Estimate: 15% at 92% pace (faster), 60% at avg, 25% at 110% (slower)
+                fracs = [(0.92, 0.15), (1.0, 0.60), (1.10, 0.25)]
+            else:
+                val = r.get('avg_hr', 0) or 0
+                if val <= 0:
+                    continue
+                fracs = [(1.06, 0.15), (1.0, 0.60), (0.92, 0.25)]
+            
+            for frac, min_frac in fracs:
+                test_val = val * frac
+                assigned = 'Other'
+                for zid, lo, hi in _spec_race_zones:
+                    if zid == 'Other':
+                        continue
+                    if _use_pace:
+                        # Pace: lower is faster. Zone = [lo, hi) where lo < hi
+                        if lo <= test_val < hi:
+                            assigned = zid
+                            break
+                    else:
+                        # Power/HR: higher is harder. Zone = [lo, hi)
+                        if lo <= test_val < hi:
+                            assigned = zid
+                            break
+                if assigned in at_or_above:
+                    contrib = mins * min_frac
+                    if rd >= _c14:
+                        m14 += contrib
+                    m28 += contrib
+        _spec_values[race_idx_s] = (round(m14), round(m28))
+    
     for race_idx, race in enumerate(PLANNED_RACES_DASH):
         key = race['distance_key']
         priority = race.get('priority', 'B')
@@ -1533,9 +1780,15 @@ def _generate_zone_html(zone_data, stats=None):
         band = round(pw * 0.03)
         
         # For standard road distances, use StepB predictions (matches stats grid exactly)
-        # For non-standard distances or non-road surfaces, use continuous model
+        # Use mode-appropriate predictions: GAP mode → _mode_gap, Sim → _mode_sim
         _stepb_key_map = {'5K': '5k_raw', '10K': '10k_raw', 'HM': 'hm_raw', 'Mara': 'marathon_raw'}
-        _stepb_raw = stats.get('race_predictions', {}).get(_stepb_key_map.get(key, ''), 0) if stats and surface == 'road' else 0
+        _rp = stats.get('race_predictions', {}) if stats else {}
+        # Pick mode-appropriate prediction source
+        if _cfg_power_mode in ('gap', 'sim'):
+            _mode_preds = _rp.get(f'_mode_{_cfg_power_mode}', {})
+            _stepb_raw = _mode_preds.get(_stepb_key_map.get(key, ''), 0) if surface == 'road' else 0
+        else:
+            _stepb_raw = _rp.get(_stepb_key_map.get(key, ''), 0) if surface == 'road' else 0
         if _stepb_raw and _stepb_raw > 0:
             t = _stepb_raw
         else:
@@ -1592,8 +1845,8 @@ def _generate_zone_html(zone_data, stats=None):
                 <div class="power-only"><div class="rv" style="color:var(--accent)" id="race-pw-{race_idx}">{pw}W</div><div class="rl">Target</div><div class="rx">±{band}W</div></div>
                 <div class="pace-target" style="display:none"><div class="rv" style="color:#4ade80" id="race-pace-{race_idx}">{pace_str}</div><div class="rl">Target pace</div></div>
                 <div><div class="rv" id="race-pred-{race_idx}">{t_str}</div><div class="rl">Predicted</div><div class="rx power-only">{pace_str}</div></div>
-                <div><div class="rv" id="spec14_{race_idx}">—</div><div class="rl">14d at effort</div></div>
-                <div><div class="rv" id="spec28_{race_idx}">—</div><div class="rl">28d at effort</div></div>
+                <div><div class="rv" id="spec14_{race_idx}">{_spec_values.get(race_idx, (0, 0))[0]}<span style="font-size:0.75rem;color:var(--text-dim)">min</span></div><div class="rl">14d at effort</div></div>
+                <div><div class="rv" id="spec28_{race_idx}">{_spec_values.get(race_idx, (0, 0))[1]}<span style="font-size:0.75rem;color:var(--text-dim)">min</span></div><div class="rl">28d at effort</div></div>
             </div>
             <div style="margin-top:6px">{taper_html}</div>
         </div>'''
@@ -1601,6 +1854,91 @@ def _generate_zone_html(zone_data, stats=None):
     # Zone run data as JSON for JS
     import json as _json
     zone_runs_json = _json.dumps(zone_data['runs'])
+    
+    # ── Server-side static zone bars (no-JS fallback) ──────────────────
+    # Pre-render weekly HR zone bars and per-run bars as static HTML
+    # JS will overwrite these when it runs (for mode switching)
+    _hr_zones = [
+        ('Z1', 'Easy', 0, _z12_hr, '#3b82f6'),
+        ('Z2', 'Aerobic', _z12_hr, _z23_hr, '#22c55e'),
+        ('Z3', 'Tempo', _z23_hr, _z34_hr, '#eab308'),
+        ('Z4', 'Threshold', _z34_hr, _z45_hr, '#f97316'),
+        ('Z5', 'Max', _z45_hr, 9999, '#ef4444'),
+    ]
+    
+    def _assign_hr_zone(hr):
+        if not hr or hr <= 0:
+            return 'Z5'
+        for zid, _, lo, hi, _ in _hr_zones:
+            if hr < hi:
+                return zid
+        return 'Z5'
+    
+    _runs = zone_data['runs']
+    
+    # Weekly aggregation (last 8 weeks)
+    from collections import defaultdict
+    from datetime import datetime as _dt
+    _weekly = defaultdict(lambda: {z[0]: 0.0 for z in _hr_zones})
+    _weekly_total = defaultdict(float)
+    _week_labels = {}  # iso_key -> display label
+    for r in _runs:
+        d = _dt.strptime(r['date'], '%Y-%m-%d')
+        # Use Monday of the week as sort key (matches JS weekKey)
+        day_of_week = d.weekday()  # 0=Monday
+        monday = d - _td(days=day_of_week)
+        iso_key = monday.strftime('%Y-%m-%d')
+        iso = d.isocalendar()
+        _week_labels[iso_key] = f"W{iso[1]:02d}/{str(iso[0])[2:]}"
+        mins = r.get('duration_min', 0) or 0
+        zid = _assign_hr_zone(r.get('avg_hr', 0))
+        _weekly[iso_key][zid] += mins
+        _weekly_total[iso_key] += mins
+    
+    _sorted_weeks = sorted(_weekly.keys())[-8:]
+    _max_total = max((_weekly_total.get(w, 1) for w in _sorted_weeks), default=1)
+    
+    _static_wk_rows = ''
+    for wk in _sorted_weeks:
+        zm = _weekly[wk]
+        total = _weekly_total[wk]
+        label = _week_labels.get(wk, wk)
+        _static_wk_rows += f'<div class="wr"><div class="wl">{label}</div><div class="wb">'
+        for zid, zname, _, _, zcol in _hr_zones:
+            if zm[zid] > 0:
+                pct = (zm[zid] / _max_total) * 100
+                _static_wk_rows += f'<div class="ws" style="width:{pct:.1f}%;background:{zcol}"><div class="tip">{zname}: {round(zm[zid])} min</div></div>'
+        _static_wk_rows += f'</div><div class="wt">{round(total)} min</div></div>'
+    
+    _static_wk_legend = ''.join(
+        f'<div class="lg"><div class="lsw" style="background:{zcol}"></div>{zname}</div>'
+        for _, zname, _, _, zcol in _hr_zones
+    )
+    
+    # Per-run static bars (last 30, stacked horizontal bars via CSS)
+    _last30 = _runs[-30:]
+    _max_run_mins = max((r.get('duration_min', 0) or 0 for r in _last30), default= 1)
+    _static_pr_rows = ''
+    for r in _last30:
+        d = _dt.strptime(r['date'], '%Y-%m-%d')
+        label = f"{d.day}/{d.month}"
+        mins = r.get('duration_min', 0) or 0
+        hr = r.get('avg_hr', 0) or 0
+        zid = _assign_hr_zone(hr)
+        zcol = next((c for z, _, _, _, c in _hr_zones if z == zid), '#3b82f6')
+        zname = next((n for z, n, _, _, _ in _hr_zones if z == zid), 'Easy')
+        pct = (mins / _max_run_mins) * 100 if _max_run_mins > 0 else 0
+        _static_pr_rows += f'<div class="wr"><div class="wl">{label}</div><div class="wb">'
+        _static_pr_rows += f'<div class="ws" style="width:{pct:.1f}%;background:{zcol}"><div class="tip">{r.get("name","")[:30]}: {round(mins)} min {zname}</div></div>'
+        _static_pr_rows += f'</div><div class="wt">{round(mins)} min</div></div>'
+    
+    # Specificity: compute 14d and 28d minutes at race effort for each planned race
+    
+    _planned_races_zone_json = _json.dumps([
+        {"name": r["name"], "date": r["date"], "priority": r.get("priority", "C"),
+         "distance_key": r["distance_key"], "distance_km": r["distance_km"],
+         "surface": r.get("surface", "road")} for r in PLANNED_RACES_DASH
+    ])
     
     return f'''
     <div class="card" id="zone-table-card">
@@ -1629,8 +1967,8 @@ def _generate_zone_html(zone_data, stats=None):
                 <button onclick="setWP(16,this)">16w</button>
             </div>
         </div>
-        <div id="wk-bars"></div>
-        <div id="wk-leg" class="legend"></div>
+        <div id="wk-bars">{_static_wk_rows}</div>
+        <div id="wk-leg" class="legend">{_static_wk_legend}</div>
     </div>
 
     <div class="card">
@@ -1644,25 +1982,27 @@ def _generate_zone_html(zone_data, stats=None):
                 <button onclick="setPR('racehr',this)">Race (HR)</button>
             </div>
         </div>
-        <div class="chart-wrapper"><canvas id="prChart"></canvas></div>
+        <div id="pr-static">{_static_pr_rows}</div>
+        <div class="chart-wrapper" id="pr-canvas-wrap" style="display:none"><canvas id="prChart"></canvas></div>
         <div id="pr-leg" class="legend"></div>
         <div class="note">Zone split from 30s rolling average of per-second power/HR data where available.</div>
     </div>
 
     <script>
-    const ZONE_RUNS=''' + zone_runs_json + f''';
+    const ZONE_RUNS=''' + zone_runs_json + ''';
+    const PLANNED_RACES=''' + _planned_races_zone_json + f''';
     const ZONE_CP={cp};const ZONE_PEAK_CP={PEAK_CP_WATTS_DASH};const ZONE_MASS={ATHLETE_MASS_KG_DASH};const ZONE_RE={re_p90};const ZONE_LTHR={LTHR_DASH};const ZONE_MAXHR={MAX_HR_DASH};
     const HR_Z=[
-      {{id:'Z1',name:'Easy',lo:0,hi:140,c:'#3b82f6'}},
-      {{id:'Z2',name:'Aerobic',lo:140,hi:155,c:'#22c55e'}},
-      {{id:'Z3',name:'Tempo',lo:155,hi:169,c:'#eab308'}},
-      {{id:'Z4',name:'Threshold',lo:169,hi:178,c:'#f97316'}},
-      {{id:'Z5',name:'Max',lo:178,hi:9999,c:'#ef4444'}}
+      {{id:'Z1',name:'Easy',lo:0,hi:{_z12_hr},c:'#3b82f6'}},
+      {{id:'Z2',name:'Aerobic',lo:{_z12_hr},hi:{_z23_hr},c:'#22c55e'}},
+      {{id:'Z3',name:'Tempo',lo:{_z23_hr},hi:{_z34_hr},c:'#eab308'}},
+      {{id:'Z4',name:'Threshold',lo:{_z34_hr},hi:{_z45_hr},c:'#f97316'}},
+      {{id:'Z5',name:'Max',lo:{_z45_hr},hi:9999,c:'#ef4444'}}
     ];
     const RF_THR=ZONE_CP/ZONE_LTHR;
-    const PW_Z12=Math.round(RF_THR*140);
-    const PW_Z23=Math.round(RF_THR*155);
-    const PW_Z34=Math.round(RF_THR*169);
+    const PW_Z12=Math.round(RF_THR*{_z12_hr});
+    const PW_Z23=Math.round(RF_THR*{_z23_hr});
+    const PW_Z34=Math.round(RF_THR*{_z34_hr});
     const PW_Z45=ZONE_CP;
     const PW_Z=[
       {{id:'Z1',name:'Easy',lo:0,hi:PW_Z12,c:'#3b82f6'}},
@@ -1679,7 +2019,7 @@ def _generate_zone_html(zone_data, stats=None):
       RACE_CFG[k]={{pw,dist:dists[k],color:cols[k]}};
     }});
     function makeRacePwZones(){{const pw=RACE_CFG,m=pw['Mara'].pw,h=pw['HM'].pw,t=pw['10K'].pw,f=pw['5K'].pw;const mh=Math.round((m+h)/2),ht=Math.round((h+t)/2),tf=Math.round((t+f)/2),above=Math.round(f*1.05);return[{{id:'Sub-5K',name:'Sub-5K',lo:above,hi:9999,c:'#4ade80'}},{{id:'5K',name:'5K',lo:tf,hi:above,c:'#f472b6'}},{{id:'10K',name:'10K',lo:ht,hi:tf,c:'#fb923c'}},{{id:'HM',name:'HM',lo:mh,hi:ht,c:'#a78bfa'}},{{id:'Mara',name:'Mara',lo:Math.round(m*0.93),hi:mh,c:'#38bdf8'}},{{id:'Other',name:'Other',lo:0,hi:Math.round(m*0.93),c:'#4b5563'}}];}}
-    function makeRaceHrZones(){{return[{{id:'Sub-5K',name:'Sub-5K',lo:184,hi:9999,c:'#4ade80'}},{{id:'5K',name:'5K',lo:180,hi:184,c:'#f472b6'}},{{id:'10K',name:'10K',lo:175,hi:180,c:'#fb923c'}},{{id:'HM',name:'HM',lo:170,hi:175,c:'#a78bfa'}},{{id:'Mara',name:'Mara',lo:163,hi:170,c:'#38bdf8'}},{{id:'Other',name:'Other',lo:0,hi:163,c:'#4b5563'}}];}}
+    function makeRaceHrZones(){{return[{{id:'Sub-5K',name:'Sub-5K',lo:{_rhr_sub5k},hi:9999,c:'#4ade80'}},{{id:'5K',name:'5K',lo:{_rhr_5k},hi:{_rhr_sub5k},c:'#f472b6'}},{{id:'10K',name:'10K',lo:{_rhr_10k},hi:{_rhr_5k},c:'#fb923c'}},{{id:'HM',name:'HM',lo:{_rhr_hm},hi:{_rhr_10k},c:'#a78bfa'}},{{id:'Mara',name:'Mara',lo:{_rhr_mara},hi:{_rhr_hm},c:'#38bdf8'}},{{id:'Other',name:'Other',lo:0,hi:{_rhr_mara},c:'#4b5563'}}];}}
     function makeRacePaceZones(){{const p5={pace_5k},p10={pace_10k},ph={pace_hm},pm={pace_mara};const s5=Math.round(p5*0.97),m5=Math.round((p5+p10)/2),mt=Math.round((p10+ph)/2),mh=Math.round((ph+pm)/2),slow=Math.round(pm*1.07);return[{{id:'Sub-5K',name:'Sub-5K',lo:0,hi:s5,c:'#4ade80'}},{{id:'5K',name:'5K',lo:s5,hi:m5,c:'#f472b6'}},{{id:'10K',name:'10K',lo:m5,hi:mt,c:'#fb923c'}},{{id:'HM',name:'HM',lo:mt,hi:mh,c:'#a78bfa'}},{{id:'Mara',name:'Mara',lo:mh,hi:slow,c:'#38bdf8'}},{{id:'Other',name:'Other',lo:slow,hi:9999,c:'#4b5563'}}];}}
     const RACE_PW_Z=makeRacePwZones(),RACE_HR_Z=makeRaceHrZones(),RACE_PACE_Z=makeRacePaceZones();
     function zonesFor(m){{if(m==='hr')return HR_Z;if(m==='power')return PW_Z;if(m==='race'){{if(typeof currentMode!=='undefined'&&currentMode==='gap')return RACE_PACE_Z;return RACE_PW_Z;}}if(m==='racehr')return RACE_HR_Z;return HR_Z;}}
@@ -1718,8 +2058,8 @@ def _generate_zone_html(zone_data, stats=None):
     // Per-run chart
     var prMode='hr',prChart=null;
     function renderPR(){{const ctx=document.getElementById('prChart').getContext('2d');const last30=ZONE_RUNS.slice(-30),zones=zonesFor(prMode),rm=isRaceMode(prMode);const labels=last30.map(r=>{{const d=new Date(r.date);return d.getDate()+'/'+(d.getMonth()+1);}});const datasets=zones.map((z,zi)=>({{label:z.name,data:last30.map(r=>{{const mins=r.duration_min||0;const est=getZoneMins(r,prMode,zones);return Math.round(est[z.id]||0);}}),backgroundColor:z.c+'cc',borderWidth:0,borderRadius:2}}));if(prChart)prChart.destroy();prChart=new Chart(ctx,{{type:'bar',data:{{labels,datasets}},options:{{responsive:true,maintainAspectRatio:false,plugins:{{legend:{{display:false}},tooltip:{{callbacks:{{title:items=>{{const i=items[0].dataIndex;return last30[i].name;}},label:item=>item.dataset.label+': '+item.raw+' min'}}}}}},scales:{{x:{{stacked:true,grid:{{color:'rgba(255,255,255,0.04)'}},ticks:{{color:'#8b90a0',font:{{size:10,family:"'JetBrains Mono'"}}}}}},y:{{stacked:true,grid:{{color:'rgba(255,255,255,0.04)'}},ticks:{{color:'#8b90a0',font:{{size:10,family:"'JetBrains Mono'"}},callback:v=>v+' min'}}}}}}}}}});document.getElementById('pr-leg').innerHTML=zones.map(z=>'<div class="lg"><div class="lsw" style="background:'+z.c+'"></div>'+z.name+'</div>').join('');}}
-    function setPR(m,btn){{prMode=m;document.querySelectorAll('#pr-mode button').forEach(b=>b.classList.remove('active'));btn.classList.add('active');renderPR();}}
-    renderPR();
+    function setPR(m,btn){{prMode=m;document.querySelectorAll('#pr-mode button').forEach(b=>b.classList.remove('active'));btn.classList.add('active');try{{renderPR();}}catch(e){{}}}}
+    try{{renderPR();var _ps=document.getElementById('pr-static');if(_ps)_ps.style.display='none';var _pc=document.getElementById('pr-canvas-wrap');if(_pc)_pc.style.display='';}}catch(e){{console.warn('Chart.js required for Per-Run chart:',e);}}
     </script>
 '''
 
@@ -1764,7 +2104,7 @@ def _generate_alert_banner(alert_data, critical_power=None):
         const items = alerts.map(a => '<div style="margin:4px 0;font-size:0.85em;color:#e4e7ef;">' + a.icon + ' <strong>' + a.name + '</strong><span style="color:#8b90a0"> ' + a.detail + '</span></div>').join('');
         el.innerHTML = '<div style="background:'+bg+';border:1px solid '+brd+';border-radius:10px;padding:10px 16px;margin-bottom:14px;"><div style="text-align:center;margin-bottom:4px;"><span style="font-size:1.1em;">'+icon+'</span> <strong style="color:'+lc+';">'+n+' alert'+s+' active</strong>' + cpHtml + '</div>'+items+'</div>';
     }}
-    renderAlertBanner('stryd');
+    renderAlertBanner(typeof currentMode !== 'undefined' ? currentMode : 'stryd');
     </script>'''
 
     # Note: renderAlertBanner references modeStats which is defined later in generate_html.
@@ -1776,6 +2116,34 @@ def _generate_alert_banner(alert_data, critical_power=None):
 
 def generate_html(stats, rf_data, volume_data, ctl_atl_data, ctl_atl_lookup, rfl_trend_dates, rfl_trend_values, rfl_trendline, rfl_projection, rfl_ci_upper, rfl_ci_lower, alltime_rfl_dates, alltime_rfl_values, recent_runs, top_races, alert_data=None, weight_data=None, prediction_data=None, ag_data=None, zone_data=None, rfl_trend_gap=None, rfl_trend_sim=None):
     """Generate the HTML dashboard."""
+    
+    # Compute initial display values based on configured power mode
+    # This ensures GAP athletes see correct values even before JS runs (mobile, slow load)
+    _init_mode = _cfg_power_mode if _cfg_power_mode in ('stryd', 'gap', 'sim') else 'stryd'
+    if _init_mode == 'gap':
+        _init_rfl = stats.get('latest_rfl_gap') or stats.get('latest_rfl')
+        _init_delta = stats.get('rfl_14d_delta_gap') or stats.get('rfl_14d_delta')
+        _init_rfl_label = 'RFL (GAP)'
+        _init_preds = stats['race_predictions'].get('_mode_gap', dict())
+        _init_easy = stats.get('easy_rfl_gap_gap')
+        _init_ag = stats['race_predictions'].get('_ag_gap')
+    elif _init_mode == 'sim':
+        _init_rfl = stats.get('latest_rfl_sim') or stats.get('latest_rfl')
+        _init_delta = stats.get('rfl_14d_delta_sim') or stats.get('rfl_14d_delta')
+        _init_rfl_label = 'RFL (Sim)'
+        _init_preds = stats['race_predictions'].get('_mode_sim', dict())
+        _init_easy = stats.get('easy_rfl_gap_sim')
+        _init_ag = stats['race_predictions'].get('_ag_sim')
+    else:
+        _init_rfl = stats.get('latest_rfl')
+        _init_delta = stats.get('rfl_14d_delta')
+        _init_rfl_label = 'RFL Trend'
+        _init_preds = stats['race_predictions']
+        _init_easy = stats.get('easy_rfl_gap')
+        _init_ag = stats.get('age_grade')
+    
+    # Body class for initial mode
+    _body_class = 'gap-mode' if _init_mode == 'gap' else ('sim-mode' if _init_mode == 'sim' else '')
     
     # Extract data for each time range - RF (v51: now includes easy_rfl and race_flags)
     rf_dates_90, rf_values_90, rf_trend_90, rf_easy_90, rf_races_90, rf_gap_trend_90, rf_sim_trend_90, rf_gap_values_90, rf_sim_values_90 = rf_data['90']
@@ -1837,7 +2205,7 @@ def generate_html(stats, rf_data, volume_data, ctl_atl_data, ctl_atl_lookup, rfl
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Paul Collyer Fitness Dashboard</title>
+    <title>{_cfg_name} Fitness Dashboard</title>
     <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🏃</text></svg>">
     <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
@@ -2200,9 +2568,8 @@ def generate_html(stats, rf_data, volume_data, ctl_atl_data, ctl_atl_lookup, rfl
         }}
     </style>
 </head>
-<body>
-<script>Chart.defaults.color="#8b90a0";Chart.defaults.borderColor="rgba(255,255,255,0.04)";Chart.defaults.font.family="'DM Sans',sans-serif";Chart.defaults.plugins.legend.labels.padding=10;
-const PLANNED_RACES = {_planned_races_json};
+<body class="{_body_class}">
+<script>try{{Chart.defaults.color="#8b90a0";Chart.defaults.borderColor="rgba(255,255,255,0.04)";Chart.defaults.font.family="'DM Sans',sans-serif";Chart.defaults.plugins.legend.labels.padding=10;
 const _today = new Date(); _today.setHours(0,0,0,0);
 const _14dFromNow = new Date(_today.getTime() + 14*86400000);
 // Format ISO date "2026-02-21" to match chart label formats
@@ -2255,16 +2622,17 @@ function raceAnnotations(dates) {{
 }}
 
 
+}}catch(e){{console.warn('Chart.js not loaded:',e);}}
 </script>
-    <h1>🏃 Paul Collyer</h1>
+    <h1>🏃 {_cfg_name}</h1>
     <div class="dash-sub">{datetime.now().strftime("%A %d %B %Y, %H:%M")}</div>
     
     <!-- Phase 2: Mode Toggle -->
-    <div class="mode-toggle" style="display:flex;gap:6px;margin:10px 0 8px;align-items:center;">
+    <div class="mode-toggle" style="display:flex;gap:6px;margin:10px 0 8px;align-items:center;{'display:none;' if _cfg_power_mode == 'gap' else ''}">
         <span style="font-size:0.72rem;color:var(--text-dim);margin-right:4px;">Model:</span>
-        <button class="mode-btn active" onclick="setMode('stryd')" id="mode-stryd">⚡ Stryd</button>
-        <button class="mode-btn" onclick="setMode('gap')" id="mode-gap">🏃 GAP</button>
-        <button class="mode-btn" onclick="setMode('sim')" id="mode-sim">🔬 Sim</button>
+        <button class="mode-btn{' active' if _cfg_power_mode == 'stryd' else ''}" onclick="setMode('stryd')" id="mode-stryd">⚡ Stryd</button>
+        <button class="mode-btn{' active' if _cfg_power_mode == 'gap' else ''}" onclick="setMode('gap')" id="mode-gap">🏃 GAP</button>
+        <button class="mode-btn{' active' if _cfg_power_mode == 'sim' else ''}" onclick="setMode('sim')" id="mode-sim">🔬 Sim</button>
     </div>
     <style>
         .mode-btn {{ font-family:'DM Sans',sans-serif; font-size:0.75rem; padding:5px 12px; border-radius:16px;
@@ -2308,12 +2676,12 @@ function raceAnnotations(dates) {{
     
     <div class="stats-grid">
         <div class="stat-card">
-            <div class="stat-value" id="rfl-value">{stats['latest_rfl']}%</div>
-            <div class="stat-label" id="rfl-label">RFL Trend</div>
+            <div class="stat-value" id="rfl-value">{_init_rfl}%</div>
+            <div class="stat-label" id="rfl-label">{_init_rfl_label}</div>
             <div class="stat-sub">vs peak</div>
         </div>
         <div class="stat-card">
-            <div class="stat-value" id="rfl-delta">{f"{'+' if stats['rfl_14d_delta'] > 0 else ''}{stats['rfl_14d_delta']}%" if stats['rfl_14d_delta'] is not None else '-'}</div>
+            <div class="stat-value" id="rfl-delta">{f"{'+' if _init_delta > 0 else ''}{_init_delta}%" if _init_delta is not None else '-'}</div>
             <div class="stat-label">RFL 14d</div>
             <div class="stat-sub">change</div>
         </div>
@@ -2322,12 +2690,12 @@ function raceAnnotations(dates) {{
                  data-stryd="{f"{'+' if stats['easy_rfl_gap'] > 0 else ''}{stats['easy_rfl_gap']}%" if stats['easy_rfl_gap'] is not None else '-'}"
                  data-gap="{f"{'+' if stats['easy_rfl_gap_gap'] > 0 else ''}{stats['easy_rfl_gap_gap']}%" if stats['easy_rfl_gap_gap'] is not None else '-'}"
                  data-sim="{f"{'+' if stats['easy_rfl_gap_sim'] > 0 else ''}{stats['easy_rfl_gap_sim']}%" if stats['easy_rfl_gap_sim'] is not None else '-'}"
-            >{f"{'+' if stats['easy_rfl_gap'] > 0 else ''}{stats['easy_rfl_gap']}%" if stats['easy_rfl_gap'] is not None else '-'}</div>
+            >{f"{'+' if _init_easy > 0 else ''}{_init_easy}%" if _init_easy is not None else '-'}</div>
             <div class="stat-label">Easy RF Gap</div>
             <div class="stat-sub">vs trend</div>
         </div>
         <div class="stat-card">
-            <div class="stat-value" id="ag-value">{stats['age_grade'] if stats['age_grade'] else '-'}%</div>
+            <div class="stat-value" id="ag-value">{_init_ag if _init_ag else '-'}%</div>
             <div class="stat-label">Age Grade</div>
             <div class="stat-sub">5k estimate</div>
         </div>
@@ -2335,22 +2703,22 @@ function raceAnnotations(dates) {{
     
     <div class="stats-grid">
         <div class="stat-card">
-            <div class="stat-value" id="pred-5k">{format_race_time(stats['race_predictions'].get('5k', '-'))}</div>
+            <div class="stat-value" id="pred-5k">{format_race_time(_init_preds.get('5k', '-'))}</div>
             <div class="stat-label">5k</div>
             <div class="stat-sub">predicted</div>
         </div>
         <div class="stat-card">
-            <div class="stat-value" id="pred-10k">{format_race_time(stats['race_predictions'].get('10k', '-'))}</div>
+            <div class="stat-value" id="pred-10k">{format_race_time(_init_preds.get('10k', '-'))}</div>
             <div class="stat-label">10k</div>
             <div class="stat-sub">predicted</div>
         </div>
         <div class="stat-card">
-            <div class="stat-value" id="pred-hm">{format_race_time(stats['race_predictions'].get('Half Marathon', '-'))}</div>
+            <div class="stat-value" id="pred-hm">{format_race_time(_init_preds.get('Half Marathon', '-'))}</div>
             <div class="stat-label">Half</div>
             <div class="stat-sub">predicted</div>
         </div>
         <div class="stat-card">
-            <div class="stat-value" id="pred-mara">{format_race_time(stats['race_predictions'].get('Marathon', '-'))}</div>
+            <div class="stat-value" id="pred-mara">{format_race_time(_init_preds.get('Marathon', '-'))}</div>
             <div class="stat-label">Marathon</div>
             <div class="stat-sub">predicted</div>
         </div>
@@ -2375,7 +2743,7 @@ function raceAnnotations(dates) {{
         <div class="stat-card">
             <div class="stat-value">{stats['total_runs']:,}</div>
             <div class="stat-label">Total Runs</div>
-            <div class="stat-sub">since 2013</div>
+            <div class="stat-sub">since {stats['first_year']}</div>
         </div>
     </div>
     
@@ -2453,7 +2821,8 @@ function raceAnnotations(dates) {{
         </div>
     </div>
     
-    <!-- v51: Weight Chart -->
+    <!-- v51: Weight Chart (hidden if no weight data) -->
+    {''.join(['''
     <div class="chart-container">
         <div class="chart-header">
             <div class="chart-title">⚖️ Weight</div>
@@ -2471,8 +2840,10 @@ function raceAnnotations(dates) {{
             <canvas id="weightChart"></canvas>
         </div>
     </div>
+    ''']) if weight_data and weight_data[0] else ''}
     
-    <!-- v51: Race Prediction Trend Chart -->
+    <!-- v51: Race Prediction Trend Chart (hidden if no race data) -->
+    {''.join(['''
     <div class="chart-container">
         <div class="chart-header">
             <div class="chart-title">🎯 Race Predictions</div>
@@ -2484,7 +2855,7 @@ function raceAnnotations(dates) {{
             </div>
         </div>
         <div style="display: flex; justify-content: space-between; align-items: center;">
-            <div class="chart-desc">Blue = predicted. <span style="color:#4ade80">Green</span> = adjusted for temp &amp; surface. <span style="color:#ef4444">●</span> race <span style="color:#fca5a5">●</span> parkrun.</div>
+            <div class="chart-desc">Solid = predicted. Dashed = adjusted for conditions. <span style="color:#ef4444">●</span> race <span style="color:#fca5a5">●</span> parkrun.</div>
             <div style="display: flex; gap: 10px; align-items: center;">
                 <label style="font-size: 0.75em; color: var(--text-dim); white-space: nowrap; cursor: pointer;">
                     <input type="checkbox" id="predConditionsToggle" style="margin-right: 3px;">adjust for conditions
@@ -2498,8 +2869,10 @@ function raceAnnotations(dates) {{
             <canvas id="predChart"></canvas>
         </div>
     </div>
+    ''']) if prediction_data and any(prediction_data.get(k, {}).get('dates') for k in prediction_data) else ''}
     
-    <!-- v51: Age Grade Trend Chart -->
+    <!-- v51: Age Grade Trend Chart (hidden if no age grade data) -->
+    {''.join(["""
     <div class="chart-container">
         <div class="chart-header">
             <div class="chart-title">📊 Age Grade</div>
@@ -2515,6 +2888,7 @@ function raceAnnotations(dates) {{
             <canvas id="agChart"></canvas>
         </div>
     </div>
+    """]) if ag_data and ag_data.get('dates') else ''}
     
     <!-- Recent Runs Table -->
     <div class="chart-container">
@@ -2534,7 +2908,7 @@ function raceAnnotations(dates) {{
                 <col style="width: 11%;">
                 <col class="power-only" style="width: 10%;">
                 <col style="width: 9%;">
-                <col class="power-only" style="width: 9%;">
+                <col style="width: 9%;">
                 <col style="width: 9%;">
             </colgroup>
             <thead>
@@ -2545,7 +2919,7 @@ function raceAnnotations(dates) {{
                     <th>Pace</th>
                     <th class="power-only">nPwr</th>
                     <th>HR</th>
-                    <th class="power-only">TSS</th>
+                    <th>TSS</th>
                     <th>RFL%</th>
                 </tr>
             </thead>
@@ -2555,7 +2929,8 @@ function raceAnnotations(dates) {{
         </div>
     </div>
     
-    <!-- Top Races Section -->
+    <!-- Top Races Section (hidden if no race data) -->
+    {''.join(["""
     <div class="chart-container">
         <div class="chart-title-row">
             <span class="chart-title">🏆 Top Race Performances</span>
@@ -2594,6 +2969,7 @@ function raceAnnotations(dates) {{
         </table>
         </div>
     </div>
+    """]) if top_races and any(top_races.get(k) for k in top_races) else ''}
     
     <div class="footer">
         Updated: {datetime.now().strftime('%Y-%m-%d %H:%M')}<br>
@@ -2744,11 +3120,12 @@ function raceAnnotations(dates) {{
         }};
         
         // Phase 2: Mode state (must be declared before functions that reference it)
-        let currentMode = 'stryd';
+        let currentMode = '{_cfg_power_mode if _cfg_power_mode in ("stryd", "gap", "sim") else "stryd"}';
         
         // Phase 2: Mode data for stats switching
         const modeStats = {{
             stryd: {{ rfl: '{stats["latest_rfl"]}', ag: '{stats["age_grade"] or "-"}',
+                rflDelta: '{f"{chr(43) if stats['rfl_14d_delta'] > 0 else ''}{stats['rfl_14d_delta']}%" if stats["rfl_14d_delta"] is not None else "-"}',
                 cp: {zone_data['current_cp'] if zone_data else (round(PEAK_CP_WATTS_DASH * float(stats["latest_rfl"]) / 100) if stats["latest_rfl"] != "-" else 0)},
                 pred5k: '{format_race_time(stats["race_predictions"].get("5k", "-"))}',
                 pred10k: '{format_race_time(stats["race_predictions"].get("10k", "-"))}',
@@ -2759,6 +3136,7 @@ function raceAnnotations(dates) {{
                 predHm_s: {stats["race_predictions"].get("hm_raw", 0)},
                 predMara_s: {stats["race_predictions"].get("marathon_raw", 0)} }},
             gap: {{ rfl: '{stats.get("latest_rfl_gap", "-")}', ag: '{stats["race_predictions"].get("_ag_gap") or "-"}',
+                rflDelta: '{f"{chr(43) if stats['rfl_14d_delta_gap'] > 0 else ''}{stats['rfl_14d_delta_gap']}%" if stats["rfl_14d_delta_gap"] is not None else "-"}',
                 cp: {round(PEAK_CP_WATTS_DASH * float(stats.get("latest_rfl_gap", 0)) / 100) if stats.get("latest_rfl_gap", "-") != "-" else 0},
                 pred5k: '{format_race_time(stats["race_predictions"].get("_mode_gap", dict()).get("5k", "-"))}',
                 pred10k: '{format_race_time(stats["race_predictions"].get("_mode_gap", dict()).get("10k", "-"))}',
@@ -2769,6 +3147,7 @@ function raceAnnotations(dates) {{
                 predHm_s: {stats["race_predictions"].get("_mode_gap", dict()).get("hm_raw", 0)},
                 predMara_s: {stats["race_predictions"].get("_mode_gap", dict()).get("marathon_raw", 0)} }},
             sim: {{ rfl: '{stats.get("latest_rfl_sim", "-")}', ag: '{stats["race_predictions"].get("_ag_sim") or "-"}',
+                rflDelta: '{f"{chr(43) if stats['rfl_14d_delta_sim'] > 0 else ''}{stats['rfl_14d_delta_sim']}%" if stats["rfl_14d_delta_sim"] is not None else "-"}',
                 cp: {round(PEAK_CP_WATTS_DASH * float(stats.get("latest_rfl_sim", 0)) / 100) if stats.get("latest_rfl_sim", "-") != "-" else 0},
                 pred5k: '{format_race_time(stats["race_predictions"].get("_mode_sim", dict()).get("5k", "-"))}',
                 pred10k: '{format_race_time(stats["race_predictions"].get("_mode_sim", dict()).get("10k", "-"))}',
@@ -2781,7 +3160,7 @@ function raceAnnotations(dates) {{
         }};
         
         // Re-render alert banner now that modeStats is available (for CP display)
-        if (typeof renderAlertBanner === 'function') renderAlertBanner('stryd');
+        if (typeof renderAlertBanner === 'function') renderAlertBanner(currentMode);
         
         // v51: Generate per-point colours (red for races, blue for training)
         function racePointColors(races, baseColor, raceColor) {{
@@ -3157,6 +3536,7 @@ function raceAnnotations(dates) {{
         
         function updateTopRacesTable(period) {{
             const tbody = document.getElementById('topRacesBody');
+            if (!tbody) return;
             const races = (topRacesData[period] || []).slice();
             
             if (races.length === 0) {{
@@ -3183,10 +3563,14 @@ function raceAnnotations(dates) {{
         }}
         
         // Initialize with 1 year view
-        updateTopRacesTable('1y');
+        if (document.getElementById('topRacesBody')) {{
+            updateTopRacesTable('1y');
+        }}
         
         // Toggle handler
-        document.getElementById('topRacesToggle').addEventListener('click', function(e) {{
+        const topRacesToggleEl = document.getElementById('topRacesToggle');
+        if (topRacesToggleEl) {{
+            topRacesToggleEl.addEventListener('click', function(e) {{
             if (e.target.tagName === 'BUTTON') {{
                 this.querySelectorAll('button').forEach(btn => btn.classList.remove('active'));
                 e.target.classList.add('active');
@@ -3194,6 +3578,7 @@ function raceAnnotations(dates) {{
                 updateTopRacesTable(period);
             }}
         }});
+        }}
         
         // --- v51: Weight Chart ---
         const weightAllDates = {json.dumps(weight_data[0] if weight_data else [])};
@@ -3277,6 +3662,7 @@ function raceAnnotations(dates) {{
         let predChart = null;
         
         function renderPredChart(distKey, includeParkruns) {{
+            if (!predCtx) return;
             const d = predData[distKey];
             if (!d || !d.dates || d.dates.length === 0) return;
             
@@ -3321,10 +3707,19 @@ function raceAnnotations(dates) {{
             const predPoints = datesISO.map((dt, i) => displayPredicted[i] !== null ? ({{ x: dt, y: displayPredicted[i] }}) : null).filter(p => p !== null);
             const actualPoints = datesISO.map((dt, i) => ({{ x: dt, y: actual[i] }}));
             
+            // Full prediction trend line (weekly smoothed, for distances with few races)
+            const trendKey = currentMode === 'gap' ? 'trend_dates_iso_gap' : currentMode === 'sim' ? 'trend_dates_iso_sim' : 'trend_dates_iso';
+            const trendValKey = currentMode === 'gap' ? 'trend_values_gap' : currentMode === 'sim' ? 'trend_values_sim' : 'trend_values';
+            const trendDates = d[trendKey] || d.trend_dates_iso || [];
+            const trendVals = d[trendValKey] || d.trend_values || [];
+            const trendPoints = trendDates.map((dt, i) => ({{ x: dt, y: trendVals[i] }}));
+            const fewRaces = actualPoints.length < 5;
+            
             // Compute stable y-axis range covering both adjusted and unadjusted data
             const allYVals = [];
             for (let i = 0; i < actual.length; i++) {{ if (actual[i]) allYVals.push(actual[i]); }}
             for (let i = 0; i < predicted.length; i++) {{ if (predicted[i]) allYVals.push(predicted[i]); }}
+            if (fewRaces) {{ for (let i = 0; i < trendVals.length; i++) {{ if (trendVals[i]) allYVals.push(trendVals[i]); }} }}
             // Also include worst-case adjusted predictions
             for (let i = 0; i < predicted.length; i++) {{
                 if (predicted[i] === null) continue;
@@ -3352,7 +3747,27 @@ function raceAnnotations(dates) {{
             predChart = new Chart(predCtx.getContext('2d'), {{
                 type: 'line',
                 data: {{
-                    datasets: [{{
+                    datasets: [
+                    // Background trend line (only for distances with < 5 races)
+                    ...(fewRaces && trendPoints.length > 0 ? [{{
+                        label: 'Fitness trend',
+                        data: trendPoints,
+                        borderColor: (function() {{
+                            const modeBase = currentMode === 'gap' ? 'rgba(74, 222, 128,' : currentMode === 'sim' ? 'rgba(249, 115, 22,' : 'rgba(129, 140, 248,';
+                            return modeBase + ' 0.3)';
+                        }})(),
+                        backgroundColor: (function() {{
+                            const modeBase = currentMode === 'gap' ? 'rgba(74, 222, 128,' : currentMode === 'sim' ? 'rgba(249, 115, 22,' : 'rgba(129, 140, 248,';
+                            return modeBase + ' 0.04)';
+                        }})(),
+                        borderWidth: 1.5,
+                        pointRadius: 0,
+                        pointHitRadius: 0,
+                        fill: true,
+                        tension: 0.3,
+                        order: 3,
+                    }}] : []),
+                    {{
                         label: adjustConditions ? 'Predicted (adj)' : 'Predicted',
                         data: predPoints,
                         borderColor: (function() {{
@@ -3366,7 +3781,7 @@ function raceAnnotations(dates) {{
                         borderDash: adjustConditions ? [4, 3] : [],
                         borderWidth: 2,
                         pointRadius: 0,
-                        fill: true,
+                        fill: !fewRaces,
                         tension: 0.3,
                     }}, {{
                         label: 'Actual',
@@ -3402,9 +3817,18 @@ function raceAnnotations(dates) {{
                                     const i = datesISO.indexOf(isoDate);
                                     if (i < 0) return [];
                                     const lines = [];
-                                    // Gap (use displayPredicted for adjusted comparison)
-                                    if (displayPredicted[i] && actual[i]) {{
-                                        const gap = actual[i] - displayPredicted[i];
+                                    // Gap vs prediction
+                                    if (predicted[i] && actual[i]) {{
+                                        // If conditions toggled, compare actual vs adjusted prediction
+                                        let compPred = predicted[i];
+                                        if (adjustConditions) {{
+                                            const estMins = predicted[i] / 60.0;
+                                            const heatMult = Math.min(HEAT_MAX_MULT, estMins / HEAT_REF_MINS);
+                                            const tempFactor = 1.0 + (tempAdjs[i] - 1.0) * heatMult;
+                                            const surfFactor = surfaceAdjs[i];
+                                            compPred = Math.round(predicted[i] * tempFactor * surfFactor);
+                                        }}
+                                        const gap = actual[i] - compPred;
                                         if (Math.abs(gap) < 2) {{
                                             lines.push('Hit prediction exactly');
                                         }} else {{
@@ -3628,13 +4052,14 @@ function raceAnnotations(dates) {{
             }}
             
             tbody.innerHTML = runs.map(run => {{
-                // v51: Trend mover arrow
+                // v51: Trend mover arrow (mode-aware)
+                const modeDelta = currentMode === 'gap' ? run.delta_gap : currentMode === 'sim' ? run.delta_sim : run.delta;
                 let deltaHtml = '';
-                if (run.delta !== null && run.delta !== undefined) {{
-                    if (run.delta >= 1.0) deltaHtml = '<span style="color:#16a34a;font-weight:bold;" title="RFL +' + run.delta.toFixed(1) + '%"> ▲▲</span>';
-                    else if (run.delta >= 0.3) deltaHtml = '<span style="color:#16a34a;" title="RFL +' + run.delta.toFixed(1) + '%"> ▲</span>';
-                    else if (run.delta <= -1.0) deltaHtml = '<span style="color:#dc2626;font-weight:bold;" title="RFL ' + run.delta.toFixed(1) + '%"> ▼▼</span>';
-                    else if (run.delta <= -0.3) deltaHtml = '<span style="color:#dc2626;" title="RFL ' + run.delta.toFixed(1) + '%"> ▼</span>';
+                if (modeDelta !== null && modeDelta !== undefined) {{
+                    if (modeDelta >= 1.0) deltaHtml = '<span style="color:#16a34a;font-weight:bold;" title="RFL +' + modeDelta.toFixed(1) + '%"> ▲▲</span>';
+                    else if (modeDelta >= 0.3) deltaHtml = '<span style="color:#16a34a;" title="RFL +' + modeDelta.toFixed(1) + '%"> ▲</span>';
+                    else if (modeDelta <= -1.0) deltaHtml = '<span style="color:#dc2626;font-weight:bold;" title="RFL ' + modeDelta.toFixed(1) + '%"> ▼▼</span>';
+                    else if (modeDelta <= -0.3) deltaHtml = '<span style="color:#dc2626;" title="RFL ' + modeDelta.toFixed(1) + '%"> ▼</span>';
                 }}
                 const rflVal = currentMode === 'gap' ? (run.rfl_gap || '-') : currentMode === 'sim' ? (run.rfl_sim || '-') : (run.rfl || '-');
                 return `
@@ -3645,7 +4070,7 @@ function raceAnnotations(dates) {{
                     <td>${{run.pace}}</td>
                     <td class="power-only">${{run.npower || '-'}}</td>
                     <td>${{run.hr || '-'}}</td>
-                    <td class="power-only">${{run.tss || '-'}}</td>
+                    <td>${{run.tss || '-'}}</td>
                     <td>${{rflVal}}</td>
                 </tr>`;
             }}).join('');
@@ -3675,6 +4100,8 @@ function raceAnnotations(dates) {{
         const ms = modeStats[mode];
         const rflEl = document.getElementById('rfl-value');
         if (rflEl) rflEl.textContent = ms.rfl + '%';
+        const rflDeltaEl = document.getElementById('rfl-delta');
+        if (rflDeltaEl) rflDeltaEl.textContent = ms.rflDelta;
         const agEl = document.getElementById('ag-value');
         if (agEl) agEl.textContent = (ms.ag && ms.ag !== 'None') ? ms.ag + '%' : '-';
         const p5 = document.getElementById('pred-5k');
@@ -3815,11 +4242,14 @@ function raceAnnotations(dates) {{
             const activeFilter = document.querySelector('#recentRunsToggle button.active');
             updateRecentRunsTable(activeFilter ? activeFilter.getAttribute('data-filter') : 'all');
         }}
-        if (typeof updateTopRacesTable === 'function') {{
+        if (typeof updateTopRacesTable === 'function' && document.getElementById('topRacesBody')) {{
             const activePeriod = document.querySelector('#topRacesToggle button.active');
             updateTopRacesTable(activePeriod ? activePeriod.getAttribute('data-period') : '1y');
         }}
     }}
+    
+    // Apply initial mode (ensures GAP athletes see GAP data on load)
+    if (typeof setMode === 'function') setMode(currentMode);
     
     </script>
 </body>

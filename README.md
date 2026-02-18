@@ -1,49 +1,81 @@
-# Running Performance Pipeline — v51
+# New Athlete Setup
 
-Three-mode fitness analysis pipeline processing GPS watch + Stryd power meter data.
+## Quick start
 
-## Pipeline Flow
+```bash
+# 1. Create athlete folder
+mkdir -p ~/athletes/yourname
+cd ~/athletes/yourname
+
+# 2. Copy template files from pipeline
+cp ~/running-pipeline/athlete_template.yml athlete.yml
+cp ~/running-pipeline/re_model_generic.json .
+cp ~/running-pipeline/master_template.xlsx .
+cp ~/running-pipeline/run_athlete.sh .
+cp ~/running-pipeline/unpack_strava_export.py .
+
+# 3. Edit athlete.yml with your details
+#    - name, mass_kg, date_of_birth, gender, timezone
+#    - lthr and max_hr (or leave defaults and estimate later)
+
+# 4. Unpack your Strava export
+./run_athlete.sh --unpack ~/Downloads/export_12345678.zip
+
+# 5. Run the full pipeline
+./run_athlete.sh
+
+# 6. Open your dashboard
+open output/dashboard/index.html
+```
+
+## Folder structure after setup
 
 ```
-FIT files → rebuild_from_fit_zip.py → StepA_SimulatePower.py → StepB_PostProcess.py → generate_dashboard.py
-                                           ↑                         ↑
-                                    build_re_model_s4.py        config.py ← athlete.yml
+~/athletes/yourname/
+├── athlete.yml              # Your config
+├── run_athlete.sh           # Pipeline runner
+├── re_model_generic.json    # Generic RE model (GAP mode)
+├── master_template.xlsx     # Column template for rebuild
+├── data/
+│   ├── fits/                # Extracted FIT files
+│   ├── fits.zip             # Zipped FIT files (auto-created)
+│   └── activities.csv       # Strava activity summary (runs only)
+└── output/
+    ├── Master_FULL.xlsx     # Raw rebuild output
+    ├── Master_FULL_post.xlsx  # Post-processed (RF, predictions, etc.)
+    ├── persec_cache/        # Per-second NPZ cache files
+    └── dashboard/
+        └── index.html       # Your dashboard
 ```
 
-## Core Scripts
+## Re-running after adding new data
 
-| Script | Purpose |
-|--------|---------|
-| `rebuild_from_fit_zip.py` | Parse FIT files → master Excel + NPZ per-second cache |
-| `StepA_SimulatePower.py` | Simulate power for non-Stryd eras using RE model |
-| `StepB_PostProcess.py` | RF, RFL, predictions, alerts, training load — the main engine |
-| `generate_dashboard.py` | Single-file HTML dashboard with Chart.js |
-| `config.py` | Central config, loads from `athlete.yml` via `athlete_config.py` |
-| `run_pipeline.py` | Orchestrator for full/incremental runs |
+If you get a new Strava export or add FIT files:
+```bash
+cd ~/athletes/yourname
+./run_athlete.sh                    # Full pipeline
+./run_athlete.sh --step stepb       # Just recalculate RF/predictions
+./run_athlete.sh --step dashboard   # Just regenerate dashboard
+```
 
-## Data Management
+## Configuration
 
-| Script | Purpose |
-|--------|---------|
-| `fetch_fit_files.py` | Download new FIT files from intervals.icu |
-| `add_run.py` | Add a run with metadata (name, shoes, flags) |
-| `add_override.py` | Add activity overrides (race flag, surface, distance) |
-| `sync_athlete_data.py` | Sync weight + non-running TSS from intervals.icu |
+Edit `athlete.yml` to change:
+- Heart rate zones (lthr, max_hr)
+- Planned races (for race readiness cards)
+- Temperature baseline (default 10°C for Northern Europe)
 
-## CI/CD
+The pipeline auto-calibrates predictions from your race results.
+No manual tuning needed.
 
-- `.github/workflows/pipeline.yml` — Daily automated run
-- `ci/dropbox_sync.py` — Upload/download NPZ cache + master to Dropbox
-- `ci/apply_run_metadata.py` — Apply pending activity names and overrides
+## Requirements
 
-## Three Modes
+- Python 3.9+
+- Packages: pandas, numpy, openpyxl, fitparse, requests, scipy, pyyaml
+- The main pipeline repo (`~/running-pipeline/` by default)
 
-- **⚡ Stryd**: Real power from Stryd pod. Primary model.
-- **🏃 GAP**: Grade Adjusted Pace / HR. No power meter needed. 0.904 correlation with Stryd.
-- **🔬 SIM**: Athlete-specific simulated power from RE model. 0.993 correlation with Stryd.
-
-## Key Files
-
-- `athlete.yml` — Athlete-specific config (mass, DOB, LTHR, planned races, etc.)
-- `activity_overrides.yml` — Per-activity flags (race, surface, distance corrections)
-- `requirements.txt` — Python dependencies (pandas <3.0)
+Set `PIPELINE_DIR` if your repo is elsewhere:
+```bash
+export PIPELINE_DIR=/path/to/running-pipeline
+./run_athlete.sh
+```
