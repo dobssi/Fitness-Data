@@ -8,8 +8,13 @@
 #   DROPBOX_TOKEN / DROPBOX_REFRESH_TOKEN / DROPBOX_APP_KEY / DROPBOX_APP_SECRET
 #
 # Dropbox structure: /Running and Cycling/DataPipeline/athletes/IanLilley/
-#   data/fits.zip, data/activities.csv
-#   output/Master_FULL.xlsx, output/Master_FULL_post.xlsx, etc.
+#   data/fits.zip, data/activities.csv          (input)
+#   activity_overrides.xlsx                     (root — shared between local & CI)
+#   athlete_data.csv                            (root)
+#   athlete.yml                                 (root — config)
+#   output/Master_FULL.xlsx, Master_FULL_post.xlsx  (output)
+#   output/dashboard/index.html                 (output)
+#   persec_cache/*.npz                          (root — cache)
 
 name: Ian Pipeline
 
@@ -32,7 +37,7 @@ concurrency:
 jobs:
   pipeline:
     runs-on: ubuntu-latest
-    timeout-minutes: 120
+    timeout-minutes: 240
 
     env:
       DROPBOX_TOKEN: ${{ secrets.DROPBOX_TOKEN }}
@@ -62,14 +67,14 @@ jobs:
       - name: Create directories
         run: |
           mkdir -p ${{ env.ATHLETE_DIR }}/data
-          mkdir -p ${{ env.ATHLETE_DIR }}/output/persec_cache
+          mkdir -p ${{ env.ATHLETE_DIR }}/persec_cache
           mkdir -p ${{ env.ATHLETE_DIR }}/output/dashboard
 
       # ─── Restore persec cache ───────────────────────────────
       - name: Restore persec cache
         uses: actions/cache/restore@v4
         with:
-          path: ${{ env.ATHLETE_DIR }}/output/persec_cache
+          path: ${{ env.ATHLETE_DIR }}/persec_cache
           key: ian-persec-${{ github.run_number }}
           restore-keys: |
             ian-persec-
@@ -82,11 +87,12 @@ jobs:
             --local-prefix "${{ env.ATHLETE_DIR }}" \
             --items data/fits.zip \
                     data/activities.csv \
+                    activity_overrides.xlsx \
+                    athlete_data.csv \
                     output/Master_FULL.xlsx \
                     output/Master_FULL_post.xlsx \
-                    output/activity_overrides.xlsx \
                     output/_weather_cache_openmeteo/openmeteo_cache.sqlite \
-            --cache-dir ${{ env.ATHLETE_DIR }}/output/persec_cache
+            --cache-dir ${{ env.ATHLETE_DIR }}/persec_cache
         continue-on-error: true
 
       # ─── Step 1: Rebuild from FIT files ─────────────────────
@@ -97,9 +103,9 @@ jobs:
             --fit-zip ${{ env.ATHLETE_DIR }}/data/fits.zip \
             --template master_template.xlsx \
             --out ${{ env.ATHLETE_DIR }}/output/Master_FULL.xlsx \
-            --persec-cache-dir ${{ env.ATHLETE_DIR }}/output/persec_cache \
+            --persec-cache-dir ${{ env.ATHLETE_DIR }}/persec_cache \
             --strava ${{ env.ATHLETE_DIR }}/data/activities.csv \
-            --override-file ${{ env.ATHLETE_DIR }}/output/activity_overrides.xlsx \
+            --override-file ${{ env.ATHLETE_DIR }}/activity_overrides.xlsx \
             --tz ${{ env.TZ_LOCAL }} \
             --weight 87.0
 
@@ -109,7 +115,7 @@ jobs:
         run: |
           python add_gap_power.py \
             --master ${{ env.ATHLETE_DIR }}/output/Master_FULL.xlsx \
-            --cache-dir ${{ env.ATHLETE_DIR }}/output/persec_cache \
+            --cache-dir ${{ env.ATHLETE_DIR }}/persec_cache \
             --out ${{ env.ATHLETE_DIR }}/output/Master_FULL.xlsx \
             --mass-kg 87.0 \
             --re-constant 0.92
@@ -120,10 +126,10 @@ jobs:
         run: |
           python StepB_PostProcess.py \
             --master ${{ env.ATHLETE_DIR }}/output/Master_FULL.xlsx \
-            --persec-cache-dir ${{ env.ATHLETE_DIR }}/output/persec_cache \
+            --persec-cache-dir ${{ env.ATHLETE_DIR }}/persec_cache \
             --out ${{ env.ATHLETE_DIR }}/output/Master_FULL_post.xlsx \
             --model-json re_model_generic.json \
-            --override-file ${{ env.ATHLETE_DIR }}/output/activity_overrides.xlsx \
+            --override-file ${{ env.ATHLETE_DIR }}/activity_overrides.xlsx \
             --athlete-data ${{ env.ATHLETE_DIR }}/athlete_data.csv \
             --mass-kg 87.0 \
             --tz ${{ env.TZ_LOCAL }} \
@@ -147,7 +153,7 @@ jobs:
         uses: actions/cache/save@v4
         if: always()
         with:
-          path: ${{ env.ATHLETE_DIR }}/output/persec_cache
+          path: ${{ env.ATHLETE_DIR }}/persec_cache
           key: ian-persec-${{ github.run_number }}
 
       # ─── Upload results to Dropbox ──────────────────────────
@@ -157,12 +163,12 @@ jobs:
           python ci/dropbox_sync.py upload \
             --dropbox-base "${{ env.DB_BASE }}" \
             --local-prefix "${{ env.ATHLETE_DIR }}" \
-            --items output/Master_FULL.xlsx \
+            --items activity_overrides.xlsx \
+                    output/Master_FULL.xlsx \
                     output/Master_FULL_post.xlsx \
-                    output/activity_overrides.xlsx \
                     output/dashboard/index.html \
                     output/_weather_cache_openmeteo/openmeteo_cache.sqlite \
-            --cache-dir ${{ env.ATHLETE_DIR }}/output/persec_cache
+            --cache-dir ${{ env.ATHLETE_DIR }}/persec_cache
 
       # ─── Deploy dashboard to GitHub Pages ──────────────────
       - name: Prepare dashboard for Pages
@@ -197,7 +203,7 @@ jobs:
             echo "- **Master size:** $SIZE bytes" >> $GITHUB_STEP_SUMMARY
           fi
           
-          CACHE="${{ env.ATHLETE_DIR }}/output/persec_cache"
+          CACHE="${{ env.ATHLETE_DIR }}/persec_cache"
           if [ -d "$CACHE" ]; then
             COUNT=$(find "$CACHE" -name "*.npz" | wc -l)
             echo "- **NPZ cache:** $COUNT files" >> $GITHUB_STEP_SUMMARY

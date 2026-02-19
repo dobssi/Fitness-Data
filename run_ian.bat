@@ -14,7 +14,7 @@ set "TZ=Europe/London"
 set "ATHLETE_DIR=athletes\IanLilley"
 set "DATA_DIR=%ATHLETE_DIR%\data"
 set "OUTPUT_DIR=%ATHLETE_DIR%\output"
-set "CACHE_DIR=%OUTPUT_DIR%\persec_cache"
+set "CACHE_DIR=%ATHLETE_DIR%\persec_cache"
 set "DASHBOARD_DIR=%OUTPUT_DIR%\dashboard"
 
 REM Point config.py at Ian's athlete.yml
