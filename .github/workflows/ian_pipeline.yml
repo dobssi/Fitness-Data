@@ -32,7 +32,7 @@ concurrency:
 jobs:
   pipeline:
     runs-on: ubuntu-latest
-    timeout-minutes: 300
+    timeout-minutes: 120
 
     env:
       DROPBOX_TOKEN: ${{ secrets.DROPBOX_TOKEN }}
@@ -163,6 +163,23 @@ jobs:
                     output/dashboard/index.html \
                     output/_weather_cache_openmeteo/openmeteo_cache.sqlite \
             --cache-dir ${{ env.ATHLETE_DIR }}/output/persec_cache
+
+      # ─── Deploy dashboard to GitHub Pages ──────────────────
+      - name: Prepare dashboard for Pages
+        run: |
+          mkdir -p docs/ian
+          cp -f ${{ env.ATHLETE_DIR }}/output/dashboard/index.html docs/ian/index.html 2>/dev/null || true
+        continue-on-error: true
+
+      - name: Deploy to GitHub Pages
+        uses: peaceiris/actions-gh-pages@v3
+        if: success()
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./docs
+          publish_branch: gh-pages
+          keep_files: true
+        continue-on-error: true
 
       # ─── Summary ────────────────────────────────────────────
       - name: Summary
