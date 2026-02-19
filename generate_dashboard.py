@@ -1436,7 +1436,9 @@ def get_zone_data(df):
     _master_dir = os.path.dirname(os.path.abspath(MASTER_FILE))
     for candidate in ['persec_cache_FULL', '../persec_cache_FULL', 'persec_cache',
                        os.path.join(_master_dir, 'persec_cache_FULL'),
-                       os.path.join(_master_dir, 'persec_cache')]:
+                       os.path.join(_master_dir, 'persec_cache'),
+                       os.path.join(_master_dir, '..', 'persec_cache_FULL'),
+                       os.path.join(_master_dir, '..', 'persec_cache')]:
         if os.path.isdir(candidate):
             npz_dir = candidate
             break
@@ -2825,7 +2827,7 @@ function raceAnnotations(dates) {{
     {''.join(['''
     <div class="chart-container">
         <div class="chart-header">
-            <div class="chart-title">Weight</div>
+            <div class="chart-title">&#9878;&#65039; Weight</div>
             <div class="chart-toggle" id="weightToggle">
                 <button class="active" data-months="6">6m</button>
                 <button data-months="12">1yr</button>
