@@ -2825,7 +2825,7 @@ function raceAnnotations(dates) {{
     {''.join(['''
     <div class="chart-container">
         <div class="chart-header">
-            <div class="chart-title">&#9878;&#65039; Weight</div>
+            <div class="chart-title">Weight</div>
             <div class="chart-toggle" id="weightToggle">
                 <button class="active" data-months="6">6m</button>
                 <button data-months="12">1yr</button>
