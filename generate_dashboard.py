@@ -1475,9 +1475,14 @@ def get_zone_data(df):
         run_id = run_date.strftime('%Y-%m-%d_%H-%M-%S')
         
         # NPZ file lookup: try run_id column first (matches FIT filename),
-        # then date-based ID, then date-prefix fallback
+        # then date-based ID, then file-based ID, then date-prefix fallback
         master_run_id = str(row.get('run_id', '')).strip() if pd.notna(row.get('run_id')) else ''
         npz_key = master_run_id.replace('&', '_').replace('?', '_').replace('=', '_') if master_run_id else ''
+        
+        # Fallback: extract activity ID from file column (e.g. '18502680351.fit' -> '18502680351')
+        file_id = ''
+        if not npz_key and pd.notna(row.get('file')):
+            file_id = str(row['file']).replace('.fit', '').replace('.FIT', '').strip()
         
         run_entry = {
             'date': run_date.strftime('%Y-%m-%d'),
@@ -1492,6 +1497,8 @@ def get_zone_data(df):
         
         # Try to load NPZ for per-second time-in-zone
         npz_path = npz_index.get(npz_key) if npz_key else None
+        if not npz_path and file_id:
+            npz_path = npz_index.get(file_id)
         if not npz_path:
             npz_path = npz_index.get(run_id)
         if not npz_path:
