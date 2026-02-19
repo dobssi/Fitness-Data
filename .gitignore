@@ -11,6 +11,7 @@ FIT_downloads/
 
 # Pipeline output files
 Master_*.xlsx
+!master_template.xlsx
 re_model_s4_*.json
 stryd_serial_map.json
 
