@@ -45,6 +45,7 @@ jobs:
       DROPBOX_APP_KEY: ${{ secrets.DROPBOX_APP_KEY }}
       DROPBOX_APP_SECRET: ${{ secrets.DROPBOX_APP_SECRET }}
       ATHLETE_DIR: athletes/IanLilley
+      ATHLETE_CONFIG_PATH: athletes/IanLilley/athlete.yml
       DB_BASE: /Running and Cycling/DataPipeline/athletes/IanLilley
       TZ_LOCAL: Europe/London
 
@@ -144,7 +145,6 @@ jobs:
           MASTER_FILE: ${{ env.ATHLETE_DIR }}/output/Master_FULL_post.xlsx
           OUTPUT_FILE: ${{ env.ATHLETE_DIR }}/output/dashboard/index.html
           ATHLETE_DATA_FILE: ${{ env.ATHLETE_DIR }}/athlete_data.csv
-          ATHLETE_CONFIG_PATH: ${{ env.ATHLETE_DIR }}/athlete.yml
         run: python generate_dashboard.py
         continue-on-error: true
 
