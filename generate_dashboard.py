@@ -2126,6 +2126,17 @@ def _generate_alert_banner(alert_data, critical_power=None):
 def generate_html(stats, rf_data, volume_data, ctl_atl_data, ctl_atl_lookup, rfl_trend_dates, rfl_trend_values, rfl_trendline, rfl_projection, rfl_ci_upper, rfl_ci_lower, alltime_rfl_dates, alltime_rfl_values, recent_runs, top_races, alert_data=None, weight_data=None, prediction_data=None, ag_data=None, zone_data=None, rfl_trend_gap=None, rfl_trend_sim=None):
     """Generate the HTML dashboard."""
     
+    # --- Helper for None-safe delta formatting ---
+    def _fmt_delta(v):
+        if v is None:
+            return "-"
+        return f"{'+' if v > 0 else ''}{v}%"
+
+    _gap_rfl = stats.get("latest_rfl_gap") or stats.get("latest_rfl")
+    _gap_rfl_num = float(_gap_rfl) if isinstance(_gap_rfl, (int, float)) else 0
+    _sim_rfl = stats.get("latest_rfl_sim") or stats.get("latest_rfl")
+    _sim_rfl_num = float(_sim_rfl) if isinstance(_sim_rfl, (int, float)) else 0
+
     # Compute initial display values based on configured power mode
     # This ensures GAP athletes see correct values even before JS runs (mobile, slow load)
     _init_mode = _cfg_power_mode if _cfg_power_mode in ('stryd', 'gap', 'sim') else 'stryd'
@@ -3134,17 +3145,6 @@ function raceAnnotations(dates) {{
         // Phase 2: Mode data for stats switching
         const modeStats = {{"""
 
-    # --- Helper variables for None-safe gap/sim stats ---
-    def _fmt_delta(v):
-        if v is None:
-            return "-"
-        return f"{'+' if v > 0 else ''}{v}%"
-
-    _gap_rfl = stats.get("latest_rfl_gap") or stats.get("latest_rfl")
-    _gap_rfl_num = _gap_rfl if isinstance(_gap_rfl, (int, float)) else 0
-    _sim_rfl = stats.get("latest_rfl_sim") or stats.get("latest_rfl")
-    _sim_rfl_num = _sim_rfl if isinstance(_sim_rfl, (int, float)) else 0
-
     html += f"""
             stryd: {{ rfl: '{stats["latest_rfl"]}', ag: '{stats["age_grade"] or "-"}',
                 rflDelta: '{f"{chr(43) if stats['rfl_14d_delta'] > 0 else ''}{stats['rfl_14d_delta']}%" if stats["rfl_14d_delta"] is not None else "-"}',
@@ -3159,7 +3159,7 @@ function raceAnnotations(dates) {{
                 predMara_s: {stats["race_predictions"].get("marathon_raw", 0)} }},
             gap: {{ rfl: '{stats.get("latest_rfl_gap") or stats.get("latest_rfl", "-")}', ag: '{stats["race_predictions"].get("_ag_gap") or "-"}',
                 rflDelta: '{_fmt_delta(stats.get("rfl_14d_delta_gap"))}',
-                cp: {round(PEAK_CP_WATTS_DASH * float(_gap_rfl) / 100) if _gap_rfl else 0},
+                cp: {round(PEAK_CP_WATTS_DASH * _gap_rfl_num / 100) if _gap_rfl_num else 0},
                 pred5k: '{format_race_time(stats["race_predictions"].get("_mode_gap", dict()).get("5k", "-"))}',
                 pred10k: '{format_race_time(stats["race_predictions"].get("_mode_gap", dict()).get("10k", "-"))}',
                 predHm: '{format_race_time(stats["race_predictions"].get("_mode_gap", dict()).get("Half Marathon", "-"))}',
