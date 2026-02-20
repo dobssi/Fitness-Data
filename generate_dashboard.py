@@ -3145,9 +3145,7 @@ function raceAnnotations(dates) {{
         let currentMode = '{_cfg_power_mode if _cfg_power_mode in ("stryd", "gap", "sim") else "stryd"}';
         
         // Phase 2: Mode data for stats switching
-        const modeStats = {{"""
-
-    html += f"""
+        const modeStats = {{
             stryd: {{ rfl: '{stats["latest_rfl"]}', ag: '{stats["age_grade"] or "-"}',
                 rflDelta: '{f"{chr(43) if stats['rfl_14d_delta'] > 0 else ''}{stats['rfl_14d_delta']}%" if stats["rfl_14d_delta"] is not None else "-"}',
                 cp: {zone_data['current_cp'] if zone_data else (round(PEAK_CP_WATTS_DASH * float(stats["latest_rfl"]) / 100) if stats["latest_rfl"] != "-" else 0)},
