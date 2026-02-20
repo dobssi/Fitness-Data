@@ -198,8 +198,8 @@ jobs:
             --nr-tss-oldest 2020-01-01
         continue-on-error: true
 
-      - name: Rebuild from FIT files
-        if: ${{ steps.gate.outputs.continue == 'true' && (env.PIPELINE_MODE == 'FULL' || env.PIPELINE_MODE == 'UPDATE') }}
+      - name: Rebuild from FIT files (FULL)
+        if: ${{ steps.gate.outputs.continue == 'true' && env.PIPELINE_MODE == 'FULL' }}
         run: |
           python rebuild_from_fit_zip.py \
             --fit-zip ${{ env.ATHLETE_DIR }}/data/fits.zip \
@@ -207,6 +207,22 @@ jobs:
             --out ${{ env.ATHLETE_DIR }}/output/Master_FULL.xlsx \
             --persec-cache-dir ${{ env.ATHLETE_DIR }}/persec_cache \
             --strava ${{ env.ATHLETE_DIR }}/data/activities.csv \
+            --pending-activities ${{ env.ATHLETE_DIR }}/pending_activities.csv \
+            --override-file ${{ env.ATHLETE_DIR }}/activity_overrides.xlsx \
+            --tz ${{ env.TZ_LOCAL }} \
+            --weight 87.0
+
+      - name: Rebuild from FIT files (UPDATE — append only)
+        if: ${{ steps.gate.outputs.continue == 'true' && env.PIPELINE_MODE == 'UPDATE' }}
+        run: |
+          python rebuild_from_fit_zip.py \
+            --fit-zip ${{ env.ATHLETE_DIR }}/data/fits.zip \
+            --template master_template.xlsx \
+            --out ${{ env.ATHLETE_DIR }}/output/Master_FULL.xlsx \
+            --append-master-in ${{ env.ATHLETE_DIR }}/output/Master_FULL.xlsx \
+            --persec-cache-dir ${{ env.ATHLETE_DIR }}/persec_cache \
+            --strava ${{ env.ATHLETE_DIR }}/data/activities.csv \
+            --pending-activities ${{ env.ATHLETE_DIR }}/pending_activities.csv \
             --override-file ${{ env.ATHLETE_DIR }}/activity_overrides.xlsx \
             --tz ${{ env.TZ_LOCAL }} \
             --weight 87.0
