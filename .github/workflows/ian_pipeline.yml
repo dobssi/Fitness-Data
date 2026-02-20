@@ -106,8 +106,7 @@ jobs:
             --fit-dir ${{ env.ATHLETE_DIR }}/data/FIT_downloads \
             --zip ${{ env.ATHLETE_DIR }}/data/fits.zip \
             --state-file ${{ env.ATHLETE_DIR }}/fit_sync_state.json \
-            --pending-csv ${{ env.ATHLETE_DIR }}/pending_activities.csv \
-            --zip-rebuild
+            --pending-csv ${{ env.ATHLETE_DIR }}/pending_activities.csv
         continue-on-error: true
 
       - name: Sync athlete data from intervals.icu
@@ -188,7 +187,6 @@ jobs:
             --items activity_overrides.xlsx \
                     athlete_data.csv \
                     fit_sync_state.json \
-                    data/fits.zip \
                     output/Master_FULL.xlsx \
                     output/Master_FULL_post.xlsx \
                     output/dashboard/index.html \

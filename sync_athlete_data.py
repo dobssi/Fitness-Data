@@ -286,6 +286,10 @@ def merge_data(existing_df: pd.DataFrame,
     
     all_dates = sorted(d for d in all_dates if d and len(d) == 10)  # valid YYYY-MM-DD
     
+    if not all_dates:
+        print("  No data to merge (no existing CSV, no weight, no non-running TSS)")
+        return pd.DataFrame(columns=["date", "weight_kg", "garmin_tr", "non_running_tss"])
+    
     print(f"  Total date range: {all_dates[0]} -> {all_dates[-1]}")
     print(f"  Total unique dates: {len(all_dates)}")
     
