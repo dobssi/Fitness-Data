@@ -4,17 +4,10 @@
 # Triggers:
 #   - Manual (workflow_dispatch) with mode selection
 #
-# Secrets required (same as Paul's pipeline):
+# Secrets required:
 #   DROPBOX_TOKEN / DROPBOX_REFRESH_TOKEN / DROPBOX_APP_KEY / DROPBOX_APP_SECRET
-#
-# Dropbox structure: /Running and Cycling/DataPipeline/athletes/IanLilley/
-#   data/fits.zip, data/activities.csv          (input)
-#   activity_overrides.xlsx                     (root — shared between local & CI)
-#   athlete_data.csv                            (root)
-#   athlete.yml                                 (root — config)
-#   output/Master_FULL.xlsx, Master_FULL_post.xlsx  (output)
-#   output/dashboard/index.html                 (output)
-#   persec_cache/*.npz                          (root — cache)
+#   IAN_INTERVALS_API_KEY    — Ian's intervals.icu API key
+#   IAN_INTERVALS_ATHLETE_ID — Ian's intervals.icu athlete ID (i512712)
 
 name: Ian Pipeline
 
@@ -25,10 +18,15 @@ on:
         description: 'Pipeline mode'
         type: choice
         options:
+          - UPDATE
           - FULL
           - FROM_STEPB
           - DASHBOARD
-        default: FROM_STEPB
+        default: UPDATE
+      sync:
+        description: 'Sync from intervals.icu'
+        type: boolean
+        default: true
 
 concurrency:
   group: ian-pipeline
@@ -44,6 +42,8 @@ jobs:
       DROPBOX_REFRESH_TOKEN: ${{ secrets.DROPBOX_REFRESH_TOKEN }}
       DROPBOX_APP_KEY: ${{ secrets.DROPBOX_APP_KEY }}
       DROPBOX_APP_SECRET: ${{ secrets.DROPBOX_APP_SECRET }}
+      INTERVALS_API_KEY: ${{ secrets.IAN_INTERVALS_API_KEY }}
+      INTERVALS_ATHLETE_ID: ${{ secrets.IAN_INTERVALS_ATHLETE_ID }}
       ATHLETE_DIR: athletes/IanLilley
       ATHLETE_CONFIG_PATH: athletes/IanLilley/athlete.yml
       DB_BASE: /Running and Cycling/DataPipeline/athletes/IanLilley
@@ -90,15 +90,37 @@ jobs:
                     data/activities.csv \
                     activity_overrides.xlsx \
                     athlete_data.csv \
+                    fit_sync_state.json \
                     output/Master_FULL.xlsx \
                     output/Master_FULL_post.xlsx \
                     output/_weather_cache_openmeteo/openmeteo_cache.sqlite \
             --cache-dir ${{ env.ATHLETE_DIR }}/persec_cache
         continue-on-error: true
 
+      # ─── Sync from intervals.icu ────────────────────────────
+      # Fetch new FIT files + weight/wellness data
+      - name: Fetch new FIT files from intervals.icu
+        if: ${{ github.event.inputs.sync != 'false' && github.event.inputs.mode != 'DASHBOARD' }}
+        run: |
+          python fetch_fit_files.py \
+            --fit-dir ${{ env.ATHLETE_DIR }}/data/FIT_downloads \
+            --zip ${{ env.ATHLETE_DIR }}/data/fits.zip \
+            --state-file ${{ env.ATHLETE_DIR }}/fit_sync_state.json \
+            --pending-csv ${{ env.ATHLETE_DIR }}/pending_activities.csv \
+            --zip-rebuild
+        continue-on-error: true
+
+      - name: Sync athlete data from intervals.icu
+        if: ${{ github.event.inputs.sync != 'false' && github.event.inputs.mode != 'DASHBOARD' }}
+        run: |
+          python sync_athlete_data.py \
+            --athlete-data ${{ env.ATHLETE_DIR }}/athlete_data.csv \
+            --nr-tss-oldest 2020-01-01
+        continue-on-error: true
+
       # ─── Step 1: Rebuild from FIT files ─────────────────────
       - name: Rebuild from FIT files
-        if: ${{ github.event.inputs.mode == 'FULL' }}
+        if: ${{ github.event.inputs.mode == 'FULL' || github.event.inputs.mode == 'UPDATE' }}
         run: |
           python rebuild_from_fit_zip.py \
             --fit-zip ${{ env.ATHLETE_DIR }}/data/fits.zip \
@@ -112,7 +134,7 @@ jobs:
 
       # ─── Step 2: Add GAP simulated power ────────────────────
       - name: Add GAP power
-        if: ${{ github.event.inputs.mode == 'FULL' }}
+        if: ${{ github.event.inputs.mode == 'FULL' || github.event.inputs.mode == 'UPDATE' }}
         run: |
           python add_gap_power.py \
             --master ${{ env.ATHLETE_DIR }}/output/Master_FULL.xlsx \
@@ -164,6 +186,9 @@ jobs:
             --dropbox-base "${{ env.DB_BASE }}" \
             --local-prefix "${{ env.ATHLETE_DIR }}" \
             --items activity_overrides.xlsx \
+                    athlete_data.csv \
+                    fit_sync_state.json \
+                    data/fits.zip \
                     output/Master_FULL.xlsx \
                     output/Master_FULL_post.xlsx \
                     output/dashboard/index.html \
@@ -194,6 +219,7 @@ jobs:
           echo "## Ian Pipeline Run Summary" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "- **Mode:** ${{ github.event.inputs.mode }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Sync:** ${{ github.event.inputs.sync }}" >> $GITHUB_STEP_SUMMARY
           echo "- **Status:** ${{ job.status }}" >> $GITHUB_STEP_SUMMARY
           echo "- **Time:** $(date -u +%Y-%m-%dT%H:%M:%SZ)" >> $GITHUB_STEP_SUMMARY
           
@@ -207,4 +233,10 @@ jobs:
           if [ -d "$CACHE" ]; then
             COUNT=$(find "$CACHE" -name "*.npz" | wc -l)
             echo "- **NPZ cache:** $COUNT files" >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          AD="${{ env.ATHLETE_DIR }}/athlete_data.csv"
+          if [ -f "$AD" ]; then
+            LINES=$(wc -l < "$AD")
+            echo "- **Athlete data:** $LINES lines" >> $GITHUB_STEP_SUMMARY
           fi

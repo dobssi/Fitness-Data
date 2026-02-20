@@ -40,10 +40,10 @@ power:
     re_constant: 0.92
 
 data:
-  source: "fit_folder"
+  source: "intervals"
   intervals:
-    athlete_id: ""
-    api_key: ""
+    athlete_id: ""        # Set via environment variable INTERVALS_ATHLETE_ID (i512712)
+    api_key: ""           # Set via environment variable IAN_INTERVALS_API_KEY
   fit_folder:
     path: "./data/fits"
   strava_export:
