@@ -134,7 +134,7 @@ jobs:
             --athlete-data ${{ env.ATHLETE_DIR }}/athlete_data.csv \
             --mass-kg 66.0 \
             --tz ${{ env.TZ_LOCAL }} \
-            --runner-dob "1965-06-15" \
+            --runner-dob "1961-07-08" \
             --runner-gender male \
             --strava ${{ env.ATHLETE_DIR }}/data/activities.csv \
             --progress-every 50

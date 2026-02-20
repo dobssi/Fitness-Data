@@ -5,7 +5,7 @@
 athlete:
   name: "Nadi Jahangiri"
   mass_kg: 66.0           # Most recent Strava weight ~66kg (2012-2015 era); placeholder
-  date_of_birth: "1965-06-15"   # Approximate — update when confirmed
+  date_of_birth: "1961-07-08"   # Confirmed
   gender: "male"
   timezone: "Europe/London"
 
