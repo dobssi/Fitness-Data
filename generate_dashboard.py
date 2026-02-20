@@ -1308,7 +1308,7 @@ def get_zone_data(df):
     
     # Use mode-appropriate RFL column
     _rfl_col_name = {'gap': 'RFL_gap_Trend', 'sim': 'RFL_sim_Trend'}.get(_cfg_power_mode, 'RFL_Trend')
-    if _rfl_col_name not in df.columns:
+    if _rfl_col_name not in df.columns or df[_rfl_col_name].dropna().empty:
         _rfl_col_name = 'RFL_Trend'  # fallback
     current_rfl = float(df.iloc[-1].get(_rfl_col_name, 0.90)) if len(df) > 0 else 0.90
     if pd.isna(current_rfl):
@@ -1548,7 +1548,7 @@ def get_zone_data(df):
     # RFL projection slope for race readiness cards
     _rfl_proj_per_day = 0.0
     _rfl_proj_col = {'gap': 'RFL_gap_Trend', 'sim': 'RFL_sim_Trend'}.get(_cfg_power_mode, 'RFL_Trend')
-    if _rfl_proj_col not in df.columns:
+    if _rfl_proj_col not in df.columns or df[_rfl_proj_col].dropna().empty:
         _rfl_proj_col = 'RFL_Trend'
     try:
         _rfl_col = df[_rfl_proj_col].dropna()
@@ -2136,6 +2136,8 @@ def generate_html(stats, rf_data, volume_data, ctl_atl_data, ctl_atl_lookup, rfl
     _gap_rfl_num = float(_gap_rfl) if isinstance(_gap_rfl, (int, float)) else 0
     _sim_rfl = stats.get("latest_rfl_sim") or stats.get("latest_rfl")
     _sim_rfl_num = float(_sim_rfl) if isinstance(_sim_rfl, (int, float)) else 0
+    _gap_preds = stats.get("race_predictions", {}).get("_mode_gap") or stats.get("race_predictions", {})
+    _sim_preds = stats.get("race_predictions", {}).get("_mode_sim") or stats.get("race_predictions", {})
 
     # Compute initial display values based on configured power mode
     # This ensures GAP athletes see correct values even before JS runs (mobile, slow load)
@@ -2144,9 +2146,9 @@ def generate_html(stats, rf_data, volume_data, ctl_atl_data, ctl_atl_lookup, rfl
         _init_rfl = stats.get('latest_rfl_gap') or stats.get('latest_rfl')
         _init_delta = stats.get('rfl_14d_delta_gap') or stats.get('rfl_14d_delta')
         _init_rfl_label = 'RFL (GAP)'
-        _init_preds = stats['race_predictions'].get('_mode_gap', dict())
-        _init_easy = stats.get('easy_rfl_gap_gap')
-        _init_ag = stats['race_predictions'].get('_ag_gap')
+        _init_preds = stats['race_predictions'].get('_mode_gap') or stats['race_predictions']
+        _init_easy = stats.get('easy_rfl_gap_gap') if stats.get('easy_rfl_gap_gap') is not None else stats.get('easy_rfl_gap')
+        _init_ag = stats['race_predictions'].get('_ag_gap') or stats.get('age_grade')
     elif _init_mode == 'sim':
         _init_rfl = stats.get('latest_rfl_sim') or stats.get('latest_rfl')
         _init_delta = stats.get('rfl_14d_delta_sim') or stats.get('rfl_14d_delta')
@@ -3157,28 +3159,28 @@ function raceAnnotations(dates) {{
                 pred10k_s: {stats["race_predictions"].get("10k_raw", 0)},
                 predHm_s: {stats["race_predictions"].get("hm_raw", 0)},
                 predMara_s: {stats["race_predictions"].get("marathon_raw", 0)} }},
-            gap: {{ rfl: '{stats.get("latest_rfl_gap") or stats.get("latest_rfl", "-")}', ag: '{stats["race_predictions"].get("_ag_gap") or "-"}',
-                rflDelta: '{_fmt_delta(stats.get("rfl_14d_delta_gap"))}',
+            gap: {{ rfl: '{stats.get("latest_rfl_gap") or stats.get("latest_rfl", "-")}', ag: '{stats["race_predictions"].get("_ag_gap") or stats.get("age_grade") or "-"}',
+                rflDelta: '{_fmt_delta(stats.get("rfl_14d_delta_gap") if stats.get("rfl_14d_delta_gap") is not None else stats.get("rfl_14d_delta"))}',
                 cp: {round(PEAK_CP_WATTS_DASH * _gap_rfl_num / 100) if _gap_rfl_num else 0},
-                pred5k: '{format_race_time(stats["race_predictions"].get("_mode_gap", dict()).get("5k", "-"))}',
-                pred10k: '{format_race_time(stats["race_predictions"].get("_mode_gap", dict()).get("10k", "-"))}',
-                predHm: '{format_race_time(stats["race_predictions"].get("_mode_gap", dict()).get("Half Marathon", "-"))}',
-                predMara: '{format_race_time(stats["race_predictions"].get("_mode_gap", dict()).get("Marathon", "-"))}',
-                pred5k_s: {stats["race_predictions"].get("_mode_gap", dict()).get("5k_raw", 0)},
-                pred10k_s: {stats["race_predictions"].get("_mode_gap", dict()).get("10k_raw", 0)},
-                predHm_s: {stats["race_predictions"].get("_mode_gap", dict()).get("hm_raw", 0)},
-                predMara_s: {stats["race_predictions"].get("_mode_gap", dict()).get("marathon_raw", 0)} }},
-            sim: {{ rfl: '{stats.get("latest_rfl_sim") or stats.get("latest_rfl", "-")}', ag: '{stats["race_predictions"].get("_ag_sim") or "-"}',
-                rflDelta: '{_fmt_delta(stats.get("rfl_14d_delta_sim"))}',
+                pred5k: '{format_race_time(_gap_preds.get("5k", "-"))}',
+                pred10k: '{format_race_time(_gap_preds.get("10k", "-"))}',
+                predHm: '{format_race_time(_gap_preds.get("Half Marathon", "-"))}',
+                predMara: '{format_race_time(_gap_preds.get("Marathon", "-"))}',
+                pred5k_s: {_gap_preds.get("5k_raw", 0)},
+                pred10k_s: {_gap_preds.get("10k_raw", 0)},
+                predHm_s: {_gap_preds.get("hm_raw", 0)},
+                predMara_s: {_gap_preds.get("marathon_raw", 0)} }},
+            sim: {{ rfl: '{stats.get("latest_rfl_sim") or stats.get("latest_rfl", "-")}', ag: '{stats["race_predictions"].get("_ag_sim") or stats.get("age_grade") or "-"}',
+                rflDelta: '{_fmt_delta(stats.get("rfl_14d_delta_sim") if stats.get("rfl_14d_delta_sim") is not None else stats.get("rfl_14d_delta"))}',
                 cp: {round(PEAK_CP_WATTS_DASH * float(_sim_rfl_num) / 100) if _sim_rfl_num else 0},
-                pred5k: '{format_race_time(stats["race_predictions"].get("_mode_sim", dict()).get("5k", "-"))}',
-                pred10k: '{format_race_time(stats["race_predictions"].get("_mode_sim", dict()).get("10k", "-"))}',
-                predHm: '{format_race_time(stats["race_predictions"].get("_mode_sim", dict()).get("Half Marathon", "-"))}',
-                predMara: '{format_race_time(stats["race_predictions"].get("_mode_sim", dict()).get("Marathon", "-"))}',
-                pred5k_s: {stats["race_predictions"].get("_mode_sim", dict()).get("5k_raw", 0)},
-                pred10k_s: {stats["race_predictions"].get("_mode_sim", dict()).get("10k_raw", 0)},
-                predHm_s: {stats["race_predictions"].get("_mode_sim", dict()).get("hm_raw", 0)},
-                predMara_s: {stats["race_predictions"].get("_mode_sim", dict()).get("marathon_raw", 0)} }}
+                pred5k: '{format_race_time(_sim_preds.get("5k", "-"))}',
+                pred10k: '{format_race_time(_sim_preds.get("10k", "-"))}',
+                predHm: '{format_race_time(_sim_preds.get("Half Marathon", "-"))}',
+                predMara: '{format_race_time(_sim_preds.get("Marathon", "-"))}',
+                pred5k_s: {_sim_preds.get("5k_raw", 0)},
+                pred10k_s: {_sim_preds.get("10k_raw", 0)},
+                predHm_s: {_sim_preds.get("hm_raw", 0)},
+                predMara_s: {_sim_preds.get("marathon_raw", 0)} }}
         }};
         
         // Re-render alert banner now that modeStats is available (for CP display)
