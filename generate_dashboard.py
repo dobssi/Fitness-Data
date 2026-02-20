@@ -3132,7 +3132,20 @@ function raceAnnotations(dates) {{
         let currentMode = '{_cfg_power_mode if _cfg_power_mode in ("stryd", "gap", "sim") else "stryd"}';
         
         // Phase 2: Mode data for stats switching
-        const modeStats = {{
+        const modeStats = {{"""
+
+    # --- Helper variables for None-safe gap/sim stats ---
+    def _fmt_delta(v):
+        if v is None:
+            return "-"
+        return f"{'+' if v > 0 else ''}{v}%"
+
+    _gap_rfl = stats.get("latest_rfl_gap") or stats.get("latest_rfl")
+    _gap_rfl_num = _gap_rfl if isinstance(_gap_rfl, (int, float)) else 0
+    _sim_rfl = stats.get("latest_rfl_sim") or stats.get("latest_rfl")
+    _sim_rfl_num = _sim_rfl if isinstance(_sim_rfl, (int, float)) else 0
+
+    html += f"""
             stryd: {{ rfl: '{stats["latest_rfl"]}', ag: '{stats["age_grade"] or "-"}',
                 rflDelta: '{f"{chr(43) if stats['rfl_14d_delta'] > 0 else ''}{stats['rfl_14d_delta']}%" if stats["rfl_14d_delta"] is not None else "-"}',
                 cp: {zone_data['current_cp'] if zone_data else (round(PEAK_CP_WATTS_DASH * float(stats["latest_rfl"]) / 100) if stats["latest_rfl"] != "-" else 0)},
@@ -3144,9 +3157,9 @@ function raceAnnotations(dates) {{
                 pred10k_s: {stats["race_predictions"].get("10k_raw", 0)},
                 predHm_s: {stats["race_predictions"].get("hm_raw", 0)},
                 predMara_s: {stats["race_predictions"].get("marathon_raw", 0)} }},
-            gap: {{ rfl: '{stats.get("latest_rfl_gap", "-")}', ag: '{stats["race_predictions"].get("_ag_gap") or "-"}',
-                rflDelta: '{f"{chr(43) if stats['rfl_14d_delta_gap'] > 0 else ''}{stats['rfl_14d_delta_gap']}%" if stats["rfl_14d_delta_gap"] is not None else "-"}',
-                cp: {round(PEAK_CP_WATTS_DASH * float(stats.get("latest_rfl_gap", 0)) / 100) if stats.get("latest_rfl_gap", "-") != "-" else 0},
+            gap: {{ rfl: '{stats.get("latest_rfl_gap") or stats.get("latest_rfl", "-")}', ag: '{stats["race_predictions"].get("_ag_gap") or "-"}',
+                rflDelta: '{_fmt_delta(stats.get("rfl_14d_delta_gap"))}',
+                cp: {round(PEAK_CP_WATTS_DASH * float(_gap_rfl) / 100) if _gap_rfl else 0},
                 pred5k: '{format_race_time(stats["race_predictions"].get("_mode_gap", dict()).get("5k", "-"))}',
                 pred10k: '{format_race_time(stats["race_predictions"].get("_mode_gap", dict()).get("10k", "-"))}',
                 predHm: '{format_race_time(stats["race_predictions"].get("_mode_gap", dict()).get("Half Marathon", "-"))}',
@@ -3155,9 +3168,9 @@ function raceAnnotations(dates) {{
                 pred10k_s: {stats["race_predictions"].get("_mode_gap", dict()).get("10k_raw", 0)},
                 predHm_s: {stats["race_predictions"].get("_mode_gap", dict()).get("hm_raw", 0)},
                 predMara_s: {stats["race_predictions"].get("_mode_gap", dict()).get("marathon_raw", 0)} }},
-            sim: {{ rfl: '{stats.get("latest_rfl_sim", "-")}', ag: '{stats["race_predictions"].get("_ag_sim") or "-"}',
-                rflDelta: '{f"{chr(43) if stats['rfl_14d_delta_sim'] > 0 else ''}{stats['rfl_14d_delta_sim']}%" if stats["rfl_14d_delta_sim"] is not None else "-"}',
-                cp: {round(PEAK_CP_WATTS_DASH * float(stats.get("latest_rfl_sim", 0)) / 100) if stats.get("latest_rfl_sim", "-") != "-" else 0},
+            sim: {{ rfl: '{stats.get("latest_rfl_sim") or stats.get("latest_rfl", "-")}', ag: '{stats["race_predictions"].get("_ag_sim") or "-"}',
+                rflDelta: '{_fmt_delta(stats.get("rfl_14d_delta_sim"))}',
+                cp: {round(PEAK_CP_WATTS_DASH * float(_sim_rfl_num) / 100) if _sim_rfl_num else 0},
                 pred5k: '{format_race_time(stats["race_predictions"].get("_mode_sim", dict()).get("5k", "-"))}',
                 pred10k: '{format_race_time(stats["race_predictions"].get("_mode_sim", dict()).get("10k", "-"))}',
                 predHm: '{format_race_time(stats["race_predictions"].get("_mode_sim", dict()).get("Half Marathon", "-"))}',
