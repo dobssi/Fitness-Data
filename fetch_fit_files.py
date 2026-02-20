@@ -283,6 +283,91 @@ def generate_pending_activities(downloaded: list, pending_csv_path: str):
     print(f"  Added {added} entries to pending_activities.csv")
 
 
+def refresh_activity_names(client, pending_csv: str, days: int = 14):
+    """
+    Re-query intervals.icu for recent activity names and update pending_activities.csv.
+    
+    This catches name edits made after the initial download — e.g. user renames
+    "Morning Run" to "Tempo 5K" on intervals.icu after uploading.
+    
+    Only updates names for files already in pending_activities.csv.
+    Also adds entries for recent runs not yet in pending (e.g. if the CSV was cleared).
+    """
+    import csv
+    
+    since = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
+    print(f"\n--- Refreshing activity names (last {days} days) ---")
+    
+    # Fetch recent activities from intervals.icu
+    activities = client.get_activities(since)
+    runs = [a for a in activities if a.get("type") in ("Run", "VirtualRun")]
+    print(f"  Found {len(runs)} runs on intervals.icu since {since}")
+    
+    if not runs:
+        return
+    
+    # Build lookup: filename stem -> intervals name
+    # fetch_fit_files saves as YYYY-MM-DD_HH-MM-SS.FIT
+    intervals_names = {}
+    for act in runs:
+        start = act.get("start_date_local", "")
+        name = act.get("name", "")
+        if start and name:
+            # Convert ISO datetime to our filename format
+            try:
+                dt = datetime.fromisoformat(start.replace("Z", "+00:00"))
+                stem = dt.strftime("%Y-%m-%d_%H-%M-%S")
+                intervals_names[f"{stem}.FIT"] = name.replace(",", " ").replace('"', "")
+            except (ValueError, TypeError):
+                pass
+    
+    if not intervals_names:
+        print("  No names to refresh")
+        return
+    
+    # Read existing pending_activities.csv
+    existing_rows = []
+    existing_files = set()
+    if os.path.exists(pending_csv):
+        with open(pending_csv, "r", encoding="utf-8") as f:
+            reader = csv.reader(f)
+            header = next(reader, None)
+            for row in reader:
+                if row:
+                    existing_rows.append(row)
+                    existing_files.add(row[0].strip())
+    
+    # Update existing entries and add new ones
+    updated = 0
+    added = 0
+    
+    # Update existing rows
+    for i, row in enumerate(existing_rows):
+        filename = row[0].strip()
+        if filename in intervals_names:
+            old_name = row[1].strip().strip('"') if len(row) > 1 else ""
+            new_name = intervals_names[filename]
+            if old_name != new_name:
+                row[1] = f'"{new_name}"'
+                updated += 1
+    
+    # Add new entries for files not yet in pending
+    for filename, name in intervals_names.items():
+        if filename not in existing_files:
+            existing_rows.append([filename, f'"{name}"', ""])
+            added += 1
+    
+    # Write back
+    if updated > 0 or added > 0:
+        with open(pending_csv, "w", encoding="utf-8", newline="") as f:
+            f.write("file,activity_name,shoe\n")
+            for row in existing_rows:
+                f.write(",".join(row) + "\n")
+        print(f"  Updated: {updated} names, Added: {added} new entries")
+    else:
+        print("  No changes needed")
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Download new FIT files from intervals.icu"
@@ -311,12 +396,21 @@ def main():
                         help="Skip updating pending_activities.csv")
     parser.add_argument("--api-key", default=None)
     parser.add_argument("--athlete-id", default=None)
+    parser.add_argument("--refresh-names", type=int, default=0, metavar="DAYS",
+                        help="Re-query intervals.icu for activity names from the last N days "
+                             "and update pending_activities.csv (e.g. --refresh-names 14)")
     args = parser.parse_args()
     
     print("=" * 60)
     print("Fetch FIT Files from intervals.icu")
     print("=" * 60)
     
+    # Clean up any previous signal file
+    try:
+        os.remove('_new_runs_added.tmp')
+    except FileNotFoundError:
+        pass
+
     # Rezip mode: just recreate the zip and exit
     if args.rezip:
         recreate_zip(args.fit_dir, args.zip)
@@ -329,6 +423,10 @@ def main():
         print(f"\nERROR: {e}")
         return 1
     
+    # Refresh activity names if requested (before download, so new names are up to date)
+    if args.refresh_names > 0 and not args.no_pending:
+        refresh_activity_names(client, args.pending_csv, days=args.refresh_names)
+
     # Determine start date
     state = load_sync_state(args.state_file)
     
