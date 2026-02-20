@@ -3352,9 +3352,17 @@ def main():
             failures.append({"file": os.path.basename(fp), "reason": f"ERROR: {repr(e)}"})
             print(f"Failed  ({i}/{total}): {os.path.basename(fp)}  |  {repr(e)}")
 
-    df = pd.DataFrame(rows).sort_values("date").reset_index(drop=True)
-    if append_mode and base_master_df is not None:
-        df = pd.concat([base_master_df, df], ignore_index=True)
+    if not rows:
+        if append_mode and base_master_df is not None:
+            print(f"No new running activities found. Using existing master ({len(base_master_df)} rows).")
+            df = base_master_df.copy()
+        else:
+            print("WARNING: No running activities found in FIT files.")
+            df = pd.DataFrame(rows)
+    else:
+        df = pd.DataFrame(rows).sort_values("date").reset_index(drop=True)
+        if append_mode and base_master_df is not None:
+            df = pd.concat([base_master_df, df], ignore_index=True)
 
     df_fail = pd.DataFrame(failures) if failures else pd.DataFrame(columns=['file','reason'])
 

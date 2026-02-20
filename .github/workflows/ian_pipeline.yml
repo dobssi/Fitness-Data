@@ -91,8 +91,18 @@ jobs:
           restore-keys: |
             ian-sync-state-
 
+      # Download fits.zip early so fetch can check for existing files
+      - name: Download fits.zip for dedup
+        if: ${{ github.event.inputs.sync != 'false' && env.PIPELINE_MODE != 'DASHBOARD' && env.PIPELINE_MODE != 'FROM_STEPB' }}
+        run: |
+          python ci/dropbox_sync.py download \
+            --dropbox-base "${{ env.DB_BASE }}" \
+            --local-prefix "${{ env.ATHLETE_DIR }}" \
+            --items data/fits.zip
+        continue-on-error: true
+
       # Check for new activities + refresh recent names + download new FITs
-      # The --no-zip flag means it won't try to append to fits.zip (not downloaded yet)
+      # fetch checks fits.zip for existing files (FIT_downloads is empty on CI)
       - name: Check for new activities
         id: fetch
         if: ${{ github.event.inputs.sync != 'false' && env.PIPELINE_MODE != 'DASHBOARD' && env.PIPELINE_MODE != 'FROM_STEPB' }}
@@ -102,8 +112,7 @@ jobs:
             --zip ${{ env.ATHLETE_DIR }}/data/fits.zip \
             --state-file ${{ env.ATHLETE_DIR }}/fit_sync_state.json \
             --pending-csv ${{ env.ATHLETE_DIR }}/pending_activities.csv \
-            --refresh-names 14 \
-            --no-zip
+            --refresh-names 14
 
           if [ -f _new_runs_added.tmp ]; then
             echo "new_runs=true" >> $GITHUB_OUTPUT
@@ -155,8 +164,7 @@ jobs:
           python ci/dropbox_sync.py download \
             --dropbox-base "${{ env.DB_BASE }}" \
             --local-prefix "${{ env.ATHLETE_DIR }}" \
-            --items data/fits.zip \
-                    data/activities.csv \
+            --items data/activities.csv \
                     activity_overrides.xlsx \
                     athlete_data.csv \
                     output/Master_FULL.xlsx \
@@ -164,31 +172,6 @@ jobs:
                     output/_weather_cache_openmeteo/openmeteo_cache.sqlite \
             --cache-dir ${{ env.ATHLETE_DIR }}/persec_cache
         continue-on-error: true
-
-      # Append any newly downloaded FITs to the zip (now that fits.zip exists from Dropbox)
-      - name: Append new FITs to zip
-        if: ${{ steps.gate.outputs.continue == 'true' && steps.fetch.outputs.new_runs == 'true' }}
-        run: |
-          python -c "
-          import zipfile, os, glob
-          zip_path = '${{ env.ATHLETE_DIR }}/data/fits.zip'
-          fit_dir = '${{ env.ATHLETE_DIR }}/data/FIT_downloads'
-          if not os.path.exists(zip_path):
-              print('No fits.zip found — creating new')
-          existing = set()
-          if os.path.exists(zip_path):
-              with zipfile.ZipFile(zip_path, 'r') as zf:
-                  existing = {os.path.basename(n).lower() for n in zf.namelist()}
-          fits = glob.glob(os.path.join(fit_dir, '*.FIT')) + glob.glob(os.path.join(fit_dir, '*.fit'))
-          added = 0
-          with zipfile.ZipFile(zip_path, 'a', zipfile.ZIP_DEFLATED) as zf:
-              for fp in fits:
-                  bn = os.path.basename(fp)
-                  if bn.lower() not in existing:
-                      zf.write(fp, bn)
-                      added += 1
-          print(f'Appended {added} FIT file(s) to {zip_path}')
-          "
 
       - name: Sync athlete data from intervals.icu
         if: ${{ steps.gate.outputs.continue == 'true' && github.event.inputs.sync != 'false' && env.PIPELINE_MODE != 'DASHBOARD' }}
@@ -269,6 +252,15 @@ jobs:
         with:
           path: ${{ env.ATHLETE_DIR }}/persec_cache
           key: ian-persec-${{ github.run_number }}
+
+      - name: Upload fits.zip to Dropbox (only if new FITs added)
+        if: ${{ steps.gate.outputs.continue == 'true' && steps.fetch.outputs.new_runs == 'true' }}
+        run: |
+          python ci/dropbox_sync.py upload \
+            --dropbox-base "${{ env.DB_BASE }}" \
+            --local-prefix "${{ env.ATHLETE_DIR }}" \
+            --items data/fits.zip
+        continue-on-error: true
 
       - name: Upload results to Dropbox
         if: ${{ steps.gate.outputs.continue == 'true' }}

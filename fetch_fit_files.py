@@ -63,16 +63,27 @@ def save_sync_state(path: str, state: dict):
         json.dump(state, f, indent=2)
 
 
-def get_existing_fit_files(fit_dir: str) -> set:
-    """Get set of existing FIT filenames (without extension) in the directory."""
-    if not os.path.isdir(fit_dir):
-        return set()
-    
+def get_existing_fit_files(fit_dir: str, zip_path: str = "") -> set:
+    """Get set of existing FIT filenames (without extension) in the directory and/or zip."""
     existing = set()
-    for f in Path(fit_dir).rglob("*.fit"):
-        existing.add(f.stem)
-    for f in Path(fit_dir).rglob("*.FIT"):
-        existing.add(f.stem)
+    
+    if os.path.isdir(fit_dir):
+        for f in Path(fit_dir).rglob("*.fit"):
+            existing.add(f.stem)
+        for f in Path(fit_dir).rglob("*.FIT"):
+            existing.add(f.stem)
+    
+    # Also check inside fits.zip (CI: FIT_downloads is empty but zip has all history)
+    if zip_path and os.path.exists(zip_path):
+        try:
+            import zipfile
+            with zipfile.ZipFile(zip_path, 'r') as zf:
+                for name in zf.namelist():
+                    stem = Path(name).stem
+                    if name.lower().endswith('.fit'):
+                        existing.add(stem)
+        except Exception as e:
+            print(f"  Warning: could not read zip {zip_path}: {e}")
     
     return existing
 
@@ -448,7 +459,7 @@ def main():
         print(f"\nNo sync state found — starting from {since} (use --full for complete history)")
     
     # Get existing files
-    existing = get_existing_fit_files(args.fit_dir)
+    existing = get_existing_fit_files(args.fit_dir, zip_path=args.zip)
     print(f"Existing FIT files in {args.fit_dir}: {len(existing)}")
     
     # Fetch and download
