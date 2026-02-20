@@ -1,0 +1,68 @@
+# =============================================================================
+# ATHLETE CONFIGURATION — Nadi Jahangiri (GAP Mode)
+# =============================================================================
+
+athlete:
+  name: "Nadi Jahangiri"
+  mass_kg: 66.0           # Most recent Strava weight ~66kg (2012-2015 era); placeholder
+  date_of_birth: "1965-06-15"   # Approximate — update when confirmed
+  gender: "male"
+  timezone: "Europe/London"
+
+  # HR thresholds
+  # 5K race avg HR consistently 146-152 (2022-2025 data)
+  # Max HR: 166 in 2024 5K race, 182 in 2015 (likely chest strap)
+  # Using 150 LTHR, 170 max HR as starting estimates
+  lthr: 150
+  max_hr: 170
+
+planned_races: []
+
+power:
+  mode: "gap"
+
+  stryd:
+    peak_cp_watts: 300    # Placeholder — not used in GAP mode
+    eras: {}
+    mass_corrections: []
+    re_reference_era: "s4"
+
+  gap:
+    re_constant: 0.92
+
+data:
+  source: "fit_folder"
+  intervals:
+    athlete_id: ""
+    api_key: ""
+  fit_folder:
+    path: "./data/fits"
+  strava_export:
+    zip_path: ""
+
+pipeline:
+  rf_window_duration_s: 2400
+  rf_trend_window_days: 42
+  rf_trend_min_periods: 5
+  ctl_time_constant: 42
+  atl_time_constant: 7
+  temp_baseline_c: 10.0
+  easy_rf:
+    hr_min: 120
+    np_cp_max: 0.85
+    vi_max: 1.10
+    dist_min_km: 4.0
+    ema_span: 15
+    z_window: 30
+  alerts:
+    alert1_rfl_drop: 0.02
+    alert1_ctl_rise: 3.0
+    alert1_window_days: 28
+    alert1b_rfl_gap: 0.02
+    alert1b_peak_window_days: 90
+    alert1b_race_window_days: 7
+    alert2_tsb_threshold: -15
+    alert2_count: 3
+    alert2_window: 5
+    alert3b_z_threshold: -2.0
+    alert5_gap_threshold: -0.03
