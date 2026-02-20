@@ -3397,6 +3397,13 @@ def main():
     wx_failed = 0
     first_wx_error = None
 
+    # Skip rows that already have valid weather (UPDATE optimisation)
+    _wx_already = df["avg_temp_c"].notna() & np.isfinite(pd.to_numeric(df["avg_temp_c"], errors="coerce").fillna(np.nan))
+    _wx_needed_mask = ~_wx_already
+    wx_skipped_cached = int(_wx_already.sum())
+    if wx_skipped_cached > 0:
+        print(f"Weather: skipping {wx_skipped_cached} runs with existing data, processing {int(_wx_needed_mask.sum())} runs")
+
     # Prepare per-run UTC-naive windows
     start_naive = []
     end_naive = []
@@ -3433,6 +3440,8 @@ def main():
     for i, k in enumerate(df["_wx_loc"].tolist()):
         if k is None:
             continue
+        if not _wx_needed_mask.iloc[i]:
+            continue  # already has weather data
         groups.setdefault(k, []).append(i)
 
     total_groups = len(groups)
