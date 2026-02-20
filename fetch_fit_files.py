@@ -145,10 +145,15 @@ def fetch_new_fit_files(client: IntervalsClient,
     to_download = []
     already_have = 0
     
+    # Load known activity IDs from sync state (handles filename mismatch between
+    # datetime-named downloads and ID-named files in the zip)
+    known_activity_ids = set(state.get("downloaded_activity_ids", []))
+    
     for act in run_activities:
         filename = activity_to_filename(act)
+        act_id = str(act.get("id", ""))
         
-        if filename in existing_files:
+        if filename in existing_files or act_id in known_activity_ids:
             already_have += 1
             continue
         
@@ -503,7 +508,14 @@ def main():
         today = datetime.now().strftime("%Y-%m-%d")
         state["last_sync_date"] = today
         state["last_download_count"] = len(downloaded)
-        state["total_fit_files"] = len(get_existing_fit_files(args.fit_dir))
+        state["total_fit_files"] = len(get_existing_fit_files(args.fit_dir, zip_path=args.zip))
+        # Track downloaded activity IDs for dedup (filenames differ between zip and fetch)
+        existing_ids = set(state.get("downloaded_activity_ids", []))
+        for fname, act in downloaded:
+            act_id = str(act.get("id", ""))
+            if act_id:
+                existing_ids.add(act_id)
+        state["downloaded_activity_ids"] = sorted(existing_ids)
         save_sync_state(args.state_file, state)
         print(f"\nSync state updated: {args.state_file}")
     

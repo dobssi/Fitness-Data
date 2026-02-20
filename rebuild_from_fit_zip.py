@@ -3355,7 +3355,10 @@ def main():
     if not rows:
         if append_mode and base_master_df is not None:
             print(f"No new running activities found. Using existing master ({len(base_master_df)} rows).")
-            df = base_master_df.copy()
+            out_path = args.out
+            base_master_df.to_excel(out_path, index=False, sheet_name="Master")
+            print(f"Output (unchanged): {out_path}")
+            return 0
         else:
             print("WARNING: No running activities found in FIT files.")
             df = pd.DataFrame(rows)
