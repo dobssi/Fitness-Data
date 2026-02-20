@@ -116,7 +116,8 @@ def fetch_new_fit_files(client: IntervalsClient,
                         fit_dir: str,
                         since: str,
                         existing_files: set,
-                        list_only: bool = False) -> list:
+                        list_only: bool = False,
+                        sync_state: dict = None) -> list:
     """
     Fetch FIT files for new running activities.
     
@@ -147,7 +148,7 @@ def fetch_new_fit_files(client: IntervalsClient,
     
     # Load known activity IDs from sync state (handles filename mismatch between
     # datetime-named downloads and ID-named files in the zip)
-    known_activity_ids = set(state.get("downloaded_activity_ids", []))
+    known_activity_ids = set((sync_state or {}).get("downloaded_activity_ids", []))
     
     for act in run_activities:
         filename = activity_to_filename(act)
@@ -469,7 +470,8 @@ def main():
     
     # Fetch and download
     downloaded = fetch_new_fit_files(
-        client, args.fit_dir, since, existing, list_only=args.list_only
+        client, args.fit_dir, since, existing, list_only=args.list_only,
+        sync_state=state
     )
     
     if args.list_only:
