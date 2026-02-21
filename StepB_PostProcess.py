@@ -1846,7 +1846,7 @@ def detect_changed_rows(df_input: pd.DataFrame, df_prev: pd.DataFrame,
             file_name = str(row.get('file', '')).lower()
             if file_name:
                 # Hash key override fields
-                hash_input = f"{row.get('race_flag','')}{row.get('parkrun','')}{row.get('official_distance_km','')}{row.get('surface','')}{row.get('surface_adj','')}{row.get('temp_override','')}"
+                hash_input = f"{row.get('race_flag','')}{row.get('parkrun','')}{row.get('official_distance_km','')}{row.get('surface','')}{row.get('surface_adj','')}{row.get('temp_override','')}{row.get('power_override_w','')}"
                 override_hashes[file_name] = hash(hash_input)
     
     # Build lookup of previous override state from prev output
@@ -3157,12 +3157,15 @@ def load_override_file(override_path: str, master_df: pd.DataFrame = None) -> pd
         df['official_distance_km'] = np.nan
     if 'notes' not in df.columns:
         df['notes'] = ''
+    if 'power_override_w' not in df.columns:
+        df['power_override_w'] = np.nan
     
     # Convert types
     df['temp_override'] = pd.to_numeric(df['temp_override'], errors='coerce')
     df['surface_adj'] = pd.to_numeric(df['surface_adj'], errors='coerce')
     df['race_flag'] = pd.to_numeric(df['race_flag'], errors='coerce').fillna(0).astype(int)
     df['official_distance_km'] = pd.to_numeric(df['official_distance_km'], errors='coerce')
+    df['power_override_w'] = pd.to_numeric(df['power_override_w'], errors='coerce')
     
     # Resolve date-based overrides to filenames using master data
     df = _resolve_date_overrides(df, master_df)
@@ -3171,7 +3174,8 @@ def load_override_file(override_path: str, master_df: pd.DataFrame = None) -> pd
     race_count = (df['race_flag'] == 1).sum()
     dist_count = df['official_distance_km'].notna().sum()
     sadj_count = df['surface_adj'].notna().sum()
-    print(f"  - {race_count} races, {dist_count} with official distance, {sadj_count} with surface_adj")
+    pwr_count = df['power_override_w'].notna().sum()
+    print(f"  - {race_count} races, {dist_count} with official distance, {sadj_count} with surface_adj, {pwr_count} with power_override")
     
     # Normalize file names to lowercase for case-insensitive matching
     df['file'] = df['file'].astype(str).str.lower()
@@ -3581,6 +3585,11 @@ def main() -> int:
                 # This prevents outdoor humidity affecting indoor run adjustments
                 dfm.at[i, 'avg_humidity_pct'] = 50.0
             
+            # v51: Power override — corrects Stryd measurement artifacts
+            # Stored on the row; applied later in NPZ loop before RF calculation
+            if pd.notna(override.get('power_override_w')):
+                dfm.at[i, 'power_override_w'] = float(override['power_override_w'])
+            
             # Distance correction for pre-Stryd activities (from override file)
             # Check calibration_era_id (if present) or power_source to determine if pre-Stryd
             era_id = str(row.get('calibration_era_id', '')).lower()
@@ -3679,6 +3688,7 @@ def main() -> int:
         "official_distance_km", "surface_adj", "gps_distance_error_m",
         "RF_gap_median",
         "RF_sim_median",
+        "power_override_w",
     ]
     for c in float_cols:
         if c in dfm.columns:
@@ -3892,6 +3902,28 @@ def main() -> int:
                 dfm.at[i, "avg_power_w"] = float(np.nanmean(p_run))
                 dfm.at[i, "nPower_HR"] = float(npw / float(np.nanmean(hrun)))
 
+            # v51: Apply power override — replaces Stryd nPower with corrected value
+            # when measurement artifact is detected (e.g. inflated leg power).
+            # This adjusts npower_w, avg_power_w, nPower_HR, and RE_avg so that all
+            # downstream metrics (RF, RFL, Power Score) use the corrected power.
+            _pwr_override = pd.to_numeric(row.get('power_override_w', np.nan), errors='coerce')
+            if np.isfinite(_pwr_override) and _pwr_override > 0:
+                _orig_npw = pd.to_numeric(dfm.at[i, 'npower_w'], errors='coerce')
+                if np.isfinite(_orig_npw) and _orig_npw > 0:
+                    _pwr_ratio = _pwr_override / _orig_npw
+                    dfm.at[i, 'npower_w'] = float(_pwr_override)
+                    _orig_avg = pd.to_numeric(dfm.at[i, 'avg_power_w'], errors='coerce')
+                    if np.isfinite(_orig_avg):
+                        dfm.at[i, 'avg_power_w'] = float(_orig_avg * _pwr_ratio)
+                    _avg_hr = pd.to_numeric(dfm.at[i, 'avg_hr'], errors='coerce')
+                    if np.isfinite(_avg_hr) and _avg_hr > 0:
+                        dfm.at[i, 'nPower_HR'] = float(_pwr_override / _avg_hr)
+                    # Recalculate RE_avg: RE = speed * mass / power
+                    _speed = pd.to_numeric(row.get('distance_km', 0), errors='coerce') * 1000 / max(pd.to_numeric(row.get('moving_time_s', 1), errors='coerce'), 1)
+                    if _speed > 0:
+                        dfm.at[i, 'RE_avg'] = float(_speed * float(args.mass_kg) / _pwr_override)
+                    print(f"  Power override: {fit_file}: {_orig_npw:.0f}W -> {_pwr_override:.0f}W ({_pwr_ratio:.3f}x)")
+
             # Recovery filter needs era-local CP estimate from prior run
             _rfl_t = pd.to_numeric(row.get('RFL_Trend', np.nan), errors='coerce')
             _era_adj = pd.to_numeric(row.get('Era_Adj', 1.0), errors='coerce')
@@ -4087,6 +4119,32 @@ def main() -> int:
         _progress(i, label + " (done)")
 
     # rounding
+    # --- v51: Post-loop power override fallback ---
+    # For runs that skipped the NPZ loop (no cache), apply power_override_w
+    # to the summary-level values. This ensures overrides work even without NPZ.
+    if 'power_override_w' in dfm.columns:
+        pwr_overrides = dfm['power_override_w'].notna()
+        if pwr_overrides.any():
+            for i in dfm.index[pwr_overrides]:
+                _po = float(dfm.at[i, 'power_override_w'])
+                _orig = pd.to_numeric(dfm.at[i, 'npower_w'], errors='coerce')
+                # Only apply if not already applied in NPZ loop (check if still original)
+                # The NPZ loop prints a message; here we check if npower still differs from override
+                if np.isfinite(_orig) and _orig > 0 and abs(_orig - _po) > 1.0:
+                    _ratio = _po / _orig
+                    dfm.at[i, 'npower_w'] = _po
+                    _avg_p = pd.to_numeric(dfm.at[i, 'avg_power_w'], errors='coerce')
+                    if np.isfinite(_avg_p):
+                        dfm.at[i, 'avg_power_w'] = float(_avg_p * _ratio)
+                    _hr = pd.to_numeric(dfm.at[i, 'avg_hr'], errors='coerce')
+                    if np.isfinite(_hr) and _hr > 0:
+                        dfm.at[i, 'nPower_HR'] = float(_po / _hr)
+                    _spd = pd.to_numeric(dfm.at[i, 'distance_km'], errors='coerce') * 1000 / max(pd.to_numeric(dfm.at[i, 'moving_time_s'], errors='coerce'), 1)
+                    if _spd > 0:
+                        dfm.at[i, 'RE_avg'] = float(_spd * ATHLETE_MASS_KG / _po)
+                    _fn = dfm.at[i, 'file'] if 'file' in dfm.columns else '?'
+                    print(f"  Power override (summary fallback): {_fn}: {_orig:.0f}W -> {_po:.0f}W")
+
     for c in ("avg_hr", "max_hr"):
         if c in dfm.columns:
             dfm[c] = pd.to_numeric(dfm[c], errors="coerce").round(1)
