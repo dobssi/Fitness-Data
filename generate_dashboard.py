@@ -1041,6 +1041,7 @@ def get_top_races(df, n=10):
             'date': row['date'].strftime('%d %b %y'),
             'name': str(name_val) if name_val else '',
             'dist': round(dist_km, 1) if dist_km > 0 else None,
+            'dist_group': 'long' if dist_km > 5.5 else 'short',
             'time': time_str,
             'ag': ag_val,
             'nag': nag_val,
@@ -1057,8 +1058,9 @@ def get_top_races(df, n=10):
             cutoff = now - delta
             period_races = races[races['date'] >= cutoff]
         
-        # Sort by normalised AG descending, take top n
-        top = period_races.nlargest(n, sort_col)
+        # Return all races sorted by normalised AG descending
+        # JS will apply distance filter and take top n
+        top = period_races.nlargest(len(period_races), sort_col)
         result[period_name] = [format_race(row) for _, row in top.iterrows()]
     
     return result
@@ -3049,6 +3051,11 @@ function raceAnnotations(dates) {{
                 <button data-period="5y">5Y</button>
                 <button data-period="all">All</button>
             </div>
+            <div class="chart-toggle" id="topRacesDistToggle" style="margin-left:12px;">
+                <button class="active" data-dist="all">All</button>
+                <button data-dist="short">≤5K</button>
+                <button data-dist="long">>5K</button>
+            </div>
         </div>
         <div class="chart-desc" id="top-races-desc">Best races by normalised AG% (adjusted for temperature, terrain, surface).</div>
         <div class="table-wrapper">
@@ -3644,19 +3651,24 @@ function raceAnnotations(dates) {{
         // Top Races data and toggle
         const topRacesData = {json.dumps(top_races)};
         
-        function updateTopRacesTable(period) {{
+        function updateTopRacesTable(period, distFilter) {{
             const tbody = document.getElementById('topRacesBody');
             if (!tbody) return;
-            const races = (topRacesData[period] || []).slice();
+            if (!distFilter) distFilter = document.querySelector('#topRacesDistToggle button.active')?.getAttribute('data-dist') || 'all';
+            let races = (topRacesData[period] || []).slice();
+            
+            // Apply distance filter
+            if (distFilter === 'short') races = races.filter(r => r.dist_group === 'short');
+            else if (distFilter === 'long') races = races.filter(r => r.dist_group === 'long');
             
             if (races.length === 0) {{
                 tbody.innerHTML = '<tr><td colspan="7" style="text-align: center; color: var(--text-dim);">No races in this period</td></tr>';
                 return;
             }}
             
-            // Sort by normalised AG descending (already ranked server-side,
-            // but re-sort here for mode toggle consistency)
+            // Sort by normalised AG descending, take top 10
             races.sort((a, b) => (b.nag || 0) - (a.nag || 0));
+            races = races.slice(0, 10);
             
             // Mode-appropriate RFL for the last column
             const rflKey = currentMode === 'gap' ? 'rfl_gap' : currentMode === 'sim' ? 'rfl_sim' : 'rfl';
@@ -3684,10 +3696,10 @@ function raceAnnotations(dates) {{
         
         // Initialize with 1 year view
         if (document.getElementById('topRacesBody')) {{
-            updateTopRacesTable('1y');
+            updateTopRacesTable('1y', 'all');
         }}
         
-        // Toggle handler
+        // Period toggle handler
         const topRacesToggleEl = document.getElementById('topRacesToggle');
         if (topRacesToggleEl) {{
             topRacesToggleEl.addEventListener('click', function(e) {{
@@ -3696,6 +3708,20 @@ function raceAnnotations(dates) {{
                 e.target.classList.add('active');
                 const period = e.target.getAttribute('data-period');
                 updateTopRacesTable(period);
+            }}
+        }});
+        }}
+        
+        // Distance toggle handler
+        const topRacesDistToggleEl = document.getElementById('topRacesDistToggle');
+        if (topRacesDistToggleEl) {{
+            topRacesDistToggleEl.addEventListener('click', function(e) {{
+            if (e.target.tagName === 'BUTTON') {{
+                this.querySelectorAll('button').forEach(btn => btn.classList.remove('active'));
+                e.target.classList.add('active');
+                const activePeriod = document.querySelector('#topRacesToggle button.active');
+                const period = activePeriod ? activePeriod.getAttribute('data-period') : '1y';
+                updateTopRacesTable(period, e.target.getAttribute('data-dist'));
             }}
         }});
         }}
