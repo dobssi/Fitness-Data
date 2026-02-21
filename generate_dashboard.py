@@ -33,6 +33,7 @@ Configuration:
 
 import pandas as pd
 import numpy as np
+import math
 from datetime import datetime, timedelta
 import json
 import os
@@ -882,20 +883,29 @@ def get_weight_chart_data(master_file, months=12):
 
 
 def _calc_normalised_ag(raw_ag, moving_s, temp_adj, terrain_adj, surface_adj,
-                        elevation_adj, avg_temp_c):
+                        elevation_adj, avg_temp_c, dist_km=None):
     """Calculate conditions-normalised age grade.
     
-    Removes the effect of temperature, terrain, surface, and altitude from the
-    raw age grade to answer: "what would this race have been worth on a flat
-    road at 10°C?"
+    Removes the effect of temperature, terrain, surface, altitude, and
+    distance-scaling bias from the raw age grade to answer: "what would
+    this race have been worth on a flat road at 10°C, with fair comparison
+    across distances?"
     
     The RF adjustment factors represent how much harder conditions made the run.
     Since AG ∝ 1/time and time ∝ 1/power (at steady state), and RF_adj = RF × adj,
-    we get: normalised_AG = raw_AG × condition_adj.
+    we get: normalised_AG = raw_AG × condition_adj × distance_adj.
     
     Temperature adjustment is duration-scaled (same formula as Power Score):
     short races get less heat penalty because core temperature hasn't risen as much.
     Cold penalty is NOT duration-scaled (vasoconstriction is immediate).
+    
+    Distance adjustment corrects for the systematic AG bias where longer races
+    produce lower AG for equivalent-quality performances. This arises because:
+    (a) recreational runners' pace scales with distance at a higher Riegel exponent
+        (~1.08-1.10) than the WMA OC tables assume (~1.07);
+    (b) WMA age factors penalise longer distances more for older runners.
+    The correction is logarithmic in distance, anchored at 0% for 5K and
+    +4% at marathon distance.
     """
     if raw_ag is None or not np.isfinite(raw_ag) or raw_ag <= 0:
         return raw_ag
@@ -926,8 +936,20 @@ def _calc_normalised_ag(raw_ag, moving_s, temp_adj, terrain_adj, surface_adj,
     s_adj = surface_adj if pd.notna(surface_adj) and np.isfinite(surface_adj) and surface_adj > 0 else 1.0
     e_adj = elevation_adj if pd.notna(elevation_adj) and np.isfinite(elevation_adj) and elevation_adj > 0 else 1.0
     
+    # Distance-scaling bias correction
+    # Logarithmic in distance, anchored at 5K=0%, marathon=+4%
+    # Formula: dist_adj = 1 + 0.04 × ln(dist/5.0) / ln(42.195/5.0)
+    # This gives: 5K=1.000, 10K=+1.3%, HM=+2.7%, Marathon=+4.0%
+    _dist_ref = 5.0           # Reference distance (no correction)
+    _dist_max_boost = 0.04    # +4% correction at marathon distance
+    _dist_log_range = math.log(42.195 / _dist_ref)  # ln(42.195/5.0) ≈ 2.134
+    
+    dist_adj = 1.0
+    if dist_km is not None and pd.notna(dist_km) and dist_km > _dist_ref:
+        dist_adj = 1.0 + _dist_max_boost * math.log(dist_km / _dist_ref) / _dist_log_range
+    
     condition_adj = race_temp_adj * t_adj * s_adj * e_adj
-    return round(raw_ag * condition_adj, 2)
+    return round(raw_ag * condition_adj * dist_adj, 2)
 
 
 def get_top_races(df, n=10):
@@ -973,6 +995,9 @@ def get_top_races(df, n=10):
     if len(races) == 0:
         return {period: [] for period in ['1y', '2y', '3y', '5y', 'all']}
     
+    # Resolve official distance column name for normalised AG
+    _off_dist_col = 'official_distance_km' if 'official_distance_km' in races.columns else 'Official_Dist_km'
+    
     # Compute normalised AG for each race
     races['normalised_ag'] = races.apply(lambda row: _calc_normalised_ag(
         row.get('age_grade_pct'),
@@ -982,6 +1007,7 @@ def get_top_races(df, n=10):
         row.get('surface_adj'),
         row.get('Elevation_Adj'),
         row.get('avg_temp_c'),
+        row.get(_off_dist_col, row.get('distance_km')),
     ), axis=1)
     
     sort_col = 'normalised_ag'
@@ -3057,7 +3083,7 @@ function raceAnnotations(dates) {{
                 <button data-dist="long">>5K</button>
             </div>
         </div>
-        <div class="chart-desc" id="top-races-desc">Best races by normalised AG% (adjusted for temperature, terrain, surface).</div>
+        <div class="chart-desc" id="top-races-desc">Best races by normalised AG% (adjusted for temperature, terrain, surface, distance).</div>
         <div class="table-wrapper">
         <table id="topRacesTable">
             <colgroup>
@@ -4310,7 +4336,7 @@ function raceAnnotations(dates) {{
         
         // Update top races description
         const trd = document.getElementById('top-races-desc');
-        if (trd) trd.textContent = 'Best races by normalised AG% (adjusted for temperature, terrain, surface).';
+        if (trd) trd.textContent = 'Best races by normalised AG% (adjusted for temperature, terrain, surface, distance).';
         
         // Reset zone views when switching to GAP (use Race Pace as default)
         if (isGap) {{
