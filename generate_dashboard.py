@@ -956,6 +956,20 @@ def get_top_races(df, n=10):
     # This catches misclassified training runs (e.g. "Tempo incl Parkrun" at 48% AG)
     races = races[races['age_grade_pct'].notna() & (races['age_grade_pct'] >= 55)].copy()
     
+    # Filter: exclude races where auto-pause makes moving_time unreliable
+    # If elapsed/moving > 2.0, the watch removed too much time (common on track
+    # sessions where standing between reps triggers auto-pause). The AG calculation
+    # uses moving_time_s, so an artificially short moving_time inflates AG.
+    if 'elapsed_time_s' in races.columns and 'moving_time_s' in races.columns:
+        _elapsed = pd.to_numeric(races['elapsed_time_s'], errors='coerce')
+        _moving = pd.to_numeric(races['moving_time_s'], errors='coerce')
+        _ratio = _elapsed / _moving.replace(0, np.nan)
+        _suspect = _ratio > 2.0
+        if _suspect.any():
+            _n_removed = _suspect.sum()
+            print(f"  Top races: excluded {_n_removed} race(s) with elapsed/moving ratio > 2.0 (auto-pause suspect)")
+        races = races[~_suspect].copy()
+    
     if len(races) == 0:
         return {period: [] for period in ['1y', '2y', '3y', '5y', 'all']}
     
@@ -997,7 +1011,7 @@ def get_top_races(df, n=10):
         else:
             dist_km = row[dist_col] / 1000 if pd.notna(row.get(dist_col)) else 0
         
-        moving_s = row.get(elapsed_col, row.get(moving_col, None))
+        moving_s = row.get(moving_col, row.get(elapsed_col, None))
         
         # Format time as H:MM:SS or M:SS
         if pd.notna(moving_s) and moving_s > 0:
