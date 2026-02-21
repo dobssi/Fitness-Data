@@ -3904,8 +3904,8 @@ def main() -> int:
 
             # v51: Apply power override — replaces Stryd nPower with corrected value
             # when measurement artifact is detected (e.g. inflated leg power).
-            # This adjusts npower_w, avg_power_w, nPower_HR, and RE_avg so that all
-            # downstream metrics (RF, RFL, Power Score) use the corrected power.
+            # This adjusts npower_w, avg_power_w, nPower_HR, RE_avg, AND scales
+            # the per-second power array so that _rf_metrics uses corrected power.
             _pwr_override = pd.to_numeric(row.get('power_override_w', np.nan), errors='coerce')
             if np.isfinite(_pwr_override) and _pwr_override > 0:
                 _orig_npw = pd.to_numeric(dfm.at[i, 'npower_w'], errors='coerce')
@@ -3922,6 +3922,8 @@ def main() -> int:
                     _speed = pd.to_numeric(row.get('distance_km', 0), errors='coerce') * 1000 / max(pd.to_numeric(row.get('moving_time_s', 1), errors='coerce'), 1)
                     if _speed > 0:
                         dfm.at[i, 'RE_avg'] = float(_speed * float(args.mass_kg) / _pwr_override)
+                    # Scale per-second power array so RF calculation uses corrected power
+                    p = p * _pwr_ratio
                     print(f"  Power override: {fit_file}: {_orig_npw:.0f}W -> {_pwr_override:.0f}W ({_pwr_ratio:.3f}x)")
 
             # Recovery filter needs era-local CP estimate from prior run
