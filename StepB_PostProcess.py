@@ -3361,14 +3361,14 @@ def refresh_activity_names(dfm: pd.DataFrame, strava_path: str, tz_local: str) -
         
         # Determine key column — 'file' (filename or date-based key) or 'date'
         import re as _re
-        _date_pat = _re.compile(r'^(\d{4}-\d{2}-\d{2})')
+        _date_seq_pat = _re.compile(r'^(\d{4}-\d{2}-\d{2})\s*(?:#(\d+))?$')
         
         key_col = 'file' if 'file' in pend.columns else ('date' if 'date' in pend.columns else None)
         
         if key_col and 'activity_name' in pend.columns:
-            # Build lookup: date_str -> name (from both filename and date-based keys)
-            pend_by_date = {}
-            pend_by_file = {}
+            # Build lookups — matches rebuild_from_fit_zip.py logic for #N sequences
+            pend_by_date = {}   # date_str -> [(seq_or_None, name), ...]
+            pend_by_file = {}   # filename -> name
             for _, pr in pend.iterrows():
                 key = str(pr.get(key_col, '')).strip()
                 name = pr.get('activity_name', '')
@@ -3376,12 +3376,32 @@ def refresh_activity_names(dfm: pd.DataFrame, strava_path: str, tz_local: str) -
                     continue
                 name = str(name).strip()
                 
-                # Check if key is a date or date-based pattern
-                m = _date_pat.match(key)
+                # Check if key is a date or date #N pattern
+                m = _date_seq_pat.match(key)
                 if m:
-                    pend_by_date[m.group(1)] = name
-                # Also store by exact key for filename matching
-                pend_by_file[key] = name
+                    d = m.group(1)
+                    seq = int(m.group(2)) if m.group(2) else None
+                    if d not in pend_by_date:
+                        pend_by_date[d] = []
+                    pend_by_date[d].append((seq, name))
+                else:
+                    # Exact filename key
+                    pend_by_file[key] = name
+            
+            # Build per-day run lists for #N sequence resolution
+            day_runs = {}  # date_str -> [fit_file, ...]  (sorted chronologically)
+            if pend_by_date:
+                for i2, row2 in dfm.iterrows():
+                    d2 = pd.Timestamp(row2.get('date'))
+                    if pd.isna(d2):
+                        continue
+                    ds2 = d2.strftime('%Y-%m-%d')
+                    if ds2 in pend_by_date:
+                        if ds2 not in day_runs:
+                            day_runs[ds2] = []
+                        day_runs[ds2].append((d2, str(row2.get('file', '')).strip()))
+                for ds2 in day_runs:
+                    day_runs[ds2].sort(key=lambda x: x[0])
             
             pend_applied = 0
             if 'date' in dfm.columns:
@@ -3394,11 +3414,23 @@ def refresh_activity_names(dfm: pd.DataFrame, strava_path: str, tz_local: str) -
                     old_name = str(row.get('activity_name', ''))
                     
                     # Date-based keys (dispatch metadata) override everything
-                    date_name = pend_by_date.get(ds)
-                    if date_name and date_name != old_name:
-                        dfm.at[i, 'activity_name'] = date_name
-                        pend_applied += 1
-                        continue
+                    if ds in pend_by_date:
+                        matched_name = None
+                        for seq, pname in pend_by_date[ds]:
+                            if seq is None:
+                                # No sequence number — applies to all runs on this date
+                                matched_name = pname
+                                break
+                            else:
+                                # Sequence number — match to Nth run of the day
+                                runs = day_runs.get(ds, [])
+                                if 0 < seq <= len(runs) and runs[seq - 1][1] == fit_file:
+                                    matched_name = pname
+                                    break
+                        if matched_name and matched_name != old_name:
+                            dfm.at[i, 'activity_name'] = matched_name
+                            pend_applied += 1
+                            continue
                     
                     # Filename keys (auto-generated) only fill blanks
                     file_name = pend_by_file.get(fit_file)
