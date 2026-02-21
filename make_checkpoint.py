@@ -31,7 +31,6 @@ PIPELINE_FILES = [
     "add_override.py",
     "run_pipeline.py",
     "push_dashboard.py",
-    "export_athlete_data.py",
     "rename_fit_files.py",
     "zip_add_fits.py",
     "fetch_fit_files.py",
@@ -45,7 +44,6 @@ PIPELINE_FILES = [
     "gap_power.py",
     "add_gap_power.py",
     "run_multi_mode_pipeline.py",
-    "test_phase_1_2.py",
     # Multi-athlete support
     "re_model_generic.json",
     "master_template.xlsx",

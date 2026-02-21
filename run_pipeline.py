@@ -1,5 +1,5 @@
 """
-run_pipeline.py — Cross-platform pipeline orchestrator v50
+run_pipeline.py — Cross-platform pipeline orchestrator v51
 ============================================================
 Replaces Run_Full_Pipeline.bat for both local and CI/CD execution.
 
@@ -39,7 +39,7 @@ from datetime import datetime
 # =============================================================================
 # CONFIGURATION
 # =============================================================================
-PIPELINE_VER = 50
+PIPELINE_VER = 51
 PY = sys.executable  # Use the same Python that's running this script
 
 # File naming templates

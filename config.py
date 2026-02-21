@@ -85,10 +85,6 @@ STRYD_MASS_HISTORY = [
 # POWER MODE CONFIGURATION (v60)
 # =============================================================================
 
-# =============================================================================
-# POWER MODE CONFIGURATION (v60)
-# =============================================================================
-
 POWER_MODE = _ATHLETE_CONFIG.power_mode  # "stryd" or "gap"
 
 # Stryd-specific settings
