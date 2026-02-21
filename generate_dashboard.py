@@ -1054,14 +1054,12 @@ def get_top_races(df, n=10):
         # Get activity name
         name_val = row.get('activity_name', row.get('Activity_Name', ''))
         
-        # Age grade percentage (raw and normalised)
-        ag_val = round(row['age_grade_pct'], 1) if pd.notna(row.get('age_grade_pct')) else None
+        # Age grade percentage (normalised)
         nag_val = round(row['normalised_ag'], 1) if pd.notna(row.get('normalised_ag')) else None
         
-        # RFL percentage (all three modes)
-        rfl_val = round(row['RFL'] * 100, 1) if pd.notna(row.get('RFL')) else None
-        rfl_gap_val = round(row['RFL_gap'] * 100, 1) if pd.notna(row.get('RFL_gap')) else None
-        rfl_sim_val = round(row['RFL_sim'] * 100, 1) if pd.notna(row.get('RFL_sim')) else None
+        # HR and TSS
+        hr_val = int(round(row['avg_hr'])) if pd.notna(row.get('avg_hr')) else None
+        tss_val = int(round(row['TSS'])) if pd.notna(row.get('TSS')) else None
         
         return {
             'date': row['date'].strftime('%d %b %y'),
@@ -1069,11 +1067,9 @@ def get_top_races(df, n=10):
             'dist': round(dist_km, 1) if dist_km > 0 else None,
             'dist_group': 'long' if dist_km > 5.5 else 'short',
             'time': time_str,
-            'ag': ag_val,
+            'hr': hr_val,
+            'tss': tss_val,
             'nag': nag_val,
-            'rfl': rfl_val,
-            'rfl_gap': rfl_gap_val,
-            'rfl_sim': rfl_sim_val,
         }
     
     result = {}
@@ -3071,11 +3067,11 @@ function raceAnnotations(dates) {{
         <div class="chart-title-row">
             <span class="chart-title">🏆 Top Race Performances</span>
             <div class="chart-toggle" id="topRacesToggle">
-                <button class="active" data-period="1y">1Y</button>
+                <button data-period="1y">1Y</button>
                 <button data-period="2y">2Y</button>
                 <button data-period="3y">3Y</button>
                 <button data-period="5y">5Y</button>
-                <button data-period="all">All</button>
+                <button class="active" data-period="all">All</button>
             </div>
             <div class="chart-toggle" id="topRacesDistToggle" style="margin-left:12px;">
                 <button class="active" data-dist="all">All</button>
@@ -3087,13 +3083,13 @@ function raceAnnotations(dates) {{
         <div class="table-wrapper">
         <table id="topRacesTable">
             <colgroup>
-                <col style="width: 14%;">
-                <col style="width: 30%;">
-                <col style="width: 11%;">
-                <col style="width: 14%;">
+                <col style="width: 12%;">
+                <col style="width: 32%;">
                 <col style="width: 10%;">
+                <col style="width: 14%;">
+                <col style="width: 8%;">
                 <col style="width: 10%;">
-                <col style="width: 11%;">
+                <col style="width: 14%;">
             </colgroup>
             <thead>
                 <tr>
@@ -3101,9 +3097,9 @@ function raceAnnotations(dates) {{
                     <th>Race</th>
                     <th>Dist</th>
                     <th>Time</th>
-                    <th>AG%</th>
+                    <th>HR</th>
+                    <th>TSS</th>
                     <th>nAG%</th>
-                    <th>RFL%</th>
                 </tr>
             </thead>
             <tbody id="topRacesBody">
@@ -3696,33 +3692,24 @@ function raceAnnotations(dates) {{
             races.sort((a, b) => (b.nag || 0) - (a.nag || 0));
             races = races.slice(0, 10);
             
-            // Mode-appropriate RFL for the last column
-            const rflKey = currentMode === 'gap' ? 'rfl_gap' : currentMode === 'sim' ? 'rfl_sim' : 'rfl';
-            
             tbody.innerHTML = races.map((race, idx) => {{
-                const rflVal = race[rflKey] || '-';
                 const nagVal = race.nag ? race.nag + '%' : '-';
-                const agVal = race.ag ? race.ag + '%' : '-';
-                // Highlight nAG > AG (conditions boost)
-                const nagStyle = race.nag && race.ag && race.nag > race.ag + 0.5
-                    ? 'color: #4ade80;'  // green — conditions penalty was removed
-                    : '';
                 return `
                 <tr>
                     <td>${{race.date}}</td>
                     <td>${{race.name}}</td>
                     <td>${{race.dist ? race.dist + ' km' : '-'}}</td>
                     <td>${{race.time}}</td>
-                    <td>${{agVal}}</td>
-                    <td style="${{nagStyle}}">${{nagVal}}</td>
-                    <td>${{rflVal}}</td>
+                    <td>${{race.hr || '-'}}</td>
+                    <td>${{race.tss || '-'}}</td>
+                    <td>${{nagVal}}</td>
                 </tr>`;
             }}).join('');
         }}
         
         // Initialize with 1 year view
         if (document.getElementById('topRacesBody')) {{
-            updateTopRacesTable('1y', 'all');
+            updateTopRacesTable('all', 'all');
         }}
         
         // Period toggle handler
