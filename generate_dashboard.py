@@ -881,11 +881,65 @@ def get_weight_chart_data(master_file, months=12):
         return [], []
 
 
+def _calc_normalised_ag(raw_ag, moving_s, temp_adj, terrain_adj, surface_adj,
+                        elevation_adj, avg_temp_c):
+    """Calculate conditions-normalised age grade.
+    
+    Removes the effect of temperature, terrain, surface, and altitude from the
+    raw age grade to answer: "what would this race have been worth on a flat
+    road at 10°C?"
+    
+    The RF adjustment factors represent how much harder conditions made the run.
+    Since AG ∝ 1/time and time ∝ 1/power (at steady state), and RF_adj = RF × adj,
+    we get: normalised_AG = raw_AG × condition_adj.
+    
+    Temperature adjustment is duration-scaled (same formula as Power Score):
+    short races get less heat penalty because core temperature hasn't risen as much.
+    Cold penalty is NOT duration-scaled (vasoconstriction is immediate).
+    """
+    if raw_ag is None or not np.isfinite(raw_ag) or raw_ag <= 0:
+        return raw_ag
+    
+    # Duration-scaled temperature adjustment (matches PS logic in StepB)
+    _heat_ref_s = 5400.0    # 90 minutes — full heat effect reference
+    _heat_max = 1.5         # Cap at 150% of base heat penalty (for ultramarathons)
+    _cold_threshold = 5.0   # °C below which cold penalty applies
+    _cold_factor = 0.003    # Per-degree cold penalty rate
+    
+    race_temp_adj = 1.0
+    if pd.notna(temp_adj) and np.isfinite(temp_adj) and temp_adj > 0:
+        if pd.notna(avg_temp_c) and np.isfinite(avg_temp_c) and avg_temp_c < _cold_threshold:
+            # Cold: penalty is immediate, not duration-scaled
+            cold_part = max(0, (_cold_threshold - avg_temp_c)) * _cold_factor
+            race_temp_adj = 1.0 + cold_part
+        else:
+            # Heat+humidity: scale by race duration
+            heat_part = max(0, temp_adj - 1.0)
+            if pd.notna(moving_s) and moving_s > 0:
+                heat_mult = min(_heat_max, moving_s / _heat_ref_s)
+            else:
+                heat_mult = 1.0
+            race_temp_adj = 1.0 + heat_part * heat_mult
+    
+    # Terrain, surface, elevation — use as-is (already appropriate for whole run)
+    t_adj = terrain_adj if pd.notna(terrain_adj) and np.isfinite(terrain_adj) and terrain_adj > 0 else 1.0
+    s_adj = surface_adj if pd.notna(surface_adj) and np.isfinite(surface_adj) and surface_adj > 0 else 1.0
+    e_adj = elevation_adj if pd.notna(elevation_adj) and np.isfinite(elevation_adj) and elevation_adj > 0 else 1.0
+    
+    condition_adj = race_temp_adj * t_adj * s_adj * e_adj
+    return round(raw_ag * condition_adj, 2)
+
+
 def get_top_races(df, n=10):
-    """Get top race performances by RFL for different time periods.
+    """Get top race performances ranked by conditions-normalised Age Grade.
+    
+    Normalised AG removes the effect of temperature, hills, surface, and
+    altitude to answer: "what would this race have been worth on a flat road
+    at 10°C?" This means a hilly, hot race that produced 73% AG raw could
+    rank higher than a flat, cool race at 75% AG if conditions explain the gap.
     
     Returns dict with keys: '1y', '2y', '3y', '5y', 'all'
-    Each value is a list of up to n race dicts sorted by RFL descending.
+    Each value is a list of up to n race dicts sorted by normalised AG descending.
     """
     # Filter to races only
     race_col = 'race_flag' if 'race_flag' in df.columns else 'Race'
@@ -894,13 +948,29 @@ def get_top_races(df, n=10):
     if len(races) == 0:
         return {period: [] for period in ['1y', '2y', '3y', '5y', 'all']}
     
-    # Sort by RFL (individual run fitness level)
-    sort_col = 'RFL' if 'RFL' in races.columns else 'RF_adj'
-    if sort_col not in races.columns:
+    # Must have age grade to rank
+    if 'age_grade_pct' not in races.columns:
         return {period: [] for period in ['1y', '2y', '3y', '5y', 'all']}
     
-    # Filter out rows without valid scores
-    races = races[races[sort_col].notna()].copy()
+    # Filter: must have valid AG and minimum quality gate (55% AG)
+    # This catches misclassified training runs (e.g. "Tempo incl Parkrun" at 48% AG)
+    races = races[races['age_grade_pct'].notna() & (races['age_grade_pct'] >= 55)].copy()
+    
+    if len(races) == 0:
+        return {period: [] for period in ['1y', '2y', '3y', '5y', 'all']}
+    
+    # Compute normalised AG for each race
+    races['normalised_ag'] = races.apply(lambda row: _calc_normalised_ag(
+        row.get('age_grade_pct'),
+        row.get('moving_time_s', row.get('elapsed_time_s')),
+        row.get('Temp_Adj'),
+        row.get('Terrain_Adj'),
+        row.get('surface_adj'),
+        row.get('Elevation_Adj'),
+        row.get('avg_temp_c'),
+    ), axis=1)
+    
+    sort_col = 'normalised_ag'
     
     now = datetime.now()
     periods = {
@@ -944,8 +1014,9 @@ def get_top_races(df, n=10):
         # Get activity name
         name_val = row.get('activity_name', row.get('Activity_Name', ''))
         
-        # Age grade percentage
+        # Age grade percentage (raw and normalised)
         ag_val = round(row['age_grade_pct'], 1) if pd.notna(row.get('age_grade_pct')) else None
+        nag_val = round(row['normalised_ag'], 1) if pd.notna(row.get('normalised_ag')) else None
         
         # RFL percentage (all three modes)
         rfl_val = round(row['RFL'] * 100, 1) if pd.notna(row.get('RFL')) else None
@@ -958,6 +1029,7 @@ def get_top_races(df, n=10):
             'dist': round(dist_km, 1) if dist_km > 0 else None,
             'time': time_str,
             'ag': ag_val,
+            'nag': nag_val,
             'rfl': rfl_val,
             'rfl_gap': rfl_gap_val,
             'rfl_sim': rfl_sim_val,
@@ -971,7 +1043,7 @@ def get_top_races(df, n=10):
             cutoff = now - delta
             period_races = races[races['date'] >= cutoff]
         
-        # Sort by RFL descending, take top n
+        # Sort by normalised AG descending, take top n
         top = period_races.nlargest(n, sort_col)
         result[period_name] = [format_race(row) for _, row in top.iterrows()]
     
@@ -2964,15 +3036,16 @@ function raceAnnotations(dates) {{
                 <button data-period="all">All</button>
             </div>
         </div>
-        <div class="chart-desc" id="top-races-desc">Best races by RFL% (fitness level at race date).</div>
+        <div class="chart-desc" id="top-races-desc">Best races by normalised AG% (adjusted for temperature, terrain, surface).</div>
         <div class="table-wrapper">
         <table id="topRacesTable">
             <colgroup>
-                <col style="width: 15%;">
-                <col style="width: 35%;">
-                <col style="width: 12%;">
-                <col style="width: 16%;">
+                <col style="width: 14%;">
+                <col style="width: 30%;">
                 <col style="width: 11%;">
+                <col style="width: 14%;">
+                <col style="width: 10%;">
+                <col style="width: 10%;">
                 <col style="width: 11%;">
             </colgroup>
             <thead>
@@ -2982,6 +3055,7 @@ function raceAnnotations(dates) {{
                     <th>Dist</th>
                     <th>Time</th>
                     <th>AG%</th>
+                    <th>nAG%</th>
                     <th>RFL%</th>
                 </tr>
             </thead>
@@ -3562,23 +3636,33 @@ function raceAnnotations(dates) {{
             const races = (topRacesData[period] || []).slice();
             
             if (races.length === 0) {{
-                tbody.innerHTML = '<tr><td colspan="6" style="text-align: center; color: var(--text-dim);">No races in this period</td></tr>';
+                tbody.innerHTML = '<tr><td colspan="7" style="text-align: center; color: var(--text-dim);">No races in this period</td></tr>';
                 return;
             }}
             
-            // Sort by mode-appropriate RFL descending
+            // Sort by normalised AG descending (already ranked server-side,
+            // but re-sort here for mode toggle consistency)
+            races.sort((a, b) => (b.nag || 0) - (a.nag || 0));
+            
+            // Mode-appropriate RFL for the last column
             const rflKey = currentMode === 'gap' ? 'rfl_gap' : currentMode === 'sim' ? 'rfl_sim' : 'rfl';
-            races.sort((a, b) => (b[rflKey] || 0) - (a[rflKey] || 0));
             
             tbody.innerHTML = races.map((race, idx) => {{
                 const rflVal = race[rflKey] || '-';
+                const nagVal = race.nag ? race.nag + '%' : '-';
+                const agVal = race.ag ? race.ag + '%' : '-';
+                // Highlight nAG > AG (conditions boost)
+                const nagStyle = race.nag && race.ag && race.nag > race.ag + 0.5
+                    ? 'color: #4ade80;'  // green — conditions penalty was removed
+                    : '';
                 return `
                 <tr>
                     <td>${{race.date}}</td>
                     <td>${{race.name}}</td>
                     <td>${{race.dist ? race.dist + ' km' : '-'}}</td>
                     <td>${{race.time}}</td>
-                    <td>${{race.ag ? race.ag + '%' : '-'}}</td>
+                    <td>${{agVal}}</td>
+                    <td style="${{nagStyle}}">${{nagVal}}</td>
                     <td>${{rflVal}}</td>
                 </tr>`;
             }}).join('');
@@ -4186,7 +4270,7 @@ function raceAnnotations(dates) {{
         
         // Update top races description
         const trd = document.getElementById('top-races-desc');
-        if (trd) trd.textContent = 'Best races by RFL% (fitness level at race date).';
+        if (trd) trd.textContent = 'Best races by normalised AG% (adjusted for temperature, terrain, surface).';
         
         // Reset zone views when switching to GAP (use Race Pace as default)
         if (isGap) {{
