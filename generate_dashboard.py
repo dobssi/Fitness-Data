@@ -1742,6 +1742,244 @@ def get_zone_data(df):
 
 
 # ============================================================================
+# ADAPTIVE TAPER SOLVER (module-level, shared by zone HTML + chart JSON)
+# ============================================================================
+import math as _taper_math
+from datetime import timedelta as _taper_td
+
+_RWP_TSB_TARGETS = {
+    '5K':  {'A': (5, 25),  'B': (2, 18)},
+    '10K': {'A': (5, 25),  'B': (2, 18)},
+    'HM':  {'A': (5, 32),  'B': (2, 22)},
+    'Mara':{'A': (10, 35), 'B': (5, 28)},
+}
+# Distance-interpolated TSB targets (anchored at 5K/10K/HM/Mara)
+_RWP_TARGET_ANCHORS = [
+    (5.0,   5, 25, 2, 18),
+    (10.0,  5, 25, 2, 18),
+    (21.1,  5, 32, 2, 22),
+    (42.2, 10, 35, 5, 28),
+]
+def _rwp_interp_targets(dist_km):
+    """Interpolate TSB target percentages by race distance."""
+    anchors = _RWP_TARGET_ANCHORS
+    if dist_km <= anchors[0][0]:
+        return {'A': (anchors[0][1], anchors[0][2]), 'B': (anchors[0][3], anchors[0][4])}
+    if dist_km >= anchors[-1][0]:
+        return {'A': (anchors[-1][1], anchors[-1][2]), 'B': (anchors[-1][3], anchors[-1][4])}
+    for i in range(len(anchors) - 1):
+        if anchors[i][0] <= dist_km <= anchors[i+1][0]:
+            f = (dist_km - anchors[i][0]) / (anchors[i+1][0] - anchors[i][0])
+            lo, hi = anchors[i], anchors[i+1]
+            return {
+                'A': (round(lo[1] + f*(hi[1]-lo[1])), round(lo[2] + f*(hi[2]-lo[2]))),
+                'B': (round(lo[3] + f*(hi[3]-lo[3])), round(lo[4] + f*(hi[4]-lo[4]))),
+            }
+    return _RWP_TSB_TARGETS.get('5K')
+# CTL-scaled taper templates: (days_before_race, session_name, tss_ratio_of_ctl, reducible?)
+_RWP_TEMPLATES = {
+    '5K': [
+        (7, 'Easy + race-pace surges', 1.50, True),
+        (6, 'Easy', 1.30, True),
+        (5, 'Easy + race-pace surges', 1.15, True),
+        (4, 'Easy', 1.00, True),
+        (3, 'Shakeout + race-pace strides', 0.55, True),
+        (2, 'Rest', 0.00, False),
+        (1, 'Shakeout + race-pace strides', 0.50, False),
+    ],
+    '10K': [
+        (7, 'Easy + race-pace surges', 1.50, True),
+        (6, 'Easy', 1.30, True),
+        (5, 'Easy + race-pace surges', 1.15, True),
+        (4, 'Easy', 1.00, True),
+        (3, 'Shakeout + race-pace strides', 0.55, True),
+        (2, 'Rest', 0.00, False),
+        (1, 'Shakeout + race-pace strides', 0.50, False),
+    ],
+    'HM': [
+        (7, 'Easy + race-pace surges', 1.50, True),
+        (6, 'Moderate + HM-pace km', 1.35, True),
+        (5, 'Easy', 1.15, True),
+        (4, 'Easy + race-pace surges', 1.00, True),
+        (3, 'Shakeout + race-pace strides', 0.55, True),
+        (2, 'Rest', 0.00, False),
+        (1, 'Shakeout + race-pace strides', 0.50, False),
+    ],
+    'Mara': [
+        (10, 'Easy + MP surges', 2.00, True),
+        (9, 'Easy', 1.75, True),
+        (8, 'Moderate + MP km', 1.50, True),
+        (7, 'Easy', 1.30, True),
+        (6, 'Easy + MP surges', 1.15, True),
+        (5, 'Easy', 1.00, True),
+        (4, 'Easy', 0.65, True),
+        (3, 'Rest', 0.00, False),
+        (2, 'Shakeout + race-pace strides', 0.50, False),
+        (1, 'Rest', 0.00, False),
+    ],
+}
+_RWP_DUR_RATIOS = {'Easy': 0.70, 'Moderate': 0.65, 'Shakeout': 0.35, 'Light': 0.35, 'Rest': 0, 'Race': 0}
+_RWP_DECAY_C = _taper_math.exp(-1/42)
+_RWP_DECAY_A = _taper_math.exp(-1/7)
+
+def _rwp_project(ctl, atl, tss):
+    return (ctl * _RWP_DECAY_C + tss * (1 - _RWP_DECAY_C),
+            atl * _RWP_DECAY_A + tss * (1 - _RWP_DECAY_A))
+
+def _rwp_duration(name, ctl_ref):
+    for key, ratio in _RWP_DUR_RATIOS.items():
+        if key.lower() in name.lower():
+            return max(10, round(ctl_ref * ratio / 5) * 5)
+    return max(10, round(ctl_ref * 0.50 / 5) * 5)
+
+def _solve_taper(ctl0, atl0, days_to_race, ctl_ref, dist_cat, priority,
+                 today_date, recent_runs, race_name, dist_km=None):
+    """Adaptive taper: CTL-scaled template -> forward project -> reduce if out of zone.
+    
+    Returns (plan_info_dict, results_list) where results_list has one entry per day
+    from tomorrow through race day, each with date/session/tss/ctl/atl/tsb/tag.
+    """
+    # Use distance-interpolated targets if dist_km provided, else fall back to category
+    if dist_km is not None:
+        tgt = _rwp_interp_targets(dist_km).get(priority, (2, 18))
+    else:
+        tgt = _RWP_TSB_TARGETS.get(dist_cat, _RWP_TSB_TARGETS['5K']).get(priority, (2, 18))
+    
+    # Build initial plan from template (only days we have left, excluding D-0)
+    tpl = [(d, n, r, red) for d, n, r, red in
+           _RWP_TEMPLATES.get(dist_cat, _RWP_TEMPLATES['5K'])
+           if 1 <= d <= days_to_race]
+    
+    plan = []
+    for d, name, ratio, reducible in tpl:
+        tss = round(ctl_ref * ratio / 5) * 5
+        dur = 0 if tss == 0 else _rwp_duration(name, ctl_ref)
+        plan.append({'d': d, 'name': name, 'tss': tss, 'dur': dur,
+                     'ratio': ratio, 'protected': not reducible})
+    plan.sort(key=lambda x: -x['d'])  # furthest-out first
+    
+    # Track which days have actual completed runs (not modifiable)
+    actual_tss = {}
+    for p in plan:
+        day_date = today_date + _taper_td(days=(days_to_race - p['d']))
+        dstr = day_date.strftime('%Y-%m-%d')
+        if dstr in recent_runs:
+            actual_tss[p['d']] = recent_runs[dstr]
+    
+    def evaluate(plan):
+        c, a = ctl0, atl0
+        results = []
+        
+        # Lookback: show D-6 through yesterday as historical context
+        # Only include days with actual recorded runs
+        lookback_days = min(6, days_to_race)
+        lookback_rows = []
+        for lb in range(lookback_days, 0, -1):
+            lb_date = today_date + _taper_td(days=-lb)
+            lb_dstr = lb_date.strftime('%Y-%m-%d')
+            lb_days_rem = days_to_race + lb
+            if lb_dstr in recent_runs:
+                act = recent_runs[lb_dstr]
+                lookback_rows.append({
+                    'date': lb_date, 'days_rem': lb_days_rem, 'session': act['name'],
+                    'tss': act['tss'], 'ctl': 0, 'atl': 0, 'tsb': 0,
+                    'tag': 'done', 'is_race': act.get('race', False),
+                    'lookback': True,
+                })
+        
+        # Reverse-calculate CTL/ATL for lookback rows
+        # Start from ctl0/atl0 and walk backwards: ctl_prev = (ctl_now - tss*(1-dc)) / dc
+        if lookback_rows:
+            c_back, a_back = ctl0, atl0
+            dc = _RWP_DECAY_C
+            da = _RWP_DECAY_A
+            # Walk backwards through lookback rows (they're in chronological order)
+            # Reverse them, peel off TSS, then re-forward
+            tss_seq = [r['tss'] for r in lookback_rows]
+            # Reverse-project to get state before first lookback day
+            for tss_val in reversed(tss_seq):
+                c_back = (c_back - tss_val * (1 - dc)) / dc
+                a_back = (a_back - tss_val * (1 - da)) / da
+            # Now forward-project to fill in actual CTL/ATL/TSB
+            c_fwd, a_fwd = c_back, a_back
+            for r in lookback_rows:
+                c_fwd = c_fwd * dc + r['tss'] * (1 - dc)
+                a_fwd = a_fwd * da + r['tss'] * (1 - da)
+                r['ctl'] = c_fwd
+                r['atl'] = a_fwd
+                r['tsb'] = c_fwd - a_fwd
+        
+        # Forward projection: today through race day
+        for i_d in range(0, days_to_race + 1):
+            day_date = today_date + _taper_td(days=i_d)
+            days_rem = days_to_race - i_d
+            dstr = day_date.strftime('%Y-%m-%d')
+            is_race = (days_rem == 0)
+            
+            if dstr in recent_runs:
+                act = recent_runs[dstr]
+                sess, tss_val, tag = act['name'], act['tss'], 'done'
+            elif is_race:
+                sess, tss_val, tag = f'\U0001f3c1 {race_name}', 0, 'race'
+            else:
+                match = [p for p in plan if p['d'] == days_rem]
+                if match:
+                    p = match[0]
+                    dur_str = f"{p['dur']}'" if p['dur'] > 0 else ''
+                    sess = f"{dur_str} {p['name']}".strip() if dur_str else p['name']
+                    tss_val = p['tss']
+                    tag = 'today' if i_d == 0 else 'plan'
+                else:
+                    sess, tss_val = 'Easy', round(ctl_ref * 0.40 / 5) * 5
+                    tag = 'today' if i_d == 0 else 'plan'
+            
+            c, a = _rwp_project(c, a, tss_val)
+            results.append({
+                'date': day_date, 'days_rem': days_rem, 'session': sess,
+                'tss': tss_val, 'ctl': c, 'atl': a, 'tsb': c - a,
+                'tag': tag, 'is_race': is_race,
+            })
+        return lookback_rows + results, c, c - a
+    
+    results, race_ctl, race_tsb = evaluate(plan)
+    tsb_lo = race_ctl * tgt[0] / 100
+    mode = 'template'
+    
+    # If too fatigued, progressively reduce planned (non-actual) sessions
+    if race_tsb < tsb_lo:
+        reducible = [i for i, p in enumerate(plan)
+                     if not p['protected'] and p['tss'] > 0
+                     and p['d'] not in actual_tss]
+        reducible.sort(key=lambda i: -plan[i]['d'])
+        
+        for idx in reducible:
+            # Try halving first
+            plan[idx]['tss'] = round(plan[idx]['tss'] * 0.5 / 5) * 5
+            plan[idx]['dur'] = max(10, round(plan[idx]['dur'] * 0.5 / 5) * 5)
+            plan[idx]['name'] = 'Light easy'
+            results, race_ctl, race_tsb = evaluate(plan)
+            tsb_lo = race_ctl * tgt[0] / 100
+            if race_tsb >= tsb_lo:
+                mode = 'adapted'
+                break
+            
+            # Try full rest
+            plan[idx]['tss'] = 0
+            plan[idx]['dur'] = 0
+            plan[idx]['name'] = 'Rest'
+            results, race_ctl, race_tsb = evaluate(plan)
+            tsb_lo = race_ctl * tgt[0] / 100
+            if race_tsb >= tsb_lo:
+                mode = 'adapted'
+                break
+        else:
+            mode = 'adapted_max'
+            results, race_ctl, race_tsb = evaluate(plan)
+    
+    return {'plan': plan, 'mode': mode}, results
+
+
+# ============================================================================
 # v51.7: ZONE HTML GENERATOR
 # ============================================================================
 def _generate_zone_html(zone_data, stats=None):
@@ -1944,6 +2182,8 @@ def _generate_zone_html(zone_data, stats=None):
                     m28 += contrib
         _spec_values[race_idx_s] = (round(m14), round(m28))
     
+    # ── Uses module-level _solve_taper, _RWP_TSB_TARGETS ──
+    
     for race_idx, race in enumerate(PLANNED_RACES_DASH):
         # Skip past races
         try:
@@ -2043,76 +2283,20 @@ def _generate_zone_html(zone_data, stats=None):
         # ── Race Week Plan (≤7 days, A or B priority) ──
         _rwp_html = ''
         if priority in ('A', 'B') and 0 < days_to <= 7:
-            _rwp_taper_templates = {
-                '5K': {7: ('Easy 45\' with strides', 45), 6: ('Moderate 35\' + 5K-pace surges', 42), 5: ('Easy 35\'', 30), 4: ('Easy 30\'', 25), 3: ('Easy 25\' with strides', 22), 2: ('Rest', 0), 1: ('Shakeout with strides', 32), 0: (None, None)},
-                '10K': {7: ('Easy 50\' with strides', 50), 6: ('Easy 40\' + 4×30s', 40), 5: ('Moderate 35\' + 10K surges', 38), 4: ('Easy 30\'', 25), 3: ('Easy 25\' with strides', 22), 2: ('Rest', 0), 1: ('Shakeout with strides', 30), 0: (None, None)},
-                'HM': {7: ('Easy 60\' with strides', 55), 6: ('Moderate 45\' + HM surges', 50), 5: ('Easy 40\'', 35), 4: ('Easy 30\' with strides', 28), 3: ('Easy 25\'', 20), 2: ('Rest', 0), 1: ('Shakeout with strides', 28), 0: (None, None)},
-                'Mara': {10: ('Easy 70\' with strides', 65), 9: ('Easy 50\'', 42), 8: ('Moderate 45\' + MP km', 48), 7: ('Easy 50\'', 42), 6: ('Easy 40\' + MP surges', 38), 5: ('Easy 35\'', 30), 4: ('Easy 25\'', 20), 3: ('Rest', 0), 2: ('Shakeout 20\' with strides', 22), 1: ('Rest', 0), 0: (None, None)},
-            }
-            _rwp_tsb_targets_pct = {
-                '5K': {'A': (5, 25), 'B': (-5, 18)},
-                '10K': {'A': (5, 25), 'B': (-5, 18)},
-                'HM': {'A': (5, 32), 'B': (-5, 22)},
-                'Mara': {'A': (10, 35), 'B': (0, 28)},
-            }
-            _rwp_dist_cat = 'Mara' if dist_km >= 25 else ('HM' if dist_km > 12 else ('10K' if dist_km > 5.5 else '5K'))
-            _rwp_tpl = dict(_rwp_taper_templates.get(_rwp_dist_cat, _rwp_taper_templates['5K']))
-            
-            # Fatigue-aware: add extra rest at D-3 if TSB/CTL < -10%
+            _rwp_dist_cat = 'Mara' if dist_km >= 35 else ('HM' if dist_km > 12 else ('10K' if dist_km > 5.5 else '5K'))
             _rwp_ctl0 = zone_data.get('current_ctl', 0)
             _rwp_atl0 = zone_data.get('current_atl', 0)
-            _rwp_tsb0 = _rwp_ctl0 - _rwp_atl0
-            if _rwp_ctl0 > 0 and (_rwp_tsb0 / _rwp_ctl0 * 100) < -10:
-                _mara_mode = 3 in _rwp_tpl and _rwp_tpl[3][1] == 0
-                _extra = 4 if _mara_mode else 3
-                if _extra in _rwp_tpl:
-                    _rwp_tpl[_extra] = ('Rest (fatigue)', 0)
-            
-            # Lookup recent actual runs for matching
             _rwp_recent = {r['date']: r for r in zone_data.get('recent_tss', [])}
             
-            _DOW = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
-            _MON = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
-            _decay_c = _math.exp(-1/42)
-            _decay_a = _math.exp(-1/7)
+            _rwp_plan, _rwp_results = _solve_taper(
+                _rwp_ctl0, _rwp_atl0, days_to, _rwp_ctl0, _rwp_dist_cat, priority,
+                _today, _rwp_recent, race['name'], dist_km=dist_km
+            )
             
-            _rwp_days = []
-            _c, _a = _rwp_ctl0, _rwp_atl0
-            for _d in range(1, days_to + 1):
-                _day_date = _today + _td(days=_d)
-                _days_rem = days_to - _d
-                _dstr = _day_date.strftime('%Y-%m-%d')
-                _actual = _rwp_recent.get(_dstr)
-                _is_race = (_days_rem == 0)
-                
-                if _actual:
-                    _sess = _actual['name']
-                    _tss_val = _actual['tss']
-                    _tag = 'done'
-                elif _is_race:
-                    _sess = f'🏁 {race["name"]}'
-                    _tss_val = 0
-                    _tag = 'race'
-                elif _days_rem in _rwp_tpl:
-                    _sess, _tss_val = _rwp_tpl[_days_rem]
-                    if _tss_val is None: _tss_val = 0
-                    _tag = 'plan'
-                else:
-                    _sess = 'Easy run'
-                    _tss_val = 35
-                    _tag = 'plan'
-                
-                _c = _c * _decay_c + _tss_val * (1 - _decay_c)
-                _a = _a * _decay_a + _tss_val * (1 - _decay_a)
-                _rwp_days.append({
-                    'date': _day_date, 'days_rem': _days_rem, 'session': _sess,
-                    'tss': _tss_val, 'ctl': _c, 'atl': _a, 'tsb': _c - _a,
-                    'tag': _tag, 'is_race': _is_race,
-                })
-            
-            _rwp_race_ctl = _rwp_days[-1]['ctl']
-            _rwp_race_tsb = _rwp_days[-1]['tsb']
-            _pcts = _rwp_tsb_targets_pct.get(_rwp_dist_cat, _rwp_tsb_targets_pct['5K']).get(priority, (-5, 18))
+            _pcts = _rwp_interp_targets(dist_km).get(priority, (2, 18)) if dist_km else _RWP_TSB_TARGETS.get(_rwp_dist_cat, _RWP_TSB_TARGETS['5K']).get(priority, (2, 18))
+            _rwp_race_day = _rwp_results[-1]
+            _rwp_race_ctl = _rwp_race_day['ctl']
+            _rwp_race_tsb = _rwp_race_day['tsb']
             _tsb_lo = _rwp_race_ctl * _pcts[0] / 100
             _tsb_hi = _rwp_race_ctl * _pcts[1] / 100
             _race_pct = (_rwp_race_tsb / _rwp_race_ctl * 100) if _rwp_race_ctl > 0 else 0
@@ -2121,26 +2305,37 @@ def _generate_zone_html(zone_data, stats=None):
             _fmt_pct = f"{'+'if _race_pct>=0 else ''}{_race_pct:.0f}%"
             _tgt_str = f"{'+'if _pcts[0]>=0 else ''}{_pcts[0]}% to {'+'if _pcts[1]>=0 else ''}{_pcts[1]}% of CTL"
             
+            _adapted = _rwp_plan.get('mode', 'template')
+            _adapt_note = ''
+            if _adapted == 'adapted':
+                _adapt_note = ' · plan adjusted for fatigue'
+            elif _adapted == 'adapted_max':
+                _adapt_note = ' · ⚠ max rest applied, still short'
+            
             if _tsb_lo <= _rwp_race_tsb <= _tsb_hi:
-                _v_cls, _v_txt = 'tsb-v-ok', f'✓ Race morning TSB {_fmt_tsb} ({_fmt_pct} of CTL) — in the zone · target {_tgt_str}'
+                _v_cls, _v_txt = 'tsb-v-ok', f'✓ Race morning TSB {_fmt_tsb} ({_fmt_pct} of CTL) — in the zone · target {_tgt_str}{_adapt_note}'
             elif _rwp_race_tsb < _tsb_lo:
-                _v_cls, _v_txt = 'tsb-v-lo', f'⚠ Race morning TSB {_fmt_tsb} ({_fmt_pct} of CTL) — {_tsb_lo - _rwp_race_tsb:.1f} below target · target {_tgt_str}'
+                _v_cls, _v_txt = 'tsb-v-lo', f'⚠ Race morning TSB {_fmt_tsb} ({_fmt_pct} of CTL) — {_tsb_lo - _rwp_race_tsb:.1f} below target · target {_tgt_str}{_adapt_note}'
             else:
                 _v_cls, _v_txt = 'tsb-v-hi', f'Race morning TSB {_fmt_tsb} ({_fmt_pct} of CTL) — very fresh · target {_tgt_str}'
+            
+            _DOW = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
+            _MON = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
             
             _rwp_html = f'<div class="rwp"><div class="rwp-label">📋 Race Week Plan · {_rwp_dist_cat} taper</div>'
             _rwp_html += '<div class="dh"><span>Day</span><span>Session</span><span style="text-align:right">TSS</span><span style="text-align:right">CTL</span><span style="text-align:right">ATL</span><span style="text-align:right">TSB</span></div>'
             
-            for _dd in _rwp_days:
+            for _dd in _rwp_results:
                 _dow = _DOW[_dd['date'].weekday()]
                 _dm = _dd['date'].day
                 _mn = _MON[_dd['date'].month - 1]
                 _rcls = ' dr-race' if _dd['is_race'] else ''
-                _tcls = 'dt-d' if _dd['tag'] == 'done' else ('dt-r' if _dd['tag'] == 'race' else 'dt-p')
-                _tlbl = 'done' if _dd['tag'] == 'done' else ('race' if _dd['tag'] == 'race' else 'plan')
+                _tcls = 'dt-d' if _dd['tag'] == 'done' else ('dt-r' if _dd['tag'] == 'race' else ('dt-t' if _dd['tag'] == 'today' else 'dt-p'))
+                _tlbl = 'done' if _dd['tag'] == 'done' else ('race' if _dd['tag'] == 'race' else ('today' if _dd['tag'] == 'today' else 'plan'))
                 _tsb_col = 'color:#4ade80' if _tsb_lo <= _dd['tsb'] <= _tsb_hi else ('color:#fbbf24' if _dd['tsb'] < _tsb_lo else 'color:#3b82f6')
                 _tsb_sign = '+' if _dd['tsb'] >= 0 else ''
-                _rwp_html += f'<div class="dr{_rcls}"><div class="dd"><b>{_dow}</b> {_dm} {_mn}</div><div class="ds">{_dd["session"]}<span class="dt {_tcls}">{_tlbl}</span></div><div class="dv dv-t">{_dd["tss"]}</div><div class="dv dv-c">{_dd["ctl"]:.1f}</div><div class="dv dv-a">{_dd["atl"]:.1f}</div><div class="dv dv-s" style="{_tsb_col}">{_tsb_sign}{_dd["tsb"]:.1f}</div></div>'
+                _tss_display = str(_dd["tss"]) if _dd["tss"] > 0 else ''
+                _rwp_html += f'<div class="dr{_rcls}"><div class="dd"><b>{_dow}</b> {_dm} {_mn}</div><div class="ds">{_dd["session"]}<span class="dt {_tcls}">{_tlbl}</span></div><div class="dv dv-t">{_tss_display}</div><div class="dv dv-c">{_dd["ctl"]:.1f}</div><div class="dv dv-a">{_dd["atl"]:.1f}</div><div class="dv dv-s" style="{_tsb_col}">{_tsb_sign}{_dd["tsb"]:.1f}</div></div>'
             
             _rwp_html += f'<div class="tsb-v {_v_cls}">{_v_txt}</div>'
             _rwp_html += f'<div class="tsb-cw"><canvas id="tsbChart_{race_idx}"></canvas></div>'
@@ -2515,22 +2710,7 @@ def generate_html(stats, rf_data, volume_data, ctl_atl_data, ctl_atl_lookup, rfl
     
     _rwp_plans_list = []
     if zone_data:
-        import math as _rw_math3
         _DOW_JS3 = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
-        _rwp_tgt = {
-            '5K': {'A': (5, 25), 'B': (-5, 18)},
-            '10K': {'A': (5, 25), 'B': (-5, 18)},
-            'HM': {'A': (5, 32), 'B': (-5, 22)},
-            'Mara': {'A': (10, 35), 'B': (0, 28)},
-        }
-        _rwp_tpl3 = {
-            '5K': {7: 45, 6: 42, 5: 30, 4: 25, 3: 22, 2: 0, 1: 32, 0: 0},
-            '10K': {7: 50, 6: 40, 5: 38, 4: 25, 3: 22, 2: 0, 1: 30, 0: 0},
-            'HM': {7: 55, 6: 50, 5: 35, 4: 28, 3: 20, 2: 0, 1: 28, 0: 0},
-            'Mara': {7: 42, 6: 38, 5: 30, 4: 20, 3: 0, 2: 22, 1: 0, 0: 0},
-        }
-        _dc3 = _rw_math3.exp(-1/42)
-        _da3 = _rw_math3.exp(-1/7)
         for _ri3, _race3 in enumerate(PLANNED_RACES_DASH):
             _rpri3 = _race3.get('priority', 'B')
             if _rpri3 == 'C':
@@ -2544,43 +2724,32 @@ def generate_html(stats, rf_data, volume_data, ctl_atl_data, ctl_atl_lookup, rfl
             if _dto3 < 1 or _dto3 > 7:
                 continue
             _dkm3 = _race3.get('distance_km', 5.0)
-            _dcat3 = 'Mara' if _dkm3 >= 25 else ('HM' if _dkm3 > 12 else ('10K' if _dkm3 > 5.5 else '5K'))
+            _dcat3 = 'Mara' if _dkm3 >= 35 else ('HM' if _dkm3 > 12 else ('10K' if _dkm3 > 5.5 else '5K'))
             _c03 = zone_data.get('current_ctl', 0)
             _a03 = zone_data.get('current_atl', 0)
             _tsb03 = _c03 - _a03
-            _pts3 = [{'tsb': round(_tsb03, 1), 'l': 'Now', 't': 'n', 'r': False}]
             _recent3 = {r['date']: r for r in zone_data.get('recent_tss', [])}
-            _c3, _a3 = _c03, _a03
-            _tpl3 = dict(_rwp_tpl3.get(_dcat3, _rwp_tpl3['5K']))
-            if _c03 > 0 and (_tsb03 / _c03 * 100) < -10:
-                _mm3 = _tpl3.get(3) == 0
-                _ex3 = 4 if _mm3 else 3
-                if _ex3 in _tpl3:
-                    _tpl3[_ex3] = 0
-            from datetime import timedelta as _td3
-            for _d3 in range(1, _dto3 + 1):
-                _dd3 = _dtd3.today() + _td3(days=_d3)
-                _drem3 = _dto3 - _d3
-                _ds3 = _dd3.strftime('%Y-%m-%d')
-                _act3 = _recent3.get(_ds3)
-                _ir3 = (_drem3 == 0)
-                if _act3:
-                    _tss3 = _act3['tss']
-                    _tag3 = 'd'
-                elif _ir3:
-                    _tss3 = 0
-                    _tag3 = 'r'
-                elif _drem3 in _tpl3:
-                    _tss3 = _tpl3[_drem3]
-                    _tag3 = 'p'
-                else:
-                    _tss3 = 35
-                    _tag3 = 'p'
-                _c3 = _c3 * _dc3 + _tss3 * (1 - _dc3)
-                _a3 = _a3 * _da3 + _tss3 * (1 - _da3)
-                _pts3.append({'tsb': round(_c3 - _a3, 1), 'l': _DOW_JS3[_dd3.isoweekday() % 7], 't': _tag3, 'r': _ir3})
-            _race_ctl3 = _c3
-            _pcts3 = _rwp_tgt.get(_dcat3, {'A': (5, 25), 'B': (-5, 18)}).get(_rpri3, (-5, 18))
+            
+            # Use shared solver
+            _plan3, _results3 = _solve_taper(
+                _c03, _a03, _dto3, _c03, _dcat3, _rpri3,
+                _dtd3.today(), _recent3, _race3['name'], dist_km=_dkm3
+            )
+            
+            # Build chart points from results (includes lookback + forward)
+            _pts3 = []
+            for _r3 in _results3:
+                _is_now = (_r3['date'] == _dtd3.today())
+                _pts3.append({
+                    'tsb': round(_r3['tsb'], 1),
+                    'l': 'Today' if _is_now else _DOW_JS3[_r3['date'].isoweekday() % 7],
+                    't': _r3['tag'][0] if _r3['tag'] != 'race' else 'r',
+                    'r': _r3['is_race'],
+                    'now': _is_now,
+                })
+            
+            _race_ctl3 = _results3[-1]['ctl']
+            _pcts3 = _rwp_interp_targets(_dkm3).get(_rpri3, (2, 18))
             _rwp_plans_list.append({
                 'canvas': f'tsbChart_{_ri3}',
                 'pts': _pts3,
@@ -2801,6 +2970,7 @@ def generate_html(stats, rf_data, volume_data, ctl_atl_data, ctl_atl_lookup, rfl
         .dt {{ display: inline-block; font-size: 0.56rem; padding: 1px 5px; border-radius: 3px; font-weight: 600; margin-left: 4px; vertical-align: middle; }}
         .dt-d {{ background: rgba(74,222,128,0.15); color: #4ade80; }}
         .dt-p {{ background: rgba(129,140,248,0.12); color: var(--accent); }}
+        .dt-t {{ background: rgba(251,191,36,0.15); color: #fbbf24; }}
         .dt-r {{ background: rgba(74,222,128,0.2); color: #4ade80; }}
         .dv {{ text-align: right; font-family: 'JetBrains Mono'; font-size: 0.73rem; }}
         .dv-t {{ color: #fbbf24; }}
@@ -4768,8 +4938,9 @@ function raceAnnotations(dates) {{
         [tsbLo, tsbHi].forEach(v => {{ const yy = y(v); if (yy >= pad.t && yy <= pad.t + pH) {{ ctx.beginPath(); ctx.moveTo(pad.l, yy); ctx.lineTo(W - pad.r, yy); ctx.stroke(); }} }});
         ctx.setLineDash([]);
         
-        // TSB line
-        const lastActual = pts.reduce((a, p, i) => (p.t === 'd' || p.t === 'n') ? i : a, 0);
+        // TSB line: solid for done/today, dashed for planned
+        const nowIdx = pts.findIndex(p => p.now);
+        const lastActual = nowIdx >= 0 ? nowIdx : pts.reduce((a, p, i) => p.t === 'd' ? i : a, 0);
         ctx.beginPath(); ctx.strokeStyle = '#818cf8'; ctx.lineWidth = 2;
         for (let i = 0; i <= Math.min(lastActual, pts.length - 1); i++) {{ if (i === 0) ctx.moveTo(x(i), y(pts[i].tsb)); else ctx.lineTo(x(i), y(pts[i].tsb)); }}
         ctx.stroke();
@@ -4782,9 +4953,10 @@ function raceAnnotations(dates) {{
         
         // Dots
         pts.forEach((p, i) => {{
-            const r = p.r ? 5 : 3.5;
+            const isActual = (p.t === 'd' || p.now);
+            const r = p.r ? 5 : (p.now ? 4.5 : 3.5);
             ctx.beginPath(); ctx.arc(x(i), y(p.tsb), r, 0, Math.PI * 2);
-            ctx.fillStyle = p.r ? '#4ade80' : (p.t === 'd' || p.t === 'n') ? '#818cf8' : 'rgba(129, 140, 248, 0.45)';
+            ctx.fillStyle = p.r ? '#4ade80' : isActual ? '#818cf8' : 'rgba(129, 140, 248, 0.45)';
             ctx.fill(); ctx.strokeStyle = 'rgba(26, 29, 39, 0.8)'; ctx.lineWidth = 1.5; ctx.stroke();
         }});
         
