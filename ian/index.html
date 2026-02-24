@@ -423,7 +423,7 @@ function raceAnnotations(dates) {
 }catch(e){console.warn('Chart.js not loaded:',e);}
 </script>
     <h1>🏃 Ian Lilley</h1>
-    <div class="dash-sub">Tuesday 24 February 2026, 16:05</div>
+    <div class="dash-sub">Tuesday 24 February 2026, 18:24</div>
     
     <!-- Phase 2: Mode Toggle -->
     <div class="mode-toggle" style="display:flex;gap:6px;margin:10px 0 8px;align-items:center;display:none;">
@@ -448,7 +448,7 @@ function raceAnnotations(dates) {
     <!-- v51: Health Check Banner -->
     <div id="alert-banner"></div>
     <script>
-    const _alertData = {"stryd": [{"name": "Taper not working", "level": "concern", "icon": "\u26a0\ufe0f", "detail": " (RFL below 90d peak at race distance)"}, {"name": "Deep fatigue", "level": "watch", "icon": "\ud83d\udc40", "detail": " (TSB -12)"}], "gap": [{"name": "Taper not working", "level": "concern", "icon": "\u26a0\ufe0f", "detail": " (RFL below 90d peak at race distance)"}, {"name": "Deep fatigue", "level": "watch", "icon": "\ud83d\udc40", "detail": " (TSB -12)"}], "sim": [{"name": "Taper not working", "level": "concern", "icon": "\u26a0\ufe0f", "detail": " (RFL below 90d peak at race distance)"}, {"name": "Deep fatigue", "level": "watch", "icon": "\ud83d\udc40", "detail": " (TSB -12)"}]};
+    const _alertData = {"stryd": [{"name": "Deep fatigue", "level": "watch", "icon": "\ud83d\udc40", "detail": " (TSB -12)"}], "gap": [{"name": "Deep fatigue", "level": "watch", "icon": "\ud83d\udc40", "detail": " (TSB -12)"}], "sim": [{"name": "Deep fatigue", "level": "watch", "icon": "\ud83d\udc40", "detail": " (TSB -12)"}]};
     function renderAlertBanner(mode) {
         const el = document.getElementById('alert-banner');
         const alerts = _alertData[mode] || [];
@@ -930,7 +930,7 @@ function raceAnnotations(dates) {
     
     
     <div class="footer">
-        Updated: 2026-02-24 16:05<br>
+        Updated: 2026-02-24 18:24<br>
         Data through: 2026-02-24
     </div>
     
