@@ -230,9 +230,10 @@ def _calc_rfl_delta(df, days_back=14, mode='stryd'):
     if rfl.isna().all() or dates.isna().all():
         return None
     
-    latest_rfl = rfl.iloc[-1] if pd.notna(rfl.iloc[-1]) else None
-    if latest_rfl is None:
+    latest_valid = rfl.dropna()
+    if latest_valid.empty:
         return None
+    latest_rfl = latest_valid.iloc[-1]
     
     cutoff = dates.max() - timedelta(days=days_back)
     # Find the last run on or before the cutoff
@@ -262,6 +263,13 @@ def get_summary_stats(df):
     year_runs = df[df['date'] >= year_ago]
     
     latest = df.iloc[-1] if len(df) > 0 else None
+
+    def _last_valid(df, col):
+        """Return last non-NaN value from column, or None."""
+        if col not in df.columns:
+            return None
+        valid = df[col].dropna()
+        return valid.iloc[-1] if len(valid) > 0 else None
     
     # Master uses distance_km, not Distance_m
     dist_col = 'distance_km' if 'distance_km' in df.columns else 'Distance_m'
@@ -297,13 +305,13 @@ def get_summary_stats(df):
         'rfl_14d_delta_sim': _calc_rfl_delta(df, 14, 'sim'),
         'latest_hr': int(latest[hr_col]) if latest is not None and pd.notna(latest.get(hr_col)) else None,
         'latest_dist': round(latest[dist_col], 2) if latest is not None and pd.notna(latest.get(dist_col)) else None,
-        # v51: Easy RF gap
-        'easy_rfl_gap': round(latest.get('Easy_RFL_Gap', 0) * 100, 1) if latest is not None and pd.notna(latest.get('Easy_RFL_Gap')) else None,
-        'easy_rfl_gap_gap': round(latest.get('Easy_RFL_Gap_gap', 0) * 100, 1) if latest is not None and pd.notna(latest.get('Easy_RFL_Gap_gap')) else None,
-        'easy_rfl_gap_sim': round(latest.get('Easy_RFL_Gap_sim', 0) * 100, 1) if latest is not None and pd.notna(latest.get('Easy_RFL_Gap_sim')) else None,
-        # Phase 2: GAP and Sim RFL for mode toggle
-        'latest_rfl_gap': round((latest.get('RFL_gap_Trend') or 0) * 100, 1) if latest is not None and pd.notna(latest.get('RFL_gap_Trend')) else None,
-        'latest_rfl_sim': round((latest.get('RFL_sim_Trend') or 0) * 100, 1) if latest is not None and pd.notna(latest.get('RFL_sim_Trend')) else None,
+        # v51: Easy RF gap — use last valid row (short runs at end of day have NaN RF)
+        'easy_rfl_gap': round(_last_valid(df, 'Easy_RFL_Gap') * 100, 1) if _last_valid(df, 'Easy_RFL_Gap') is not None else None,
+        'easy_rfl_gap_gap': round(_last_valid(df, 'Easy_RFL_Gap_gap') * 100, 1) if _last_valid(df, 'Easy_RFL_Gap_gap') is not None else None,
+        'easy_rfl_gap_sim': round(_last_valid(df, 'Easy_RFL_Gap_sim') * 100, 1) if _last_valid(df, 'Easy_RFL_Gap_sim') is not None else None,
+        # Phase 2: GAP and Sim RFL for mode toggle — use last valid row (short runs have NaN RF)
+        'latest_rfl_gap': round(_last_valid(df, 'RFL_gap_Trend') * 100, 1) if _last_valid(df, 'RFL_gap_Trend') is not None else None,
+        'latest_rfl_sim': round(_last_valid(df, 'RFL_sim_Trend') * 100, 1) if _last_valid(df, 'RFL_sim_Trend') is not None else None,
         'first_year': df['date'].min().year if len(df) > 0 else '',
     }
     return stats
