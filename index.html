@@ -423,7 +423,7 @@ function raceAnnotations(dates) {
 }catch(e){console.warn('Chart.js not loaded:',e);}
 </script>
     <h1>🏃 Paul Collyer</h1>
-    <div class="dash-sub">Tuesday 24 February 2026, 12:07</div>
+    <div class="dash-sub">Tuesday 24 February 2026, 18:30</div>
     
     <!-- Phase 2: Mode Toggle -->
     <div class="mode-toggle" style="display:flex;gap:6px;margin:10px 0 8px;align-items:center;">
@@ -448,7 +448,7 @@ function raceAnnotations(dates) {
     <!-- v51: Health Check Banner -->
     <div id="alert-banner"></div>
     <script>
-    const _alertData = {"stryd": [{"name": "Taper not working", "level": "concern", "icon": "\u26a0\ufe0f", "detail": " (RFL below 90d peak at race distance)"}], "gap": [], "sim": [{"name": "Taper not working", "level": "concern", "icon": "\u26a0\ufe0f", "detail": " (RFL below 90d peak at race distance)"}]};
+    const _alertData = {"stryd": [], "gap": [], "sim": []};
     function renderAlertBanner(mode) {
         const el = document.getElementById('alert-banner');
         const alerts = _alertData[mode] || [];
@@ -548,7 +548,7 @@ function raceAnnotations(dates) {
     
     <div class="stats-grid">
         <div class="stat-card">
-            <div class="stat-value">72.8</div>
+            <div class="stat-value">62.5</div>
             <div class="stat-label">Last 7 Days</div>
             <div class="stat-sub">km</div>
         </div>
@@ -581,19 +581,6 @@ function raceAnnotations(dates) {
     <div class="card" id="race-readiness-card">
         <h2>🎯 Race Readiness <span class="badge">±3% of target</span></h2>
         <div class="rc">
-            <div class="rh">
-                <span class="rn">Battersea parkrun <span style="font-size:0.65rem;padding:2px 6px;border-radius:4px;background:#8b90a022;color:#8b90a0;font-weight:600;margin-left:6px;vertical-align:middle">C RACE</span></span>
-                <span class="rd">2026-02-21 · 3d ago</span>
-            </div>
-            <div class="rs">
-                <div class="power-only"><div class="rv" style="color:var(--accent)" id="race-pw-0">345W</div><div class="rl">Target</div><div class="rx">±10W</div></div>
-                <div class="pace-target" style="display:none"><div class="rv" style="color:#4ade80" id="race-pace-0">4:00/km</div><div class="rl">Target pace</div></div>
-                <div><div class="rv" id="race-pred-0">20:00</div><div class="rl">Predicted</div><div class="rx power-only">4:00/km</div></div>
-                <div><div class="rv" id="spec14_0">15<span style="font-size:0.75rem;color:var(--text-dim)">min</span></div><div class="rl">14d at effort</div></div>
-                <div><div class="rv" id="spec28_0">15<span style="font-size:0.75rem;color:var(--text-dim)">min</span></div><div class="rl">28d at effort</div></div>
-            </div>
-            <div style="margin-top:6px"></div>
-        </div><div class="rc">
             <div class="rh">
                 <span class="rn">LFOTM 5K <span style="font-size:0.65rem;padding:2px 6px;border-radius:4px;background:#fbbf2422;color:#fbbf24;font-weight:600;margin-left:6px;vertical-align:middle">B RACE</span></span>
                 <span class="rd">2026-02-27 · 3d</span>
@@ -987,7 +974,7 @@ function raceAnnotations(dates) {
     
     
     <div class="footer">
-        Updated: 2026-02-24 12:07<br>
+        Updated: 2026-02-24 18:30<br>
         Data through: 2026-02-24
     </div>
     
