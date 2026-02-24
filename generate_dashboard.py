@@ -1683,7 +1683,62 @@ def get_zone_data(df):
     except Exception:
         pass
     
-    return {'runs': runs, 'current_cp': current_cp, 'current_rfl': round(current_rfl, 4), 're_p90': re_p90, 'gap_target_paces': gap_target_paces_local, 'rfl_proj_per_day': _rfl_proj_per_day}
+    # ── Race week planner data ──
+    # Recent runs with TSS for forward projection (last 14 days)
+    import math as _rw_math
+    _TC_CTL, _TC_ATL = 42, 7
+    _rw_recent_tss = []
+    _today_dt = df['date'].iloc[-1] if len(df) > 0 else pd.Timestamp.now()
+    _14d_ago = _today_dt - pd.Timedelta(days=14)
+    _tss_col = 'TSS' if 'TSS' in df.columns else None
+    _name_col = 'activity_name' if 'activity_name' in df.columns else 'Activity_Name'
+    _race_col = 'race_flag' if 'race_flag' in df.columns else 'Race'
+    if _tss_col:
+        for _, _row in df[df['date'] > _14d_ago].iterrows():
+            _rw_recent_tss.append({
+                'date': _row['date'].strftime('%Y-%m-%d'),
+                'name': str(_row.get(_name_col, ''))[:40] if pd.notna(_row.get(_name_col)) else '',
+                'tss': round(float(_row[_tss_col])) if pd.notna(_row.get(_tss_col)) else 0,
+                'race': bool(_row.get(_race_col, 0) == 1),
+            })
+    
+    # Current CTL/ATL from latest row (for forward projection start point)
+    _latest = df.iloc[-1] if len(df) > 0 else None
+    _rw_ctl = round(float(_latest['CTL']), 1) if _latest is not None and pd.notna(_latest.get('CTL')) else 0
+    _rw_atl = round(float(_latest['ATL']), 1) if _latest is not None and pd.notna(_latest.get('ATL')) else 0
+    
+    # Pre-race morning TSB/CTL for all races (reverse Banister)
+    _pre_race_tsb = {}
+    if _tss_col and 'CTL' in df.columns and 'ATL' in df.columns:
+        _decay_ctl = _rw_math.exp(-1/_TC_CTL)
+        _decay_atl = _rw_math.exp(-1/_TC_ATL)
+        for _idx, _row in df[df[_race_col] == 1].iterrows():
+            _r_ctl = _row.get('CTL')
+            _r_atl = _row.get('ATL')
+            _r_tss = _row.get(_tss_col)
+            if not all(pd.notna(x) and x > 0 for x in [_r_ctl, _r_atl, _r_tss]):
+                continue
+            _ctl_pre = (_r_ctl - _r_tss * (1 - _decay_ctl)) / _decay_ctl
+            _atl_pre = (_r_atl - _r_tss * (1 - _decay_atl)) / _decay_atl
+            _tsb_pre = _ctl_pre - _atl_pre
+            _ratio_pre = (_tsb_pre / _ctl_pre * 100) if _ctl_pre > 0 else 0
+            _date_str = _row['date'].strftime('%Y-%m-%d')
+            _pre_race_tsb[_date_str] = {
+                'ctl_pre': round(_ctl_pre, 1),
+                'atl_pre': round(_atl_pre, 1),
+                'tsb_pre': round(_tsb_pre, 1),
+                'tsb_pct': round(_ratio_pre, 1),
+            }
+    
+    return {
+        'runs': runs, 'current_cp': current_cp, 'current_rfl': round(current_rfl, 4),
+        're_p90': re_p90, 'gap_target_paces': gap_target_paces_local,
+        'rfl_proj_per_day': _rfl_proj_per_day,
+        # Race week planner data
+        'recent_tss': _rw_recent_tss,
+        'current_ctl': _rw_ctl, 'current_atl': _rw_atl,
+        'pre_race_tsb': _pre_race_tsb,
+    }
 
 
 # ============================================================================
@@ -1983,8 +2038,115 @@ def _generate_zone_html(zone_data, stats=None):
                 <div><div class="rv" id="spec14_{race_idx}">{_spec_values.get(race_idx, (0, 0))[0]}<span style="font-size:0.75rem;color:var(--text-dim)">min</span></div><div class="rl">14d at effort</div></div>
                 <div><div class="rv" id="spec28_{race_idx}">{_spec_values.get(race_idx, (0, 0))[1]}<span style="font-size:0.75rem;color:var(--text-dim)">min</span></div><div class="rl">28d at effort</div></div>
             </div>
-            <div style="margin-top:6px">{taper_html}</div>
-        </div>'''
+            <div style="margin-top:6px">{taper_html}</div>\n'''
+        
+        # ── Race Week Plan (≤7 days, A or B priority) ──
+        _rwp_html = ''
+        if priority in ('A', 'B') and 0 < days_to <= 7:
+            _rwp_taper_templates = {
+                '5K': {7: ('Easy 45\' with strides', 45), 6: ('Moderate 35\' + 5K-pace surges', 42), 5: ('Easy 35\'', 30), 4: ('Easy 30\'', 25), 3: ('Easy 25\' with strides', 22), 2: ('Rest', 0), 1: ('Shakeout with strides', 32), 0: (None, None)},
+                '10K': {7: ('Easy 50\' with strides', 50), 6: ('Easy 40\' + 4×30s', 40), 5: ('Moderate 35\' + 10K surges', 38), 4: ('Easy 30\'', 25), 3: ('Easy 25\' with strides', 22), 2: ('Rest', 0), 1: ('Shakeout with strides', 30), 0: (None, None)},
+                'HM': {7: ('Easy 60\' with strides', 55), 6: ('Moderate 45\' + HM surges', 50), 5: ('Easy 40\'', 35), 4: ('Easy 30\' with strides', 28), 3: ('Easy 25\'', 20), 2: ('Rest', 0), 1: ('Shakeout with strides', 28), 0: (None, None)},
+                'Mara': {10: ('Easy 70\' with strides', 65), 9: ('Easy 50\'', 42), 8: ('Moderate 45\' + MP km', 48), 7: ('Easy 50\'', 42), 6: ('Easy 40\' + MP surges', 38), 5: ('Easy 35\'', 30), 4: ('Easy 25\'', 20), 3: ('Rest', 0), 2: ('Shakeout 20\' with strides', 22), 1: ('Rest', 0), 0: (None, None)},
+            }
+            _rwp_tsb_targets_pct = {
+                '5K': {'A': (5, 25), 'B': (-5, 18)},
+                '10K': {'A': (5, 25), 'B': (-5, 18)},
+                'HM': {'A': (5, 32), 'B': (-5, 22)},
+                'Mara': {'A': (10, 35), 'B': (0, 28)},
+            }
+            _rwp_dist_cat = 'Mara' if dist_km >= 25 else ('HM' if dist_km > 12 else ('10K' if dist_km > 5.5 else '5K'))
+            _rwp_tpl = dict(_rwp_taper_templates.get(_rwp_dist_cat, _rwp_taper_templates['5K']))
+            
+            # Fatigue-aware: add extra rest at D-3 if TSB/CTL < -10%
+            _rwp_ctl0 = zone_data.get('current_ctl', 0)
+            _rwp_atl0 = zone_data.get('current_atl', 0)
+            _rwp_tsb0 = _rwp_ctl0 - _rwp_atl0
+            if _rwp_ctl0 > 0 and (_rwp_tsb0 / _rwp_ctl0 * 100) < -10:
+                _mara_mode = 3 in _rwp_tpl and _rwp_tpl[3][1] == 0
+                _extra = 4 if _mara_mode else 3
+                if _extra in _rwp_tpl:
+                    _rwp_tpl[_extra] = ('Rest (fatigue)', 0)
+            
+            # Lookup recent actual runs for matching
+            _rwp_recent = {r['date']: r for r in zone_data.get('recent_tss', [])}
+            
+            _DOW = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
+            _MON = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
+            _decay_c = _math.exp(-1/42)
+            _decay_a = _math.exp(-1/7)
+            
+            _rwp_days = []
+            _c, _a = _rwp_ctl0, _rwp_atl0
+            for _d in range(1, days_to + 1):
+                _day_date = _today + _td(days=_d)
+                _days_rem = days_to - _d
+                _dstr = _day_date.strftime('%Y-%m-%d')
+                _actual = _rwp_recent.get(_dstr)
+                _is_race = (_days_rem == 0)
+                
+                if _actual:
+                    _sess = _actual['name']
+                    _tss_val = _actual['tss']
+                    _tag = 'done'
+                elif _is_race:
+                    _sess = f'🏁 {race["name"]}'
+                    _tss_val = 0
+                    _tag = 'race'
+                elif _days_rem in _rwp_tpl:
+                    _sess, _tss_val = _rwp_tpl[_days_rem]
+                    if _tss_val is None: _tss_val = 0
+                    _tag = 'plan'
+                else:
+                    _sess = 'Easy run'
+                    _tss_val = 35
+                    _tag = 'plan'
+                
+                _c = _c * _decay_c + _tss_val * (1 - _decay_c)
+                _a = _a * _decay_a + _tss_val * (1 - _decay_a)
+                _rwp_days.append({
+                    'date': _day_date, 'days_rem': _days_rem, 'session': _sess,
+                    'tss': _tss_val, 'ctl': _c, 'atl': _a, 'tsb': _c - _a,
+                    'tag': _tag, 'is_race': _is_race,
+                })
+            
+            _rwp_race_ctl = _rwp_days[-1]['ctl']
+            _rwp_race_tsb = _rwp_days[-1]['tsb']
+            _pcts = _rwp_tsb_targets_pct.get(_rwp_dist_cat, _rwp_tsb_targets_pct['5K']).get(priority, (-5, 18))
+            _tsb_lo = _rwp_race_ctl * _pcts[0] / 100
+            _tsb_hi = _rwp_race_ctl * _pcts[1] / 100
+            _race_pct = (_rwp_race_tsb / _rwp_race_ctl * 100) if _rwp_race_ctl > 0 else 0
+            
+            _fmt_tsb = f"{'+'if _rwp_race_tsb>=0 else ''}{_rwp_race_tsb:.1f}"
+            _fmt_pct = f"{'+'if _race_pct>=0 else ''}{_race_pct:.0f}%"
+            _tgt_str = f"{'+'if _pcts[0]>=0 else ''}{_pcts[0]}% to {'+'if _pcts[1]>=0 else ''}{_pcts[1]}% of CTL"
+            
+            if _tsb_lo <= _rwp_race_tsb <= _tsb_hi:
+                _v_cls, _v_txt = 'tsb-v-ok', f'✓ Race morning TSB {_fmt_tsb} ({_fmt_pct} of CTL) — in the zone · target {_tgt_str}'
+            elif _rwp_race_tsb < _tsb_lo:
+                _v_cls, _v_txt = 'tsb-v-lo', f'⚠ Race morning TSB {_fmt_tsb} ({_fmt_pct} of CTL) — {_tsb_lo - _rwp_race_tsb:.1f} below target · target {_tgt_str}'
+            else:
+                _v_cls, _v_txt = 'tsb-v-hi', f'Race morning TSB {_fmt_tsb} ({_fmt_pct} of CTL) — very fresh · target {_tgt_str}'
+            
+            _rwp_html = f'<div class="rwp"><div class="rwp-label">📋 Race Week Plan · {_rwp_dist_cat} taper</div>'
+            _rwp_html += '<div class="dh"><span>Day</span><span>Session</span><span style="text-align:right">TSS</span><span style="text-align:right">CTL</span><span style="text-align:right">ATL</span><span style="text-align:right">TSB</span></div>'
+            
+            for _dd in _rwp_days:
+                _dow = _DOW[_dd['date'].weekday()]
+                _dm = _dd['date'].day
+                _mn = _MON[_dd['date'].month - 1]
+                _rcls = ' dr-race' if _dd['is_race'] else ''
+                _tcls = 'dt-d' if _dd['tag'] == 'done' else ('dt-r' if _dd['tag'] == 'race' else 'dt-p')
+                _tlbl = 'done' if _dd['tag'] == 'done' else ('race' if _dd['tag'] == 'race' else 'plan')
+                _tsb_col = 'color:#4ade80' if _tsb_lo <= _dd['tsb'] <= _tsb_hi else ('color:#fbbf24' if _dd['tsb'] < _tsb_lo else 'color:#3b82f6')
+                _tsb_sign = '+' if _dd['tsb'] >= 0 else ''
+                _rwp_html += f'<div class="dr{_rcls}"><div class="dd"><b>{_dow}</b> {_dm} {_mn}</div><div class="ds">{_dd["session"]}<span class="dt {_tcls}">{_tlbl}</span></div><div class="dv dv-t">{_dd["tss"]}</div><div class="dv dv-c">{_dd["ctl"]:.1f}</div><div class="dv dv-a">{_dd["atl"]:.1f}</div><div class="dv dv-s" style="{_tsb_col}">{_tsb_sign}{_dd["tsb"]:.1f}</div></div>'
+            
+            _rwp_html += f'<div class="tsb-v {_v_cls}">{_v_txt}</div>'
+            _rwp_html += f'<div class="tsb-cw"><canvas id="tsbChart_{race_idx}"></canvas></div>'
+            _rwp_html += '</div>'
+        
+        race_cards += _rwp_html + '</div>'''
     
     # Zone run data as JSON for JS
     import json as _json
@@ -2348,6 +2510,85 @@ def generate_html(stats, rf_data, volume_data, ctl_atl_data, ctl_atl_lookup, rfl
         for r in PLANNED_RACES_DASH
     ])
     
+    # Race week plan: pre-race TSB lookup and chart plan data
+    _pre_race_tsb_json = json.dumps(zone_data.get('pre_race_tsb', {}) if zone_data else {})
+    
+    _rwp_plans_list = []
+    if zone_data:
+        import math as _rw_math3
+        _DOW_JS3 = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
+        _rwp_tgt = {
+            '5K': {'A': (5, 25), 'B': (-5, 18)},
+            '10K': {'A': (5, 25), 'B': (-5, 18)},
+            'HM': {'A': (5, 32), 'B': (-5, 22)},
+            'Mara': {'A': (10, 35), 'B': (0, 28)},
+        }
+        _rwp_tpl3 = {
+            '5K': {7: 45, 6: 42, 5: 30, 4: 25, 3: 22, 2: 0, 1: 32, 0: 0},
+            '10K': {7: 50, 6: 40, 5: 38, 4: 25, 3: 22, 2: 0, 1: 30, 0: 0},
+            'HM': {7: 55, 6: 50, 5: 35, 4: 28, 3: 20, 2: 0, 1: 28, 0: 0},
+            'Mara': {7: 42, 6: 38, 5: 30, 4: 20, 3: 0, 2: 22, 1: 0, 0: 0},
+        }
+        _dc3 = _rw_math3.exp(-1/42)
+        _da3 = _rw_math3.exp(-1/7)
+        for _ri3, _race3 in enumerate(PLANNED_RACES_DASH):
+            _rpri3 = _race3.get('priority', 'B')
+            if _rpri3 == 'C':
+                continue
+            try:
+                _rdt3 = datetime.strptime(_race3['date'], '%Y-%m-%d').date()
+                from datetime import date as _dtd3
+                _dto3 = (_rdt3 - _dtd3.today()).days
+            except (ValueError, KeyError):
+                continue
+            if _dto3 < 1 or _dto3 > 7:
+                continue
+            _dkm3 = _race3.get('distance_km', 5.0)
+            _dcat3 = 'Mara' if _dkm3 >= 25 else ('HM' if _dkm3 > 12 else ('10K' if _dkm3 > 5.5 else '5K'))
+            _c03 = zone_data.get('current_ctl', 0)
+            _a03 = zone_data.get('current_atl', 0)
+            _tsb03 = _c03 - _a03
+            _pts3 = [{'tsb': round(_tsb03, 1), 'l': 'Now', 't': 'n', 'r': False}]
+            _recent3 = {r['date']: r for r in zone_data.get('recent_tss', [])}
+            _c3, _a3 = _c03, _a03
+            _tpl3 = dict(_rwp_tpl3.get(_dcat3, _rwp_tpl3['5K']))
+            if _c03 > 0 and (_tsb03 / _c03 * 100) < -10:
+                _mm3 = _tpl3.get(3) == 0
+                _ex3 = 4 if _mm3 else 3
+                if _ex3 in _tpl3:
+                    _tpl3[_ex3] = 0
+            from datetime import timedelta as _td3
+            for _d3 in range(1, _dto3 + 1):
+                _dd3 = _dtd3.today() + _td3(days=_d3)
+                _drem3 = _dto3 - _d3
+                _ds3 = _dd3.strftime('%Y-%m-%d')
+                _act3 = _recent3.get(_ds3)
+                _ir3 = (_drem3 == 0)
+                if _act3:
+                    _tss3 = _act3['tss']
+                    _tag3 = 'd'
+                elif _ir3:
+                    _tss3 = 0
+                    _tag3 = 'r'
+                elif _drem3 in _tpl3:
+                    _tss3 = _tpl3[_drem3]
+                    _tag3 = 'p'
+                else:
+                    _tss3 = 35
+                    _tag3 = 'p'
+                _c3 = _c3 * _dc3 + _tss3 * (1 - _dc3)
+                _a3 = _a3 * _da3 + _tss3 * (1 - _da3)
+                _pts3.append({'tsb': round(_c3 - _a3, 1), 'l': _DOW_JS3[_dd3.isoweekday() % 7], 't': _tag3, 'r': _ir3})
+            _race_ctl3 = _c3
+            _pcts3 = _rwp_tgt.get(_dcat3, {'A': (5, 25), 'B': (-5, 18)}).get(_rpri3, (-5, 18))
+            _rwp_plans_list.append({
+                'canvas': f'tsbChart_{_ri3}',
+                'pts': _pts3,
+                'tsbLo': round(_race_ctl3 * _pcts3[0] / 100, 1),
+                'tsbHi': round(_race_ctl3 * _pcts3[1] / 100, 1),
+            })
+    _rwp_plans_json = json.dumps(_rwp_plans_list)
+    
     html = f'''<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -2545,6 +2786,37 @@ def generate_html(stats, rf_data, volume_data, ctl_atl_data, ctl_atl_lookup, rfl
         .rv {{ font-size: 1.1rem; font-weight: 700; font-family: 'JetBrains Mono'; text-align: center; }}
         .rl {{ font-size: 0.68rem; color: var(--text-dim); text-align: center; margin-top: 1px; }}
         .rx {{ font-size: 0.64rem; color: var(--text-muted); text-align: center; }}
+        
+        /* Race Week Plan */
+        .rwp {{ margin-top: 12px; border-top: 1px solid var(--border); padding-top: 12px; }}
+        .rwp-label {{ font-size: 0.72rem; font-weight: 600; color: var(--accent); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 8px; }}
+        .dh {{ display: grid; grid-template-columns: 72px 1fr 42px 42px 42px 48px; gap: 4px; font-size: 0.65rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.04em; font-weight: 600; padding-bottom: 5px; border-bottom: 1px solid var(--border); margin-bottom: 2px; }}
+        .dh span:nth-child(n+3) {{ text-align: right; }}
+        .dr {{ display: grid; grid-template-columns: 72px 1fr 42px 42px 42px 48px; align-items: center; padding: 5px 0; border-bottom: 1px solid rgba(255,255,255,0.025); font-size: 0.78rem; gap: 4px; }}
+        .dr:last-child {{ border-bottom: none; }}
+        .dr-race {{ background: rgba(74,222,128,0.06); border-radius: 6px; padding-left: 6px; margin-left: -6px; padding-right: 6px; margin-right: -6px; }}
+        .dd {{ font-family: 'JetBrains Mono'; font-size: 0.72rem; color: var(--text-dim); }}
+        .dd b {{ font-weight: 600; color: var(--text); font-size: 0.75rem; }}
+        .ds {{ font-weight: 500; font-size: 0.76rem; }}
+        .dt {{ display: inline-block; font-size: 0.56rem; padding: 1px 5px; border-radius: 3px; font-weight: 600; margin-left: 4px; vertical-align: middle; }}
+        .dt-d {{ background: rgba(74,222,128,0.15); color: #4ade80; }}
+        .dt-p {{ background: rgba(129,140,248,0.12); color: var(--accent); }}
+        .dt-r {{ background: rgba(74,222,128,0.2); color: #4ade80; }}
+        .dv {{ text-align: right; font-family: 'JetBrains Mono'; font-size: 0.73rem; }}
+        .dv-t {{ color: #fbbf24; }}
+        .dv-c {{ color: #3b82f6; }}
+        .dv-a {{ color: #f97316; }}
+        .dv-s {{ font-weight: 700; }}
+        .tsb-v {{ display: inline-block; font-size: 0.72rem; padding: 3px 8px; border-radius: 5px; font-weight: 600; margin-top: 10px; }}
+        .tsb-v-ok {{ background: rgba(74,222,128,0.12); color: #4ade80; }}
+        .tsb-v-lo {{ background: rgba(251,191,36,0.12); color: #fbbf24; }}
+        .tsb-v-hi {{ background: rgba(59,130,246,0.12); color: #3b82f6; }}
+        .tsb-cw {{ margin-top: 10px; height: 90px; position: relative; }}
+        .tsb-cw canvas {{ width: 100%; height: 100%; display: block; }}
+        @media (max-width: 600px) {{
+            .dr, .dh {{ grid-template-columns: 54px 1fr 38px 38px 38px 44px; }}
+            .dv {{ font-size: 0.68rem; }}
+        }}
         
         /* Legend */
         .legend {{ display: flex; gap: 10px; margin-top: 8px; flex-wrap: wrap; }}
@@ -4040,6 +4312,12 @@ function raceAnnotations(dates) {{
                                         const icon = surfaceIcons[surfaces[i]] || '';
                                         lines.push(icon + ' ' + surfaces[i]);
                                     }}
+                                    // Pre-race morning TSB (reverse Banister)
+                                    if (_preRaceTSB && isoDate && _preRaceTSB[isoDate]) {{
+                                        const pr = _preRaceTSB[isoDate];
+                                        const sign = pr.tsb_pre >= 0 ? '+' : '';
+                                        lines.push('Pre-race TSB: ' + sign + pr.tsb_pre.toFixed(1) + ' (' + (pr.tsb_pct >= 0 ? '+' : '') + pr.tsb_pct.toFixed(0) + '% of CTL)');
+                                    }}
                                     return lines;
                                 }}
                             }}
@@ -4425,6 +4703,109 @@ function raceAnnotations(dates) {{
     
     // Apply initial mode (ensures GAP athletes see GAP data on load)
     if (typeof setMode === 'function') setMode(currentMode);
+    
+    // ── Race Week Plan: TSB mini-charts ──
+    const _preRaceTSB = {_pre_race_tsb_json};
+    const _rwpPlans = {_rwp_plans_json};
+    
+    function drawRWPChart(canvasId, plan) {{
+        const canvas = document.getElementById(canvasId);
+        if (!canvas) return;
+        const dpr = window.devicePixelRatio || 1;
+        const rect = canvas.parentElement.getBoundingClientRect();
+        canvas.width = rect.width * dpr;
+        canvas.height = rect.height * dpr;
+        canvas.style.width = rect.width + 'px';
+        canvas.style.height = rect.height + 'px';
+        const ctx = canvas.getContext('2d');
+        ctx.scale(dpr, dpr);
+        const W = rect.width, H = rect.height;
+        
+        const pts = plan.pts;
+        const tsbLo = plan.tsbLo, tsbHi = plan.tsbHi;
+        const allVals = pts.map(p => p.tsb).concat([tsbLo, tsbHi, 0]);
+        const dMin = Math.min(...allVals), dMax = Math.max(...allVals);
+        const yPad = Math.max(3, (dMax - dMin) * 0.18);
+        const yMin = dMin - yPad, yMax = dMax + yPad;
+        
+        const rawStep = (yMax - yMin) / 4;
+        const niceStep = rawStep <= 3 ? 2 : rawStep <= 6 ? 5 : rawStep <= 12 ? 10 : 20;
+        const ticks = [];
+        for (let t = Math.ceil(yMin / niceStep) * niceStep; t <= yMax; t += niceStep) ticks.push(t);
+        if (!ticks.includes(0) && yMin < 0 && yMax > 0) ticks.push(0);
+        ticks.sort((a, b) => a - b);
+        
+        const pad = {{ l: 38, r: 16, t: 10, b: 22 }};
+        const pW = W - pad.l - pad.r, pH = H - pad.t - pad.b;
+        const x = i => pad.l + (i / Math.max(pts.length - 1, 1)) * pW;
+        const y = v => pad.t + pH - ((v - yMin) / (yMax - yMin)) * pH;
+        
+        ctx.fillStyle = 'rgba(0,0,0,0.12)';
+        ctx.beginPath(); ctx.roundRect(0, 0, W, H, 6); ctx.fill();
+        
+        // Target zone band
+        ctx.fillStyle = 'rgba(74, 222, 128, 0.07)';
+        const zT = Math.max(y(tsbHi), pad.t), zB = Math.min(y(tsbLo), pad.t + pH);
+        if (zB > zT) ctx.fillRect(pad.l, zT, pW, zB - zT);
+        
+        // Grid + labels
+        ctx.textAlign = 'right'; ctx.textBaseline = 'middle';
+        ctx.font = '500 10px "JetBrains Mono", monospace';
+        ticks.forEach(t => {{
+            const yy = y(t);
+            if (yy < pad.t - 2 || yy > pad.t + pH + 2) return;
+            ctx.strokeStyle = t === 0 ? 'rgba(255,255,255,0.12)' : 'rgba(255,255,255,0.04)';
+            ctx.lineWidth = t === 0 ? 1 : 0.5;
+            ctx.setLineDash(t === 0 ? [] : [3, 3]);
+            ctx.beginPath(); ctx.moveTo(pad.l, yy); ctx.lineTo(W - pad.r, yy); ctx.stroke();
+            ctx.setLineDash([]);
+            ctx.fillStyle = 'rgba(139, 144, 160, 0.8)';
+            ctx.fillText((t >= 0 ? '+' : '') + t, pad.l - 4, yy);
+        }});
+        
+        // Zone dashed borders
+        ctx.strokeStyle = 'rgba(74, 222, 128, 0.3)'; ctx.lineWidth = 1; ctx.setLineDash([4, 4]);
+        [tsbLo, tsbHi].forEach(v => {{ const yy = y(v); if (yy >= pad.t && yy <= pad.t + pH) {{ ctx.beginPath(); ctx.moveTo(pad.l, yy); ctx.lineTo(W - pad.r, yy); ctx.stroke(); }} }});
+        ctx.setLineDash([]);
+        
+        // TSB line
+        const lastActual = pts.reduce((a, p, i) => (p.t === 'd' || p.t === 'n') ? i : a, 0);
+        ctx.beginPath(); ctx.strokeStyle = '#818cf8'; ctx.lineWidth = 2;
+        for (let i = 0; i <= Math.min(lastActual, pts.length - 1); i++) {{ if (i === 0) ctx.moveTo(x(i), y(pts[i].tsb)); else ctx.lineTo(x(i), y(pts[i].tsb)); }}
+        ctx.stroke();
+        if (lastActual < pts.length - 1) {{
+            ctx.beginPath(); ctx.strokeStyle = 'rgba(129, 140, 248, 0.5)'; ctx.lineWidth = 2; ctx.setLineDash([5, 4]);
+            ctx.moveTo(x(lastActual), y(pts[lastActual].tsb));
+            for (let i = lastActual + 1; i < pts.length; i++) ctx.lineTo(x(i), y(pts[i].tsb));
+            ctx.stroke(); ctx.setLineDash([]);
+        }}
+        
+        // Dots
+        pts.forEach((p, i) => {{
+            const r = p.r ? 5 : 3.5;
+            ctx.beginPath(); ctx.arc(x(i), y(p.tsb), r, 0, Math.PI * 2);
+            ctx.fillStyle = p.r ? '#4ade80' : (p.t === 'd' || p.t === 'n') ? '#818cf8' : 'rgba(129, 140, 248, 0.45)';
+            ctx.fill(); ctx.strokeStyle = 'rgba(26, 29, 39, 0.8)'; ctx.lineWidth = 1.5; ctx.stroke();
+        }});
+        
+        // X labels
+        ctx.font = '500 10px "DM Sans", sans-serif'; ctx.fillStyle = '#8b90a0'; ctx.textAlign = 'center'; ctx.textBaseline = 'top';
+        pts.forEach((p, i) => ctx.fillText(p.l, x(i), pad.t + pH + 6));
+        
+        // Race morning callout
+        const last = pts[pts.length - 1];
+        ctx.font = '700 11px "JetBrains Mono", monospace';
+        ctx.fillStyle = (last.tsb >= tsbLo && last.tsb <= tsbHi) ? '#4ade80' : (last.tsb < tsbLo ? '#fbbf24' : '#60a5fa');
+        const lbl = (last.tsb >= 0 ? '+' : '') + last.tsb.toFixed(1);
+        const lx = x(pts.length - 1);
+        if (lx + 40 > W - pad.r) {{ ctx.textAlign = 'right'; ctx.fillText(lbl, lx - 8, y(last.tsb) - 5); }}
+        else {{ ctx.textAlign = 'left'; ctx.fillText(lbl, lx + 8, y(last.tsb) - 5); }}
+    }}
+    
+    // Draw all TSB charts
+    const _DOW = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+    _rwpPlans.forEach(p => {{ if (p.canvas) drawRWPChart(p.canvas, p); }});
+    window.addEventListener('resize', () => _rwpPlans.forEach(p => {{ if (p.canvas) drawRWPChart(p.canvas, p); }}));
     
     </script>
 </body>
