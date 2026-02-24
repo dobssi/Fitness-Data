@@ -196,6 +196,38 @@
         .rl { font-size: 0.68rem; color: var(--text-dim); text-align: center; margin-top: 1px; }
         .rx { font-size: 0.64rem; color: var(--text-muted); text-align: center; }
         
+        /* Race Week Plan */
+        .rwp { margin-top: 12px; border-top: 1px solid var(--border); padding-top: 12px; }
+        .rwp-label { font-size: 0.72rem; font-weight: 600; color: var(--accent); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 8px; }
+        .dh { display: grid; grid-template-columns: 72px 1fr 42px 42px 42px 48px; gap: 4px; font-size: 0.65rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.04em; font-weight: 600; padding-bottom: 5px; border-bottom: 1px solid var(--border); margin-bottom: 2px; }
+        .dh span:nth-child(n+3) { text-align: right; }
+        .dr { display: grid; grid-template-columns: 72px 1fr 42px 42px 42px 48px; align-items: center; padding: 5px 0; border-bottom: 1px solid rgba(255,255,255,0.025); font-size: 0.78rem; gap: 4px; }
+        .dr:last-child { border-bottom: none; }
+        .dr-race { background: rgba(74,222,128,0.06); border-radius: 6px; padding-left: 6px; margin-left: -6px; padding-right: 6px; margin-right: -6px; }
+        .dd { font-family: 'JetBrains Mono'; font-size: 0.72rem; color: var(--text-dim); }
+        .dd b { font-weight: 600; color: var(--text); font-size: 0.75rem; }
+        .ds { font-weight: 500; font-size: 0.76rem; }
+        .dt { display: inline-block; font-size: 0.56rem; padding: 1px 5px; border-radius: 3px; font-weight: 600; margin-left: 4px; vertical-align: middle; }
+        .dt-d { background: rgba(74,222,128,0.15); color: #4ade80; }
+        .dt-p { background: rgba(129,140,248,0.12); color: var(--accent); }
+        .dt-t { background: rgba(251,191,36,0.15); color: #fbbf24; }
+        .dt-r { background: rgba(74,222,128,0.2); color: #4ade80; }
+        .dv { text-align: right; font-family: 'JetBrains Mono'; font-size: 0.73rem; }
+        .dv-t { color: #fbbf24; }
+        .dv-c { color: #3b82f6; }
+        .dv-a { color: #f97316; }
+        .dv-s { font-weight: 700; }
+        .tsb-v { display: inline-block; font-size: 0.72rem; padding: 3px 8px; border-radius: 5px; font-weight: 600; margin-top: 10px; }
+        .tsb-v-ok { background: rgba(74,222,128,0.12); color: #4ade80; }
+        .tsb-v-lo { background: rgba(251,191,36,0.12); color: #fbbf24; }
+        .tsb-v-hi { background: rgba(59,130,246,0.12); color: #3b82f6; }
+        .tsb-cw { margin-top: 10px; height: 90px; position: relative; }
+        .tsb-cw canvas { width: 100%; height: 100%; display: block; }
+        @media (max-width: 600px) {
+            .dr, .dh { grid-template-columns: 54px 1fr 38px 38px 38px 44px; }
+            .dv { font-size: 0.68rem; }
+        }
+        
         /* Legend */
         .legend { display: flex; gap: 10px; margin-top: 8px; flex-wrap: wrap; }
         .lg { display: flex; align-items: center; gap: 4px; font-size: 0.7rem; color: var(--text-dim); }
@@ -423,7 +455,7 @@ function raceAnnotations(dates) {
 }catch(e){console.warn('Chart.js not loaded:',e);}
 </script>
     <h1>🏃 Ian Lilley</h1>
-    <div class="dash-sub">Tuesday 24 February 2026, 18:24</div>
+    <div class="dash-sub">Tuesday 24 February 2026, 21:47</div>
     
     <!-- Phase 2: Mode Toggle -->
     <div class="mode-toggle" style="display:flex;gap:6px;margin:10px 0 8px;align-items:center;display:none;">
@@ -593,7 +625,7 @@ function raceAnnotations(dates) {
                 <div><div class="rv" id="spec28_0">13<span style="font-size:0.75rem;color:var(--text-dim)">min</span></div><div class="rl">28d at effort</div></div>
             </div>
             <div style="margin-top:6px"></div>
-        </div><div class="rc">
+</div><div class="rc">
             <div class="rh">
                 <span class="rn">Paddock Wood Half <span style="font-size:0.65rem;padding:2px 6px;border-radius:4px;background:#f8717122;color:#f87171;font-weight:600;margin-left:6px;vertical-align:middle">A RACE</span></span>
                 <span class="rd">2026-03-08 · 12d</span>
@@ -606,7 +638,7 @@ function raceAnnotations(dates) {
                 <div><div class="rv" id="spec28_1">44<span style="font-size:0.75rem;color:var(--text-dim)">min</span></div><div class="rl">28d at effort</div></div>
             </div>
             <div style="margin-top:6px"><span style="color:#4ade80;font-size:0.72rem">🟢 In taper window</span></div>
-        </div>
+</div>
     </div>
 
     <div class="card">
@@ -930,7 +962,7 @@ function raceAnnotations(dates) {
     
     
     <div class="footer">
-        Updated: 2026-02-24 18:24<br>
+        Updated: 2026-02-24 21:47<br>
         Data through: 2026-02-24
     </div>
     
@@ -1843,6 +1875,12 @@ function raceAnnotations(dates) {
                                         const icon = surfaceIcons[surfaces[i]] || '';
                                         lines.push(icon + ' ' + surfaces[i]);
                                     }
+                                    // Pre-race morning TSB (reverse Banister)
+                                    if (_preRaceTSB && isoDate && _preRaceTSB[isoDate]) {
+                                        const pr = _preRaceTSB[isoDate];
+                                        const sign = pr.tsb_pre >= 0 ? '+' : '';
+                                        lines.push('Pre-race TSB: ' + sign + pr.tsb_pre.toFixed(1) + ' (' + (pr.tsb_pct >= 0 ? '+' : '') + pr.tsb_pct.toFixed(0) + '% of CTL)');
+                                    }
                                     return lines;
                                 }
                             }
@@ -2228,6 +2266,111 @@ function raceAnnotations(dates) {
     
     // Apply initial mode (ensures GAP athletes see GAP data on load)
     if (typeof setMode === 'function') setMode(currentMode);
+    
+    // ── Race Week Plan: TSB mini-charts ──
+    const _preRaceTSB = {"2015-12-05": {"ctl_pre": 9.7, "atl_pre": 39.6, "tsb_pre": -29.9, "tsb_pct": -307.1}, "2016-01-01": {"ctl_pre": 34.9, "atl_pre": 63.8, "tsb_pre": -28.8, "tsb_pct": -82.5}, "2016-01-23": {"ctl_pre": 53.0, "atl_pre": 78.3, "tsb_pre": -25.3, "tsb_pct": -47.7}, "2016-02-07": {"ctl_pre": 56.5, "atl_pre": 62.5, "tsb_pre": -6.0, "tsb_pct": -10.6}, "2016-02-20": {"ctl_pre": 62.3, "atl_pre": 76.0, "tsb_pre": -13.7, "tsb_pct": -22.1}, "2016-02-27": {"ctl_pre": 64.6, "atl_pre": 76.3, "tsb_pre": -11.7, "tsb_pct": -18.1}, "2016-03-04": {"ctl_pre": 71.6, "atl_pre": 100.1, "tsb_pre": -28.5, "tsb_pct": -39.9}, "2016-03-18": {"ctl_pre": 73.7, "atl_pre": 86.9, "tsb_pre": -13.1, "tsb_pct": -17.8}, "2016-04-15": {"ctl_pre": 77.2, "atl_pre": 75.1, "tsb_pre": 2.1, "tsb_pct": 2.7}, "2016-04-24": {"ctl_pre": 67.1, "atl_pre": 38.1, "tsb_pre": 29.0, "tsb_pct": 43.2}, "2016-07-23": {"ctl_pre": 41.4, "atl_pre": 51.6, "tsb_pre": -10.3, "tsb_pct": -24.8}, "2016-08-26": {"ctl_pre": 49.8, "atl_pre": 61.2, "tsb_pre": -11.4, "tsb_pct": -22.9}, "2016-09-10": {"ctl_pre": 52.4, "atl_pre": 63.5, "tsb_pre": -11.1, "tsb_pct": -21.1}, "2016-09-30": {"ctl_pre": 57.7, "atl_pre": 70.2, "tsb_pre": -12.6, "tsb_pct": -21.8}, "2016-10-02": {"ctl_pre": 56.0, "atl_pre": 57.6, "tsb_pre": -1.6, "tsb_pct": -2.9}, "2016-10-22": {"ctl_pre": 61.7, "atl_pre": 70.7, "tsb_pre": -9.0, "tsb_pct": -14.6}, "2016-10-29": {"ctl_pre": 61.6, "atl_pre": 61.9, "tsb_pre": -0.3, "tsb_pct": -0.5}, "2016-11-12": {"ctl_pre": 60.3, "atl_pre": 56.4, "tsb_pre": 3.9, "tsb_pct": 6.4}, "2016-11-19": {"ctl_pre": 62.4, "atl_pre": 67.6, "tsb_pre": -5.1, "tsb_pct": -8.2}, "2016-12-03": {"ctl_pre": 63.2, "atl_pre": 70.2, "tsb_pre": -7.0, "tsb_pct": -11.0}, "2017-01-07": {"ctl_pre": 50.2, "atl_pre": 41.2, "tsb_pre": 8.9, "tsb_pct": 17.8}, "2017-02-24": {"ctl_pre": 51.4, "atl_pre": 42.0, "tsb_pre": 9.4, "tsb_pct": 18.3}, "2017-08-26": {"ctl_pre": 7.2, "atl_pre": 5.5, "tsb_pre": 1.7, "tsb_pct": 23.9}, "2017-11-24": {"ctl_pre": 19.7, "atl_pre": 29.9, "tsb_pre": -10.2, "tsb_pct": -52.0}, "2017-12-09": {"ctl_pre": 21.6, "atl_pre": 19.7, "tsb_pre": 2.0, "tsb_pct": 9.1}, "2017-12-16": {"ctl_pre": 25.2, "atl_pre": 35.7, "tsb_pre": -10.5, "tsb_pct": -41.6}, "2018-01-13": {"ctl_pre": 32.8, "atl_pre": 46.0, "tsb_pre": -13.2, "tsb_pct": -40.3}, "2018-01-20": {"ctl_pre": 35.3, "atl_pre": 44.9, "tsb_pre": -9.7, "tsb_pct": -27.4}, "2018-01-26": {"ctl_pre": 38.4, "atl_pre": 55.0, "tsb_pre": -16.5, "tsb_pct": -43.0}, "2018-02-03": {"ctl_pre": 41.5, "atl_pre": 55.3, "tsb_pre": -13.8, "tsb_pct": -33.3}, "2018-02-16": {"ctl_pre": 40.1, "atl_pre": 39.0, "tsb_pre": 1.0, "tsb_pct": 2.6}, "2018-03-24": {"ctl_pre": 44.5, "atl_pre": 48.7, "tsb_pre": -4.2, "tsb_pct": -9.4}, "2018-04-08": {"ctl_pre": 45.0, "atl_pre": 41.4, "tsb_pre": 3.6, "tsb_pct": 8.0}, "2018-04-21": {"ctl_pre": 49.2, "atl_pre": 59.5, "tsb_pre": -10.3, "tsb_pct": -21.0}, "2018-04-27": {"ctl_pre": 49.0, "atl_pre": 53.4, "tsb_pre": -4.4, "tsb_pct": -9.0}, "2018-04-28": {"ctl_pre": 49.0, "atl_pre": 52.4, "tsb_pre": -3.4, "tsb_pct": -7.0}, "2018-05-05": {"ctl_pre": 47.2, "atl_pre": 42.4, "tsb_pre": 4.8, "tsb_pct": 10.1}, "2018-06-29": {"ctl_pre": 36.4, "atl_pre": 33.4, "tsb_pre": 3.0, "tsb_pct": 8.2}, "2018-07-04": {"ctl_pre": 37.6, "atl_pre": 41.5, "tsb_pre": -3.9, "tsb_pct": -10.3}, "2018-07-13": {"ctl_pre": 39.7, "atl_pre": 49.0, "tsb_pre": -9.3, "tsb_pct": -23.5}, "2018-07-14": {"ctl_pre": 39.2, "atl_pre": 45.2, "tsb_pre": -5.9, "tsb_pct": -15.1}, "2018-07-27": {"ctl_pre": 37.3, "atl_pre": 32.5, "tsb_pre": 4.8, "tsb_pct": 12.9}, "2018-08-18": {"ctl_pre": 34.8, "atl_pre": 35.7, "tsb_pre": -0.9, "tsb_pct": -2.4}, "2018-09-01": {"ctl_pre": 36.3, "atl_pre": 44.0, "tsb_pre": -7.7, "tsb_pct": -21.3}, "2018-09-15": {"ctl_pre": 37.9, "atl_pre": 38.9, "tsb_pre": -1.0, "tsb_pct": -2.7}, "2018-09-22": {"ctl_pre": 39.8, "atl_pre": 46.0, "tsb_pre": -6.2, "tsb_pct": -15.6}, "2018-09-30": {"ctl_pre": 40.4, "atl_pre": 43.2, "tsb_pre": -2.8, "tsb_pct": -7.0}, "2018-10-06": {"ctl_pre": 42.4, "atl_pre": 49.2, "tsb_pre": -6.8, "tsb_pct": -16.0}, "2018-11-17": {"ctl_pre": 40.8, "atl_pre": 39.6, "tsb_pre": 1.3, "tsb_pct": 3.1}, "2018-12-01": {"ctl_pre": 43.2, "atl_pre": 44.7, "tsb_pre": -1.6, "tsb_pct": -3.6}, "2018-12-28": {"ctl_pre": 41.3, "atl_pre": 36.6, "tsb_pre": 4.7, "tsb_pct": 11.3}, "2018-12-29": {"ctl_pre": 41.5, "atl_pre": 38.5, "tsb_pre": 3.0, "tsb_pct": 7.3}, "2019-01-25": {"ctl_pre": 47.9, "atl_pre": 59.1, "tsb_pre": -11.2, "tsb_pct": -23.4}, "2019-02-02": {"ctl_pre": 47.7, "atl_pre": 47.2, "tsb_pre": 0.5, "tsb_pct": 1.1}, "2019-03-29": {"ctl_pre": 34.3, "atl_pre": 45.7, "tsb_pre": -11.4, "tsb_pct": -33.2}, "2019-04-06": {"ctl_pre": 38.0, "atl_pre": 52.4, "tsb_pre": -14.4, "tsb_pct": -37.9}, "2019-04-26": {"ctl_pre": 39.3, "atl_pre": 38.2, "tsb_pre": 1.1, "tsb_pct": 2.8}, "2019-06-10": {"ctl_pre": 44.6, "atl_pre": 52.8, "tsb_pre": -8.2, "tsb_pct": -18.4}, "2019-06-28": {"ctl_pre": 46.1, "atl_pre": 48.6, "tsb_pre": -2.5, "tsb_pct": -5.4}, "2019-07-22": {"ctl_pre": 36.5, "atl_pre": 15.6, "tsb_pre": 20.8, "tsb_pct": 57.1}, "2019-08-10": {"ctl_pre": 32.5, "atl_pre": 15.5, "tsb_pre": 17.0, "tsb_pct": 52.3}, "2019-08-31": {"ctl_pre": 36.2, "atl_pre": 40.7, "tsb_pre": -4.5, "tsb_pct": -12.4}, "2019-09-07": {"ctl_pre": 38.2, "atl_pre": 48.8, "tsb_pre": -10.6, "tsb_pct": -27.8}, "2019-09-14": {"ctl_pre": 41.0, "atl_pre": 52.8, "tsb_pre": -11.8, "tsb_pct": -28.7}, "2019-09-21": {"ctl_pre": 42.5, "atl_pre": 53.8, "tsb_pre": -11.3, "tsb_pct": -26.5}, "2019-10-05": {"ctl_pre": 44.7, "atl_pre": 56.8, "tsb_pre": -12.1, "tsb_pct": -27.2}, "2019-10-19": {"ctl_pre": 47.0, "atl_pre": 50.0, "tsb_pre": -3.0, "tsb_pct": -6.3}, "2019-11-16": {"ctl_pre": 49.8, "atl_pre": 61.5, "tsb_pre": -11.7, "tsb_pct": -23.6}, "2019-11-23": {"ctl_pre": 51.4, "atl_pre": 59.6, "tsb_pre": -8.1, "tsb_pct": -15.8}, "2019-11-30": {"ctl_pre": 51.8, "atl_pre": 52.1, "tsb_pre": -0.3, "tsb_pct": -0.5}, "2019-12-07": {"ctl_pre": 51.7, "atl_pre": 48.7, "tsb_pre": 3.0, "tsb_pct": 5.8}, "2020-01-01": {"ctl_pre": 47.8, "atl_pre": 40.0, "tsb_pre": 7.9, "tsb_pct": 16.5}, "2020-01-25": {"ctl_pre": 49.1, "atl_pre": 49.2, "tsb_pre": -0.1, "tsb_pct": -0.2}, "2020-01-31": {"ctl_pre": 50.3, "atl_pre": 52.8, "tsb_pre": -2.5, "tsb_pct": -4.9}, "2020-02-15": {"ctl_pre": 51.4, "atl_pre": 50.6, "tsb_pre": 0.9, "tsb_pct": 1.7}, "2020-05-06": {"ctl_pre": 48.7, "atl_pre": 49.0, "tsb_pre": -0.3, "tsb_pct": -0.6}, "2021-11-26": {"ctl_pre": 34.4, "atl_pre": 33.3, "tsb_pre": 1.1, "tsb_pct": 3.1}, "2023-06-03": {"ctl_pre": 47.5, "atl_pre": 42.4, "tsb_pre": 5.1, "tsb_pct": 10.8}, "2023-06-13": {"ctl_pre": 49.7, "atl_pre": 53.6, "tsb_pre": -3.9, "tsb_pct": -7.8}, "2023-06-17": {"ctl_pre": 50.4, "atl_pre": 56.0, "tsb_pre": -5.6, "tsb_pct": -11.2}, "2023-10-07": {"ctl_pre": 41.6, "atl_pre": 15.1, "tsb_pre": 26.5, "tsb_pct": 63.6}, "2024-01-26": {"ctl_pre": 51.6, "atl_pre": 58.3, "tsb_pre": -6.6, "tsb_pct": -12.9}, "2024-02-03": {"ctl_pre": 49.4, "atl_pre": 46.3, "tsb_pre": 3.1, "tsb_pct": 6.3}, "2024-03-03": {"ctl_pre": 51.7, "atl_pre": 52.4, "tsb_pre": -0.6, "tsb_pct": -1.2}, "2024-04-26": {"ctl_pre": 44.8, "atl_pre": 52.7, "tsb_pre": -7.9, "tsb_pct": -17.7}, "2025-06-17": {"ctl_pre": 39.4, "atl_pre": 31.5, "tsb_pre": 7.9, "tsb_pct": 20.1}, "2025-11-22": {"ctl_pre": 42.7, "atl_pre": 39.8, "tsb_pre": 3.0, "tsb_pct": 6.9}, "2025-11-29": {"ctl_pre": 43.6, "atl_pre": 43.0, "tsb_pre": 0.6, "tsb_pct": 1.3}};
+    const _rwpPlans = [];
+    
+    function drawRWPChart(canvasId, plan) {
+        const canvas = document.getElementById(canvasId);
+        if (!canvas) return;
+        const dpr = window.devicePixelRatio || 1;
+        const rect = canvas.parentElement.getBoundingClientRect();
+        canvas.width = rect.width * dpr;
+        canvas.height = rect.height * dpr;
+        canvas.style.width = rect.width + 'px';
+        canvas.style.height = rect.height + 'px';
+        const ctx = canvas.getContext('2d');
+        ctx.scale(dpr, dpr);
+        const W = rect.width, H = rect.height;
+        
+        const pts = plan.pts;
+        const tsbLo = plan.tsbLo, tsbHi = plan.tsbHi;
+        const allVals = pts.map(p => p.tsb).concat([tsbLo, tsbHi, 0]);
+        const dMin = Math.min(...allVals), dMax = Math.max(...allVals);
+        const yPad = Math.max(3, (dMax - dMin) * 0.18);
+        const yMin = dMin - yPad, yMax = dMax + yPad;
+        
+        const rawStep = (yMax - yMin) / 4;
+        const niceStep = rawStep <= 3 ? 2 : rawStep <= 6 ? 5 : rawStep <= 12 ? 10 : 20;
+        const ticks = [];
+        for (let t = Math.ceil(yMin / niceStep) * niceStep; t <= yMax; t += niceStep) ticks.push(t);
+        if (!ticks.includes(0) && yMin < 0 && yMax > 0) ticks.push(0);
+        ticks.sort((a, b) => a - b);
+        
+        const pad = { l: 38, r: 16, t: 10, b: 22 };
+        const pW = W - pad.l - pad.r, pH = H - pad.t - pad.b;
+        const x = i => pad.l + (i / Math.max(pts.length - 1, 1)) * pW;
+        const y = v => pad.t + pH - ((v - yMin) / (yMax - yMin)) * pH;
+        
+        ctx.fillStyle = 'rgba(0,0,0,0.12)';
+        ctx.beginPath(); ctx.roundRect(0, 0, W, H, 6); ctx.fill();
+        
+        // Target zone band
+        ctx.fillStyle = 'rgba(74, 222, 128, 0.07)';
+        const zT = Math.max(y(tsbHi), pad.t), zB = Math.min(y(tsbLo), pad.t + pH);
+        if (zB > zT) ctx.fillRect(pad.l, zT, pW, zB - zT);
+        
+        // Grid + labels
+        ctx.textAlign = 'right'; ctx.textBaseline = 'middle';
+        ctx.font = '500 10px "JetBrains Mono", monospace';
+        ticks.forEach(t => {
+            const yy = y(t);
+            if (yy < pad.t - 2 || yy > pad.t + pH + 2) return;
+            ctx.strokeStyle = t === 0 ? 'rgba(255,255,255,0.12)' : 'rgba(255,255,255,0.04)';
+            ctx.lineWidth = t === 0 ? 1 : 0.5;
+            ctx.setLineDash(t === 0 ? [] : [3, 3]);
+            ctx.beginPath(); ctx.moveTo(pad.l, yy); ctx.lineTo(W - pad.r, yy); ctx.stroke();
+            ctx.setLineDash([]);
+            ctx.fillStyle = 'rgba(139, 144, 160, 0.8)';
+            ctx.fillText((t >= 0 ? '+' : '') + t, pad.l - 4, yy);
+        });
+        
+        // Zone dashed borders
+        ctx.strokeStyle = 'rgba(74, 222, 128, 0.3)'; ctx.lineWidth = 1; ctx.setLineDash([4, 4]);
+        [tsbLo, tsbHi].forEach(v => { const yy = y(v); if (yy >= pad.t && yy <= pad.t + pH) { ctx.beginPath(); ctx.moveTo(pad.l, yy); ctx.lineTo(W - pad.r, yy); ctx.stroke(); } });
+        ctx.setLineDash([]);
+        
+        // TSB line: solid for done/today, dashed for planned
+        const nowIdx = pts.findIndex(p => p.now);
+        const lastActual = nowIdx >= 0 ? nowIdx : pts.reduce((a, p, i) => p.t === 'd' ? i : a, 0);
+        ctx.beginPath(); ctx.strokeStyle = '#818cf8'; ctx.lineWidth = 2;
+        for (let i = 0; i <= Math.min(lastActual, pts.length - 1); i++) { if (i === 0) ctx.moveTo(x(i), y(pts[i].tsb)); else ctx.lineTo(x(i), y(pts[i].tsb)); }
+        ctx.stroke();
+        if (lastActual < pts.length - 1) {
+            ctx.beginPath(); ctx.strokeStyle = 'rgba(129, 140, 248, 0.5)'; ctx.lineWidth = 2; ctx.setLineDash([5, 4]);
+            ctx.moveTo(x(lastActual), y(pts[lastActual].tsb));
+            for (let i = lastActual + 1; i < pts.length; i++) ctx.lineTo(x(i), y(pts[i].tsb));
+            ctx.stroke(); ctx.setLineDash([]);
+        }
+        
+        // Dots
+        pts.forEach((p, i) => {
+            const isActual = (p.t === 'd' || p.now);
+            const r = p.r ? 5 : (p.now ? 4.5 : 3.5);
+            ctx.beginPath(); ctx.arc(x(i), y(p.tsb), r, 0, Math.PI * 2);
+            ctx.fillStyle = p.r ? '#4ade80' : isActual ? '#818cf8' : 'rgba(129, 140, 248, 0.45)';
+            ctx.fill(); ctx.strokeStyle = 'rgba(26, 29, 39, 0.8)'; ctx.lineWidth = 1.5; ctx.stroke();
+        });
+        
+        // X labels
+        ctx.font = '500 10px "DM Sans", sans-serif'; ctx.fillStyle = '#8b90a0'; ctx.textAlign = 'center'; ctx.textBaseline = 'top';
+        pts.forEach((p, i) => ctx.fillText(p.l, x(i), pad.t + pH + 6));
+        
+        // Race morning callout
+        const last = pts[pts.length - 1];
+        ctx.font = '700 11px "JetBrains Mono", monospace';
+        ctx.fillStyle = (last.tsb >= tsbLo && last.tsb <= tsbHi) ? '#4ade80' : (last.tsb < tsbLo ? '#fbbf24' : '#60a5fa');
+        const lbl = (last.tsb >= 0 ? '+' : '') + last.tsb.toFixed(1);
+        const lx = x(pts.length - 1);
+        if (lx + 40 > W - pad.r) { ctx.textAlign = 'right'; ctx.fillText(lbl, lx - 8, y(last.tsb) - 5); }
+        else { ctx.textAlign = 'left'; ctx.fillText(lbl, lx + 8, y(last.tsb) - 5); }
+    }
+    
+    // Draw all TSB charts
+    const _DOW = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+    _rwpPlans.forEach(p => { if (p.canvas) drawRWPChart(p.canvas, p); });
+    window.addEventListener('resize', () => _rwpPlans.forEach(p => { if (p.canvas) drawRWPChart(p.canvas, p); }));
     
     </script>
 </body>
