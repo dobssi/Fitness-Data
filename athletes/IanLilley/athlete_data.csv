@@ -1,0 +1,7 @@
+# Athlete data synced from intervals.icu on 2026-02-24 18:18
+# Weight: intervals.icu (2023+) + legacy CSV (pre-2023)
+# Non-running TSS: (calories - 80/hr * elapsed_hours) / 10
+date,weight_kg,garmin_tr,non_running_tss
+2025-04-18,,,15.077777777777778
+2025-05-04,,,89.65777777777778
+2025-07-19,,,11.011111111111111
