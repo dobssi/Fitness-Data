@@ -1,0 +1,321 @@
+# .github/workflows/steve_pipeline.yml
+# Pipeline for Steve Davies — GAP mode
+#
+# Triggers:
+#   - Scheduled check 8x/day (skips quickly if no new activities)
+#   - Manual (workflow_dispatch) with mode selection
+#
+# Scheduled no-op path (~90s):
+#   checkout → install → restore sync state → query intervals.icu → no new runs → exit
+#
+# Secrets required:
+#   DROPBOX_TOKEN / DROPBOX_REFRESH_TOKEN / DROPBOX_APP_KEY / DROPBOX_APP_SECRET
+#   STEVE_INTERVALS_API_KEY    — Steve's intervals.icu API key
+#   STEVE_INTERVALS_ATHLETE_ID — Steve's intervals.icu athlete ID (i517034)
+
+name: Steve Davies Pipeline
+
+on:
+  # schedule:
+    # - cron: '0 9,11,13,15,17,19,21,23 * * *'
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: 'Pipeline mode'
+        type: choice
+        options:
+          - UPDATE
+          - FULL
+          - FROM_STEPB
+          - DASHBOARD
+        default: UPDATE
+      sync:
+        description: 'Sync from intervals.icu'
+        type: boolean
+        default: true
+
+concurrency:
+  group: steve-pipeline
+  cancel-in-progress: false
+
+jobs:
+  pipeline:
+    runs-on: ubuntu-latest
+    timeout-minutes: 240
+
+    env:
+      DROPBOX_TOKEN: ${{ secrets.DROPBOX_TOKEN }}
+      DROPBOX_REFRESH_TOKEN: ${{ secrets.DROPBOX_REFRESH_TOKEN }}
+      DROPBOX_APP_KEY: ${{ secrets.DROPBOX_APP_KEY }}
+      DROPBOX_APP_SECRET: ${{ secrets.DROPBOX_APP_SECRET }}
+      INTERVALS_API_KEY: ${{ secrets.STEVE_INTERVALS_API_KEY }}
+      INTERVALS_ATHLETE_ID: ${{ secrets.STEVE_INTERVALS_ATHLETE_ID }}
+      ATHLETE_DIR: athletes/SteveDavies
+      ATHLETE_CONFIG_PATH: athletes/SteveDavies/athlete.yml
+      DB_BASE: /Running and Cycling/DataPipeline/athletes/SteveDavies
+      TZ_LOCAL: Europe/London
+      PIPELINE_MODE: ${{ github.event.inputs.mode || 'UPDATE' }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Create directories
+        run: |
+          mkdir -p ${{ env.ATHLETE_DIR }}/data/FIT_downloads
+          mkdir -p ${{ env.ATHLETE_DIR }}/persec_cache
+          mkdir -p ${{ env.ATHLETE_DIR }}/output/dashboard
+
+      # ═══════════════════════════════════════════════════════════
+      # LIGHTWEIGHT CHECK — runs every time (~30s)
+      # ═══════════════════════════════════════════════════════════
+
+      - name: Restore sync state
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            ${{ env.ATHLETE_DIR }}/fit_sync_state.json
+            ${{ env.ATHLETE_DIR }}/pending_activities.csv
+          key: steve-sync-state-${{ github.run_number }}
+          restore-keys: |
+            steve-sync-state-
+
+      # Download fits.zip early so fetch can check for existing files
+      - name: Download fits.zip for dedup
+        if: ${{ github.event.inputs.sync != 'false' && env.PIPELINE_MODE != 'DASHBOARD' && env.PIPELINE_MODE != 'FROM_STEPB' }}
+        run: |
+          python ci/dropbox_sync.py download \
+            --dropbox-base "${{ env.DB_BASE }}" \
+            --local-prefix "${{ env.ATHLETE_DIR }}" \
+            --items data/fits.zip
+        continue-on-error: true
+
+      # Check for new activities + refresh recent names + download new FITs
+      # fetch checks fits.zip for existing files (FIT_downloads is empty on CI)
+      - name: Check for new activities
+        id: fetch
+        if: ${{ github.event.inputs.sync != 'false' && env.PIPELINE_MODE != 'DASHBOARD' && env.PIPELINE_MODE != 'FROM_STEPB' }}
+        run: |
+          python fetch_fit_files.py \
+            --fit-dir ${{ env.ATHLETE_DIR }}/data/FIT_downloads \
+            --zip ${{ env.ATHLETE_DIR }}/data/fits.zip \
+            --state-file ${{ env.ATHLETE_DIR }}/fit_sync_state.json \
+            --pending-csv ${{ env.ATHLETE_DIR }}/pending_activities.csv \
+            --refresh-names 14
+
+          if [ -f _new_runs_added.tmp ]; then
+            echo "new_runs=true" >> $GITHUB_OUTPUT
+            COUNT=$(cat _new_runs_added.tmp)
+            echo "  → $COUNT new run(s) detected"
+          else
+            echo "new_runs=false" >> $GITHUB_OUTPUT
+            echo "  → No new runs"
+          fi
+        continue-on-error: true
+
+      - name: Decide whether to continue
+        id: gate
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "continue=true" >> $GITHUB_OUTPUT
+          elif [ "${{ steps.fetch.outputs.new_runs }}" = "true" ]; then
+            echo "continue=true" >> $GITHUB_OUTPUT
+          else
+            echo "continue=false" >> $GITHUB_OUTPUT
+          fi
+
+      # Always save sync state (persists across no-op runs)
+      - name: Save sync state
+        uses: actions/cache/save@v4
+        if: always()
+        with:
+          path: |
+            ${{ env.ATHLETE_DIR }}/fit_sync_state.json
+            ${{ env.ATHLETE_DIR }}/pending_activities.csv
+          key: steve-sync-state-${{ github.run_number }}
+
+      # ═══════════════════════════════════════════════════════════
+      # FULL PIPELINE — only if new data or manual dispatch
+      # ═══════════════════════════════════════════════════════════
+
+      - name: Restore persec cache
+        if: ${{ steps.gate.outputs.continue == 'true' }}
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ env.ATHLETE_DIR }}/persec_cache
+          key: steve-persec-${{ github.run_number }}
+          restore-keys: |
+            steve-persec-
+
+      - name: Download data from Dropbox
+        if: ${{ steps.gate.outputs.continue == 'true' }}
+        run: |
+          python ci/dropbox_sync.py download \
+            --dropbox-base "${{ env.DB_BASE }}" \
+            --local-prefix "${{ env.ATHLETE_DIR }}" \
+            --items data/activities.csv \
+                    activity_overrides.xlsx \
+                    athlete_data.csv \
+                    output/Master_FULL.xlsx \
+                    output/Master_FULL_post.xlsx \
+                    output/_weather_cache_openmeteo/openmeteo_cache.sqlite \
+            --cache-dir ${{ env.ATHLETE_DIR }}/persec_cache
+        continue-on-error: true
+
+      - name: Sync athlete data from intervals.icu
+        if: ${{ steps.gate.outputs.continue == 'true' && github.event.inputs.sync != 'false' && env.PIPELINE_MODE != 'DASHBOARD' }}
+        run: |
+          python sync_athlete_data.py \
+            --athlete-data ${{ env.ATHLETE_DIR }}/athlete_data.csv \
+            --nr-tss-oldest 2020-01-01
+        continue-on-error: true
+
+      - name: Rebuild from FIT files (FULL)
+        if: ${{ steps.gate.outputs.continue == 'true' && env.PIPELINE_MODE == 'FULL' }}
+        run: |
+          python rebuild_from_fit_zip.py \
+            --fit-zip ${{ env.ATHLETE_DIR }}/data/fits.zip \
+            --template master_template.xlsx \
+            --out ${{ env.ATHLETE_DIR }}/output/Master_FULL.xlsx \
+            --persec-cache-dir ${{ env.ATHLETE_DIR }}/persec_cache \
+            --strava ${{ env.ATHLETE_DIR }}/data/activities.csv \
+            --pending-activities ${{ env.ATHLETE_DIR }}/pending_activities.csv \
+            --override-file ${{ env.ATHLETE_DIR }}/activity_overrides.xlsx \
+            --tz ${{ env.TZ_LOCAL }} \
+            --weight 75
+
+      - name: Rebuild from FIT files (UPDATE — append only)
+        if: ${{ steps.gate.outputs.continue == 'true' && env.PIPELINE_MODE == 'UPDATE' }}
+        run: |
+          python rebuild_from_fit_zip.py \
+            --fit-zip ${{ env.ATHLETE_DIR }}/data/fits.zip \
+            --template master_template.xlsx \
+            --out ${{ env.ATHLETE_DIR }}/output/Master_FULL.xlsx \
+            --append-master-in ${{ env.ATHLETE_DIR }}/output/Master_FULL.xlsx \
+            --persec-cache-dir ${{ env.ATHLETE_DIR }}/persec_cache \
+            --strava ${{ env.ATHLETE_DIR }}/data/activities.csv \
+            --pending-activities ${{ env.ATHLETE_DIR }}/pending_activities.csv \
+            --override-file ${{ env.ATHLETE_DIR }}/activity_overrides.xlsx \
+            --tz ${{ env.TZ_LOCAL }} \
+            --weight 75
+
+      - name: Add GAP power
+        if: ${{ steps.gate.outputs.continue == 'true' && (env.PIPELINE_MODE == 'FULL' || env.PIPELINE_MODE == 'UPDATE') }}
+        run: |
+          python add_gap_power.py \
+            --master ${{ env.ATHLETE_DIR }}/output/Master_FULL.xlsx \
+            --cache-dir ${{ env.ATHLETE_DIR }}/persec_cache \
+            --out ${{ env.ATHLETE_DIR }}/output/Master_FULL.xlsx \
+            --mass-kg 75 \
+            --re-constant 0.92
+
+      - name: StepB post-processing
+        if: ${{ steps.gate.outputs.continue == 'true' && env.PIPELINE_MODE != 'DASHBOARD' }}
+        run: |
+          python StepB_PostProcess.py \
+            --master ${{ env.ATHLETE_DIR }}/output/Master_FULL.xlsx \
+            --persec-cache-dir ${{ env.ATHLETE_DIR }}/persec_cache \
+            --out ${{ env.ATHLETE_DIR }}/output/Master_FULL_post.xlsx \
+            --model-json re_model_generic.json \
+            --override-file ${{ env.ATHLETE_DIR }}/activity_overrides.xlsx \
+            --athlete-data ${{ env.ATHLETE_DIR }}/athlete_data.csv \
+            --mass-kg 75 \
+            --tz ${{ env.TZ_LOCAL }} \
+            --runner-dob "1969-06-09" \
+            --runner-gender male \
+            --strava ${{ env.ATHLETE_DIR }}/data/activities.csv \
+            --progress-every 50
+
+      - name: Generate dashboard
+        if: ${{ steps.gate.outputs.continue == 'true' }}
+        env:
+          MASTER_FILE: ${{ env.ATHLETE_DIR }}/output/Master_FULL_post.xlsx
+          OUTPUT_FILE: ${{ env.ATHLETE_DIR }}/output/dashboard/index.html
+          ATHLETE_DATA_FILE: ${{ env.ATHLETE_DIR }}/athlete_data.csv
+        run: python generate_dashboard.py
+        continue-on-error: true
+
+      - name: Save persec cache
+        uses: actions/cache/save@v4
+        if: ${{ steps.gate.outputs.continue == 'true' }}
+        with:
+          path: ${{ env.ATHLETE_DIR }}/persec_cache
+          key: steve-persec-${{ github.run_number }}
+
+      - name: Upload fits.zip to Dropbox (only if new FITs added)
+        if: ${{ steps.gate.outputs.continue == 'true' && steps.fetch.outputs.new_runs == 'true' }}
+        run: |
+          python ci/dropbox_sync.py upload \
+            --dropbox-base "${{ env.DB_BASE }}" \
+            --local-prefix "${{ env.ATHLETE_DIR }}" \
+            --items data/fits.zip
+        continue-on-error: true
+
+      - name: Upload results to Dropbox
+        if: ${{ steps.gate.outputs.continue == 'true' }}
+        run: |
+          python ci/dropbox_sync.py upload \
+            --dropbox-base "${{ env.DB_BASE }}" \
+            --local-prefix "${{ env.ATHLETE_DIR }}" \
+            --items activity_overrides.xlsx \
+                    athlete_data.csv \
+                    fit_sync_state.json \
+                    pending_activities.csv \
+                    output/Master_FULL.xlsx \
+                    output/Master_FULL_post.xlsx \
+                    output/dashboard/index.html \
+                    output/_weather_cache_openmeteo/openmeteo_cache.sqlite \
+            --cache-dir ${{ env.ATHLETE_DIR }}/persec_cache
+
+      - name: Prepare dashboard for Pages
+        if: ${{ steps.gate.outputs.continue == 'true' }}
+        run: |
+          mkdir -p docs/steve
+          cp -f ${{ env.ATHLETE_DIR }}/output/dashboard/index.html docs/steve/index.html 2>/dev/null || true
+        continue-on-error: true
+
+      - name: Deploy to GitHub Pages
+        uses: peaceiris/actions-gh-pages@v3
+        if: ${{ steps.gate.outputs.continue == 'true' }}
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./docs
+          publish_branch: gh-pages
+          keep_files: true
+        continue-on-error: true
+
+      # ─── Summary ────────────────────────────────────────────
+      - name: Summary
+        if: always()
+        run: |
+          echo "## Steve Davies Pipeline Run Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- **Trigger:** ${{ github.event_name }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Mode:** ${{ env.PIPELINE_MODE }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **New runs:** ${{ steps.fetch.outputs.new_runs || 'n/a' }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Pipeline ran:** ${{ steps.gate.outputs.continue }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Status:** ${{ job.status }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Time:** $(date -u +%Y-%m-%dT%H:%M:%SZ)" >> $GITHUB_STEP_SUMMARY
+          
+          MASTER="${{ env.ATHLETE_DIR }}/output/Master_FULL_post.xlsx"
+          if [ -f "$MASTER" ]; then
+            SIZE=$(stat -c%s "$MASTER" 2>/dev/null || echo "?")
+            echo "- **Master size:** $SIZE bytes" >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          CACHE="${{ env.ATHLETE_DIR }}/persec_cache"
+          if [ -d "$CACHE" ]; then
+            COUNT=$(find "$CACHE" -name "*.npz" | wc -l)
+            echo "- **NPZ cache:** $COUNT files" >> $GITHUB_STEP_SUMMARY
+          fi

@@ -53,9 +53,30 @@ except ImportError:
 # ═════════════════════════════════════════════════════════════════════════════
 
 def scan_fit_file(fit_path: str) -> dict | None:
-    """Extract summary stats from a single FIT file. Returns None if not a run."""
+    """Extract summary stats from a single FIT file. Returns None if not a run.
+    Auto-detects gzip compression (Strava exports use .fit.gz or .fit that are gzipped)."""
+    import gzip
+    import tempfile
+    
+    actual_path = fit_path
+    tmp_path = None
+    
     try:
-        fit = FitFile(fit_path)
+        # Check if file is gzip-compressed (magic bytes 1f 8b)
+        with open(fit_path, 'rb') as f:
+            magic = f.read(2)
+        
+        if magic == b'\x1f\x8b':
+            # Decompress to temp file
+            tmp_fd, tmp_path = tempfile.mkstemp(suffix='.fit')
+            os.close(tmp_fd)
+            with gzip.open(fit_path, 'rb') as gz_in:
+                with open(tmp_path, 'wb') as f_out:
+                    import shutil
+                    shutil.copyfileobj(gz_in, f_out)
+            actual_path = tmp_path
+        
+        fit = FitFile(actual_path)
         # Get session data
         sessions = list(fit.get_messages("session"))
         if not sessions:
@@ -105,12 +126,20 @@ def scan_fit_file(fit_path: str) -> dict | None:
         }
     except Exception as e:
         return None
+    finally:
+        if tmp_path and os.path.exists(tmp_path):
+            try:
+                os.remove(tmp_path)
+            except:
+                pass
 
 
 def scan_fit_folder(folder: str, verbose: bool = True) -> list[dict]:
     """Scan all FIT files in a folder (or zip). Returns list of run summaries."""
     import zipfile
     import tempfile
+    import gzip
+    import shutil
     
     runs = []
     fit_files = []
@@ -121,18 +150,39 @@ def scan_fit_folder(folder: str, verbose: bool = True) -> list[dict]:
         if verbose:
             print(f"Extracting {folder}...")
         with zipfile.ZipFile(folder, "r") as zf:
-            members = [m for m in zf.namelist() if m.upper().endswith(".FIT")]
+            members = [m for m in zf.namelist() if m.upper().endswith(".FIT") or m.upper().endswith(".FIT.GZ")]
             if verbose:
                 print(f"  Found {len(members)} FIT files in zip")
             for m in members:
                 zf.extract(m, tmpdir)
-                fit_files.append(os.path.join(tmpdir, m))
+                extracted = os.path.join(tmpdir, m)
+                if extracted.upper().endswith(".FIT.GZ"):
+                    # Decompress .fit.gz → .fit
+                    fit_path = extracted[:-3]  # strip .gz
+                    with gzip.open(extracted, 'rb') as gz_in:
+                        with open(fit_path, 'wb') as f_out:
+                            shutil.copyfileobj(gz_in, f_out)
+                    os.remove(extracted)
+                    fit_files.append(fit_path)
+                else:
+                    fit_files.append(extracted)
     else:
         # Walk directory
         for root, dirs, files in os.walk(folder):
             for f in files:
+                fpath = os.path.join(root, f)
                 if f.upper().endswith(".FIT"):
-                    fit_files.append(os.path.join(root, f))
+                    fit_files.append(fpath)
+                elif f.upper().endswith(".FIT.GZ"):
+                    # Decompress in place
+                    fit_path = fpath[:-3]
+                    try:
+                        with gzip.open(fpath, 'rb') as gz_in:
+                            with open(fit_path, 'wb') as f_out:
+                                shutil.copyfileobj(gz_in, f_out)
+                        fit_files.append(fit_path)
+                    except Exception:
+                        pass
         if verbose:
             print(f"Found {len(fit_files)} FIT files")
     
@@ -392,7 +442,7 @@ athlete:
   max_hr: {cfg['max_hr']}
 
 planned_races:
-  {races_yaml}
+{races_yaml}
 
 power:
   mode: "{mode}"
@@ -423,7 +473,7 @@ pipeline:
   temp_baseline_c: {cfg.get('temp_baseline_c', 10.0)}
   easy_rf:
     hr_min: {max(120, int(cfg['lthr'] * 0.77))}
-    hr_max: {cfg['lthr']}
+    hr_max: 0
 """
     return yml
 
@@ -974,7 +1024,7 @@ def generate_override_xlsx(path: str, races: list[dict] = None):
 def generate_athlete_data_csv(path: str):
     """Generate empty athlete_data.csv with correct headers."""
     Path(path).parent.mkdir(parents=True, exist_ok=True)
-    with open(path, "w") as f:
+    with open(path, "w", encoding="utf-8") as f:
         f.write("date,weight_kg,resting_hr,hrv,sleep_hours,notes\n")
 
 
@@ -1160,7 +1210,7 @@ def main():
     
     # Write text files
     for path, content in files_to_create.items():
-        with open(path, "w") as f:
+        with open(path, "w", encoding="utf-8") as f:
             f.write(content)
         print(f"  ✓ {path}")
     
@@ -1221,7 +1271,7 @@ def main():
     
     # Save config for reference
     config_path = str(athlete_dir / "onboard_config.json")
-    with open(config_path, "w") as f:
+    with open(config_path, "w", encoding="utf-8") as f:
         save_cfg = {k: v for k, v in cfg.items() if k != "fit_scan_path"}
         if scan_results:
             save_cfg["scan_results"] = {

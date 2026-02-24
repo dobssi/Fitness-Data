@@ -1,0 +1,44 @@
+{
+  "name": "Steve Davies",
+  "mass_kg": 75,
+  "dob": "1969-06-09",
+  "gender": "male",
+  "timezone": "Europe/London",
+  "lthr": 157,
+  "max_hr": 173,
+  "power_mode": "gap",
+  "data_source": "fit_folder",
+  "planned_races": [
+    {
+      "name": "LFOTM 5K",
+      "date": "2026-03-27",
+      "distance_km": 5.0,
+      "priority": "B",
+      "surface": "road"
+    },
+    {
+      "name": "Parkrun",
+      "date": "2026-04-11",
+      "distance_km": 5.0,
+      "priority": "C",
+      "surface": "road"
+    },
+    {
+      "name": "LFOTM 5K",
+      "date": "2026-04-24",
+      "distance_km": 5.0,
+      "priority": "A",
+      "surface": "road"
+    }
+  ],
+  "folder_name": "SteveDavies",
+  "slug": "steve",
+  "scan_results": {
+    "n_runs": 4723,
+    "date_range": [
+      "2015-01-14",
+      "2026-02-24"
+    ],
+    "n_races": 413
+  }
+}
