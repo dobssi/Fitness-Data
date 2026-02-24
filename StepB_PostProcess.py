@@ -1334,17 +1334,35 @@ def calc_alert_columns(df: pd.DataFrame) -> pd.DataFrame:
     ctl_vals = pd.to_numeric(df.get('CTL'), errors='coerce').values if 'CTL' in df.columns else np.full(n, np.nan)
     tsb_vals = pd.to_numeric(df.get('TSB'), errors='coerce').values if 'TSB' in df.columns else np.full(n, np.nan)
     
-    # Build planned race taper windows
+    # Build planned race list with taper windows and TSB targets
     try:
         from config import PLANNED_RACES
     except (ImportError, Exception):
         PLANNED_RACES = []
-    _taper_days_map = {'A': 14, 'B': 7, 'C': 0}
-    _taper_windows = {}  # np.datetime64 -> taper_days
+    # TSB targets by race distance (midpoint of ideal range)
+    # 5K/10K: +5 to +15, HM: +10 to +25, Mara: +20 to +35
+    _tsb_target_ranges = {
+        'A': {'short': (5, 15), 'hm': (10, 25), 'mara': (20, 35)},
+        'B': {'short': (0, 15), 'hm': (5, 20), 'mara': (15, 30)},
+        'C': {'short': (-5, 10), 'hm': (0, 15), 'mara': (10, 25)},
+    }
+    def _get_tsb_target(dist_km, priority):
+        if dist_km >= 35: bucket = 'mara'
+        elif dist_km >= 18: bucket = 'hm'
+        else: bucket = 'short'
+        return _tsb_target_ranges.get(priority, _tsb_target_ranges['B'])[bucket]
+    
+    _taper_days_map = {'A': 14, 'B': 7, 'C': 3}
+    _race_info = []  # list of (race_dt_np, taper_days, name, dist_km, priority, tsb_lo, tsb_hi)
     for pr in PLANNED_RACES:
-        td = _taper_days_map.get(pr.get('priority', 'B'), 7)
-        if td > 0:
-            _taper_windows[np.datetime64(pr['date'])] = td
+        priority = pr.get('priority', 'B')
+        td = _taper_days_map.get(priority, 7)
+        dist = pr.get('distance_km', 5.0)
+        tsb_lo, tsb_hi = _get_tsb_target(dist, priority)
+        _race_info.append((
+            np.datetime64(pr['date']), td, pr.get('name', ''),
+            dist, priority, tsb_lo, tsb_hi
+        ))
     
     # Pre-compute Alert 2 (TSB-based, mode-independent)
     a2_flags = np.zeros(n, dtype=bool)
@@ -1398,35 +1416,36 @@ def calc_alert_columns(df: pd.DataFrame) -> pd.DataFrame:
                             parts.append(f"Training more scoring worse (RFL -{rfl_drop_pct:.1f}%, CTL +{ctl_rise:.0f})")
                             a_counts[0] += 1
             
-            # Bit 1 (2): Alert 1b — Taper not working
-            if i > 0 and np.isfinite(rfl[i]):
+            # Bit 1 (2): Alert 1b — Pre-race TSB projection
+            # Projects TSB to race day using exponential decay of CTL/ATL.
+            # Fires if projected TSB will be below the target range for the
+            # race distance and priority. Applies to A, B, and C races.
+            if i > 0 and np.isfinite(ctl_vals[i]) and np.isfinite(tsb_vals[i]):
                 triggered_1b = False
-                _1b_text = "Taper not working"
-                # a) Historical: race day >= 20km
-                if race_flags[i] == 1 and dist_km[i] >= 20:
-                    cutoff_90d = dates[i] - np.timedelta64(ALERT1B_PEAK_WINDOW_DAYS, 'D')
-                    window = np.where((dates[:i+1] >= cutoff_90d))[0]
-                    if len(window) >= 3:
-                        peak = np.nanmax(rfl[window])
-                        if np.isfinite(peak) and (peak - rfl[i]) > ALERT1B_RFL_GAP:
+                _1b_text = ""
+                atl_val = ctl_vals[i] - tsb_vals[i]  # ATL = CTL - TSB
+                
+                for race_dt, td, race_name, dist_km_r, priority_r, tsb_lo, tsb_hi in _race_info:
+                    days_to_race = (race_dt - dates[i]) / np.timedelta64(1, 'D')
+                    # Only check within the taper window (or slightly before for early warning)
+                    if 0 < days_to_race <= td + 3:
+                        # Project TSB to race day assuming light training (TSS ~20/day)
+                        light_tss = 20.0
+                        proj_ctl = ctl_vals[i]
+                        proj_atl = atl_val
+                        for _d in range(int(days_to_race)):
+                            proj_ctl = proj_ctl * np.exp(-1/42) + light_tss * (1 - np.exp(-1/42))
+                            proj_atl = proj_atl * np.exp(-1/7) + light_tss * (1 - np.exp(-1/7))
+                        proj_tsb = proj_ctl - proj_atl
+                        
+                        if proj_tsb < tsb_lo:
                             triggered_1b = True
-                # b) Pre-race: within taper window
-                if not triggered_1b:
-                    for race_dt, td in _taper_windows.items():
-                        days_to_race = (race_dt - dates[i]) / np.timedelta64(1, 'D')
-                        if 0 <= days_to_race <= td:
-                            cutoff_90d = dates[i] - np.timedelta64(ALERT1B_PEAK_WINDOW_DAYS, 'D')
-                            window = np.where((dates[:i+1] >= cutoff_90d))[0]
-                            if len(window) >= 3:
-                                peak = np.nanmax(rfl[window])
-                                if np.isfinite(peak) and (peak - rfl[i]) > ALERT1B_RFL_GAP:
-                                    triggered_1b = True
-                                    # Find race name
-                                    for pr in PLANNED_RACES:
-                                        if np.datetime64(pr['date']) == race_dt:
-                                            _1b_text = f"Taper not working ({pr['name']} in {int(days_to_race)}d)"
-                                            break
-                                    break
+                            deficit = tsb_lo - proj_tsb
+                            _1b_text = (f"TSB projected {proj_tsb:+.0f} for "
+                                       f"{race_name} in {int(days_to_race)}d "
+                                       f"(target {tsb_lo:+d} to {tsb_hi:+d})")
+                            break
+                
                 if triggered_1b:
                     bits |= 2
                     parts.append(_1b_text)

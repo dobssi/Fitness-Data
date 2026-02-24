@@ -779,7 +779,7 @@ def get_alert_data(df):
     """
     ALERT_DEFS = {
         0: {'name': 'Training more, scoring worse', 'level': 'concern', 'icon': '⚠️'},
-        1: {'name': 'Taper not working', 'level': 'concern', 'icon': '⚠️'},
+        1: {'name': 'Pre-race TSB concern', 'level': 'watch', 'icon': '⏳'},
         2: {'name': 'Deep fatigue', 'level': 'watch', 'icon': '👀'},
         3: {'name': 'Easy run outlier', 'level': 'watch', 'icon': '👀'},
     }
@@ -820,8 +820,17 @@ def get_alert_data(df):
                         detail = f" (RFL -{rfl_drop:.1f}%, CTL +{ctl_rise:.0f})"
                 except Exception:
                     pass
-            elif bit == 1:  # Alert 1b: Taper
-                detail = " (RFL below 90d peak at race distance)"
+            elif bit == 1:  # Alert 1b: Pre-race TSB projection
+                # Extract the projection detail from Alert_Text (StepB writes it there)
+                text_col = f'Alert_Text{suffix}'
+                raw_text = str(latest.get(text_col, ''))
+                # Find the TSB projection substring
+                import re as _re
+                tsb_match = _re.search(r'TSB projected [^ ]+ for .+?\)', raw_text)
+                if tsb_match:
+                    detail = f" ({tsb_match.group()})"
+                else:
+                    detail = ""
             elif bit == 2 and pd.notna(latest.get('TSB')):  # Alert 2: TSB
                 detail = f" (TSB {latest['TSB']:.0f})"
             elif bit == 3 and pd.notna(latest.get(ez_z_col)):  # Alert 3b: z-score
@@ -1881,6 +1890,13 @@ def _generate_zone_html(zone_data, stats=None):
         _spec_values[race_idx_s] = (round(m14), round(m28))
     
     for race_idx, race in enumerate(PLANNED_RACES_DASH):
+        # Skip past races
+        try:
+            _race_dt = datetime.strptime(race['date'], '%Y-%m-%d').date()
+            if _race_dt < dt_date.today():
+                continue
+        except (ValueError, KeyError):
+            pass
         key = race['distance_key']
         priority = race.get('priority', 'B')
         surface = race.get('surface', 'road')
