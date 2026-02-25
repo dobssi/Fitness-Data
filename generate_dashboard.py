@@ -54,7 +54,7 @@ def load_and_process_data():
     
     # --- Load from Master (v43 columns) ---
     print(f"Loading {MASTER_FILE}...")
-    df = pd.read_excel(MASTER_FILE, sheet_name='Master')
+    df = pd.read_excel(MASTER_FILE, sheet_name=0)  # Master sheet (may have athlete ID suffix)
     df['date'] = pd.to_datetime(df['date'])
     df = df.sort_values('date').reset_index(drop=True)
     print(f"Loaded {len(df)} runs")
@@ -218,7 +218,7 @@ def get_daily_ctl_atl_lookup(master_file):
     Returns dict: date_str -> {ctl, atl, tsb}
     Includes projected future days (with TSS=0 decay)."""
     try:
-        df = pd.read_excel(master_file, sheet_name='Daily')
+        df = pd.read_excel(master_file, sheet_name=1)  # Daily sheet
         df['Date'] = pd.to_datetime(df['Date'])
         
         # Build lookup dict
@@ -541,7 +541,7 @@ def get_ctl_atl_trend(df, days=90):
     Also returns projection data for future days (dashed line)."""
     try:
         # Read from Daily sheet which has all calendar days including future projections
-        daily_df = pd.read_excel(MASTER_FILE, sheet_name='Daily')
+        daily_df = pd.read_excel(MASTER_FILE, sheet_name=1)  # Daily sheet
         daily_df['Date'] = pd.to_datetime(daily_df['Date'])
         
         # Today boundary
@@ -600,7 +600,7 @@ def get_ctl_atl_trend(df, days=90):
 def get_daily_rfl_trend(master_file, days=14, rfl_col='RFL_Trend'):
     """Get daily RFL trend from Master's Daily sheet with trendline, projection and 95% CI."""
     try:
-        df = pd.read_excel(master_file, sheet_name='Daily')
+        df = pd.read_excel(master_file, sheet_name=1)  # Daily sheet
         df['Date'] = pd.to_datetime(df['Date'])
         
         # Get up to end of today
@@ -696,7 +696,7 @@ def get_daily_rfl_trend(master_file, days=14, rfl_col='RFL_Trend'):
 def get_alltime_weekly_rfl(master_file):
     """Get all-time weekly RFL data from Master's Weekly sheet."""
     try:
-        df = pd.read_excel(master_file, sheet_name='Weekly')
+        df = pd.read_excel(master_file, sheet_name=2)  # Weekly sheet
         
         # v44.5: Use RFL_Trend
         rfl_col = 'RFL_Trend'
@@ -879,7 +879,7 @@ def get_weight_chart_data(master_file, months=12):
     athlete_data, and the weekly average is weighted by run distance.
     """
     try:
-        df = pd.read_excel(master_file, sheet_name='Master',
+        df = pd.read_excel(master_file, sheet_name=0,  # Master sheet
                            usecols=['date', 'weight_kg', 'distance_km'])
         df['date'] = pd.to_datetime(df['date'])
         df = df.dropna(subset=['weight_kg'])
