@@ -1071,7 +1071,9 @@ def get_top_races(df, n=10):
         else:
             dist_km = row[dist_col] / 1000 if pd.notna(row.get(dist_col)) else 0
         
-        moving_s = row.get(moving_col, row.get(elapsed_col, None))
+        # Use elapsed time for races (actual finish time, not auto-pause moving time)
+        elapsed_s = row.get(elapsed_col)
+        moving_s = elapsed_s if pd.notna(elapsed_s) and elapsed_s > 0 else row.get(moving_col, None)
         
         # Format time as H:MM:SS or M:SS
         if pd.notna(moving_s) and moving_s > 0:
