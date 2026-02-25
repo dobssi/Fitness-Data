@@ -429,16 +429,21 @@ def main():
     p.add_argument("--from-master", action="store_true",
                    help="Generate candidates from Master instead of reading existing overrides")
     p.add_argument("--skip-if-classified", action="store_true",
-                   help="Skip if overrides already has a 'verdict' column (preserves athlete edits)")
+                   help="Skip if overrides already has verdict column or any race_flag values set (preserves athlete edits)")
     args = p.parse_args()
     
-    # Check skip condition
+    # Check skip condition — skip if already classified OR if athlete has manually edited race flags
     if args.skip_if_classified and Path(args.overrides).exists():
         try:
-            existing = pd.read_excel(args.overrides, nrows=0)
+            existing = pd.read_excel(args.overrides)
             if 'verdict' in existing.columns:
                 print(f"Overrides already classified (has 'verdict' column) — skipping.")
                 print(f"  To re-classify, remove --skip-if-classified or delete the verdict column.")
+                return
+            if 'race_flag' in existing.columns and existing['race_flag'].notna().any():
+                n_races = (existing['race_flag'] == 1).sum()
+                print(f"Overrides already has {n_races} race flags set — skipping to preserve athlete edits.")
+                print(f"  To re-classify, remove --skip-if-classified.")
                 return
         except Exception:
             pass
