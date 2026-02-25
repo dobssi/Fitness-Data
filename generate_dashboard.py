@@ -1741,14 +1741,17 @@ def get_zone_data(df):
     if _tss_col and 'CTL' in df.columns and 'ATL' in df.columns:
         _decay_ctl = _rw_math.exp(-1/_TC_CTL)
         _decay_atl = _rw_math.exp(-1/_TC_ATL)
+        # Total day TSS (including warmups and multi-run days)
+        _day_tss = df.groupby(df['date'].dt.date)[_tss_col].sum()
         for _idx, _row in df[df[_race_col] == 1].iterrows():
             _r_ctl = _row.get('CTL')
             _r_atl = _row.get('ATL')
-            _r_tss = _row.get(_tss_col)
-            if not all(pd.notna(x) and x > 0 for x in [_r_ctl, _r_atl, _r_tss]):
+            _r_date = _row['date'].date()
+            _r_tss_total = _day_tss.get(_r_date, 0)
+            if not all(pd.notna(x) and x > 0 for x in [_r_ctl, _r_atl, _r_tss_total]):
                 continue
-            _ctl_pre = (_r_ctl - _r_tss * (1 - _decay_ctl)) / _decay_ctl
-            _atl_pre = (_r_atl - _r_tss * (1 - _decay_atl)) / _decay_atl
+            _ctl_pre = (_r_ctl - _r_tss_total * (1 - _decay_ctl)) / _decay_ctl
+            _atl_pre = (_r_atl - _r_tss_total * (1 - _decay_atl)) / _decay_atl
             _tsb_pre = _ctl_pre - _atl_pre
             _ratio_pre = (_tsb_pre / _ctl_pre * 100) if _ctl_pre > 0 else 0
             _date_str = _row['date'].strftime('%Y-%m-%d')
