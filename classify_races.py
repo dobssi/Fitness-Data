@@ -304,15 +304,8 @@ def enrich_and_classify(master_path: str, overrides_path: str,
             ov.at[i, 'race_flag'] = 0
         elif 'race (high)' in v:
             ov.at[i, 'race_flag'] = 1
-            # Check if parkrun
-            name = str(row.get('activity_name', ''))
-            if re.search(r'parkrun|park run', name, re.I):
-                ov.at[i, 'parkrun'] = 1
         elif 'race (low)' in v:
             ov.at[i, 'race_flag'] = 1
-            # Jogged race — still a race
-            if re.search(r'parkrun|park run', str(row.get('activity_name', '')), re.I):
-                ov.at[i, 'parkrun'] = 1
         elif 'training (medium)' in v:
             ov.at[i, 'race_flag'] = 0
         elif 'race (medium)' in v:
@@ -321,6 +314,9 @@ def enrich_and_classify(master_path: str, overrides_path: str,
         elif 'uncertain' in v:
             ov.at[i, 'race_flag'] = 0  # default to training, flag for review
             ov.at[i, 'notes'] = f"REVIEW: {row['reason']}"
+    
+    # ── Detect parkruns ──
+    _detect_parkruns(ov, master_lookup)
     
     # ── Sort by date ──
     ov.sort_values('date', inplace=True)
@@ -419,6 +415,117 @@ def enrich_and_classify(master_path: str, overrides_path: str,
     return output_path
 
 
+def _is_parkrun(name, date_val, dist_km):
+    """Detect parkrun from name, day-of-week, and distance.
+    Returns True if:
+      - Activity name contains 'parkrun' or 'park run', OR
+      - It's a Saturday AND distance is 4.8-5.5 km (typical parkrun GPS range)
+    """
+    # Name match — strongest signal
+    if name and re.search(r'parkrun|park run', name, re.I):
+        return True
+    
+    # Saturday + ~5km — very likely parkrun
+    if date_val and dist_km:
+        try:
+            from datetime import datetime
+            if isinstance(date_val, str):
+                dt = datetime.strptime(str(date_val)[:10], '%Y-%m-%d')
+            elif hasattr(date_val, 'weekday'):
+                dt = date_val
+            else:
+                return False
+            if dt.weekday() == 5 and 4.8 <= float(dist_km) <= 5.5:
+                return True
+        except (ValueError, TypeError):
+            pass
+    
+    return False
+
+
+def _detect_parkruns(ov, master_lookup):
+    """Set parkrun=1 for all detected parkruns in the overrides DataFrame.
+    Uses activity name, date (Saturday), and distance (~5km).
+    Only sets — never clears an existing parkrun=1."""
+    
+    if 'parkrun' not in ov.columns:
+        ov['parkrun'] = 0
+    
+    count = 0
+    for i, row in ov.iterrows():
+        if row.get('parkrun', 0) == 1:
+            continue
+        
+        fname = str(row.get('file', ''))
+        m = master_lookup.get(fname, {}) if isinstance(master_lookup, dict) else {}
+        
+        # Get activity name from enriched column or Master
+        name = str(row.get('activity_name', '') or m.get('activity_name', '') or '')
+        date_val = row.get('date', '') or m.get('date', '')
+        dist = row.get('actual_dist_km', None) or m.get('distance_km', None)
+        
+        if _is_parkrun(name, date_val, dist):
+            ov.at[i, 'parkrun'] = 1
+            # Ensure race_flag is also 1
+            if 'race_flag' in ov.columns:
+                ov.at[i, 'race_flag'] = 1
+            count += 1
+    
+    if count > 0:
+        print(f"  Parkrun detection: marked {count} parkrun(s).")
+
+
+def _backfill_parkruns(ov, master_path, overrides_path):
+    """Lightweight parkrun detection — runs even when full classification is skipped.
+    Looks up activity names/dates/distances from Master and sets parkrun=1 where detected.
+    Only touches rows where parkrun is 0 or NaN (never clears an existing 1)."""
+    
+    if 'parkrun' not in ov.columns:
+        ov['parkrun'] = 0
+    
+    # Load Master for activity names + dates + distances
+    try:
+        master = pd.read_excel(master_path)
+    except Exception as e:
+        print(f"  Could not load Master for parkrun backfill: {e}")
+        return
+    
+    # Build lookup: filename -> {activity_name, date, distance_km}
+    master_lookup = {}
+    for _, row in master.iterrows():
+        fname = str(row.get('file', ''))
+        if fname:
+            master_lookup[fname] = {
+                'activity_name': str(row.get('activity_name', '') or ''),
+                'date': row.get('date', ''),
+                'distance_km': row.get('distance_km', None),
+            }
+    
+    filled = 0
+    for i, row in ov.iterrows():
+        if row.get('parkrun', 0) == 1:
+            continue
+        
+        fname = str(row.get('file', ''))
+        m = master_lookup.get(fname, {})
+        name = m.get('activity_name', '')
+        date_val = m.get('date', '')
+        dist = m.get('distance_km', None)
+        
+        if _is_parkrun(name, date_val, dist):
+            ov.at[i, 'parkrun'] = 1
+            if 'race_flag' in ov.columns:
+                ov.at[i, 'race_flag'] = 1
+            filled += 1
+    
+    if filled > 0:
+        ov.to_excel(overrides_path, index=False)
+        print(f"  Parkrun backfill: marked {filled} new parkrun(s).")
+    else:
+        print(f"  Parkrun backfill: no new parkruns found.")
+
+
+
 def main():
     p = argparse.ArgumentParser(description="Smart race classifier for activity overrides")
     p.add_argument("--master", required=True, help="Path to Master_FULL_post.xlsx")
@@ -436,14 +543,20 @@ def main():
     if args.skip_if_classified and Path(args.overrides).exists():
         try:
             existing = pd.read_excel(args.overrides)
+            skip = False
             if 'verdict' in existing.columns:
-                print(f"Overrides already classified (has 'verdict' column) — skipping.")
+                print(f"Overrides already classified (has 'verdict' column) — skipping full classification.")
                 print(f"  To re-classify, remove --skip-if-classified or delete the verdict column.")
-                return
-            if 'race_flag' in existing.columns and existing['race_flag'].notna().any():
+                skip = True
+            elif 'race_flag' in existing.columns and existing['race_flag'].notna().any():
                 n_races = (existing['race_flag'] == 1).sum()
                 print(f"Overrides already has {n_races} race flags set — skipping to preserve athlete edits.")
                 print(f"  To re-classify, remove --skip-if-classified.")
+                skip = True
+            
+            if skip:
+                # Still do a lightweight parkrun backfill from Master activity names
+                _backfill_parkruns(existing, args.master, args.overrides)
                 return
         except Exception:
             pass

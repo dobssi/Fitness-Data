@@ -112,7 +112,14 @@ def load_and_process_data():
         except Exception as e:
             print(f"Warning: Could not load athlete data: {e}")
     else:
-        print(f"  Note: {ATHLETE_DATA_FILE} not found - weight will be blank")
+        print(f"  Note: {ATHLETE_DATA_FILE} not found")
+    
+    # Fallback: if no weight from athlete_data, try Master's weight_kg column
+    if weight is None and len(df) > 0 and 'weight_kg' in df.columns:
+        wt_vals = df['weight_kg'].dropna()
+        if len(wt_vals) > 0:
+            weight = round(float(wt_vals.iloc[-1]), 1)
+            print(f"  Weight fallback from Master: {weight}kg (static)")
     
     # --- Get CP, race predictions, and age grade from Master (v43 columns) ---
     critical_power = None
