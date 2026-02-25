@@ -1434,8 +1434,8 @@ def calc_alert_columns(df: pd.DataFrame) -> pd.DataFrame:
                         proj_ctl = ctl_vals[i]
                         proj_atl = atl_val
                         for _d in range(int(days_to_race)):
-                            proj_ctl = proj_ctl * np.exp(-1/42) + light_tss * (1 - np.exp(-1/42))
-                            proj_atl = proj_atl * np.exp(-1/7) + light_tss * (1 - np.exp(-1/7))
+                            proj_ctl = proj_ctl + (light_tss - proj_ctl) / 42
+                            proj_atl = proj_atl + (light_tss - proj_atl) / 7
                         proj_tsb = proj_ctl - proj_atl
                         
                         if proj_tsb < tsb_lo:

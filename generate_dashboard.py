@@ -1862,12 +1862,12 @@ _RWP_TEMPLATES = {
     ],
 }
 _RWP_DUR_RATIOS = {'Easy': 0.70, 'Moderate': 0.65, 'Shakeout': 0.35, 'Light': 0.35, 'Rest': 0, 'Race': 0}
-_RWP_DECAY_C = _taper_math.exp(-1/42)
-_RWP_DECAY_A = _taper_math.exp(-1/7)
+_RWP_DECAY_C = 1 - 1/42  # Match StepB: ctl + (tss - ctl) / tc
+_RWP_DECAY_A = 1 - 1/7
 
 def _rwp_project(ctl, atl, tss):
-    return (ctl * _RWP_DECAY_C + tss * (1 - _RWP_DECAY_C),
-            atl * _RWP_DECAY_A + tss * (1 - _RWP_DECAY_A))
+    return (ctl + (tss - ctl) / 42,
+            atl + (tss - atl) / 7)
 
 def _rwp_duration(name, ctl_ref):
     for key, ratio in _RWP_DUR_RATIOS.items():
@@ -1934,20 +1934,18 @@ def _solve_taper(ctl0, atl0, days_to_race, ctl_ref, dist_cat, priority,
         # Start from ctl0/atl0 and walk backwards: ctl_prev = (ctl_now - tss*(1-dc)) / dc
         if lookback_rows:
             c_back, a_back = ctl0, atl0
-            dc = _RWP_DECAY_C
-            da = _RWP_DECAY_A
             # Walk backwards through lookback rows (they're in chronological order)
             # Reverse them, peel off TSS, then re-forward
             tss_seq = [r['tss'] for r in lookback_rows]
             # Reverse-project to get state before first lookback day
             for tss_val in reversed(tss_seq):
-                c_back = (c_back - tss_val * (1 - dc)) / dc
-                a_back = (a_back - tss_val * (1 - da)) / da
+                c_back = (c_back - tss_val / 42) / (1 - 1/42)
+                a_back = (a_back - tss_val / 7) / (1 - 1/7)
             # Now forward-project to fill in actual CTL/ATL/TSB
             c_fwd, a_fwd = c_back, a_back
             for r in lookback_rows:
-                c_fwd = c_fwd * dc + r['tss'] * (1 - dc)
-                a_fwd = a_fwd * da + r['tss'] * (1 - da)
+                c_fwd = c_fwd + (r['tss'] - c_fwd) / 42
+                a_fwd = a_fwd + (r['tss'] - a_fwd) / 7
                 r['ctl'] = c_fwd
                 r['atl'] = a_fwd
                 r['tsb'] = c_fwd - a_fwd
