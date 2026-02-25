@@ -4,6 +4,7 @@
 
 athlete:
   name: "Ian Lilley"
+  athlete_id: "A002"
   mass_kg: 87.0
   date_of_birth: "1971-11-27"
   gender: "male"

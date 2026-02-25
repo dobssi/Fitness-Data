@@ -6,6 +6,7 @@
 # Basic profile
 athlete:
   name: "Paul Collyer"
+  athlete_id: "A001"
   mass_kg: 76.0           # Body mass for ALL pipeline calculations (constant, not daily weight)
   date_of_birth: "1969-05-27"
   gender: "male"          # Options: "male", "female"

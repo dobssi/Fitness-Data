@@ -220,6 +220,7 @@ class AthleteConfig:
     timezone: str = "UTC"
     lthr: int = 0      # Required in YAML — no sensible generic default
     max_hr: int = 0    # Required in YAML — no sensible generic default
+    athlete_id: str = ""  # e.g. "A001", "A002" — used in Excel sheet names
     planned_races: List[PlannedRace] = field(default_factory=list)
     
     # Convenience properties
@@ -316,6 +317,7 @@ class AthleteConfig:
             timezone=str(athlete_data.get("timezone", "UTC")),
             lthr=int(athlete_data["lthr"]),
             max_hr=int(athlete_data["max_hr"]),
+            athlete_id=str(athlete_data.get("athlete_id", "")),
             planned_races=planned_races,
         )
 

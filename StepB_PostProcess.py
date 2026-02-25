@@ -5254,9 +5254,16 @@ def _write_formatted_excel(df: pd.DataFrame, output_path: str,
     
     wb = Workbook()
     
+    # Get athlete ID for sheet name suffix
+    try:
+        from config import ATHLETE_ID, ATHLETE_NAME
+        _id_suffix = f" ({ATHLETE_ID})" if ATHLETE_ID else f" ({ATHLETE_NAME})" if ATHLETE_NAME else ""
+    except (ImportError, Exception):
+        _id_suffix = ""
+    
     # --- Master sheet ---
     ws = wb.active
-    ws.title = "Master"
+    ws.title = f"Master{_id_suffix}"[:31]  # Excel sheet names max 31 chars
     
     # Write data
     for r_idx, row in enumerate(dataframe_to_rows(df, index=False, header=True), 1):
@@ -5303,13 +5310,14 @@ def _write_formatted_excel(df: pd.DataFrame, output_path: str,
         ws.sheet_view.zoomScale = 85
     
     # --- Write summary sheets ---
-    write_summary_sheet(wb, "Daily", daily_df, date_col_width=12)
-    write_summary_sheet(wb, "Weekly", weekly_df, date_col_width=12)
-    write_summary_sheet(wb, "Monthly", monthly_df, date_col_width=12)
-    write_summary_sheet(wb, "Yearly", yearly_df, date_col_width=8)
+    write_summary_sheet(wb, f"Daily{_id_suffix}"[:31], daily_df, date_col_width=12)
+    write_summary_sheet(wb, f"Weekly{_id_suffix}"[:31], weekly_df, date_col_width=12)
+    write_summary_sheet(wb, f"Monthly{_id_suffix}"[:31], monthly_df, date_col_width=12)
+    write_summary_sheet(wb, f"Yearly{_id_suffix}"[:31], yearly_df, date_col_width=8)
     
     wb.save(output_path)
-    print(f"  Wrote sheets: Master, Daily, Weekly, Monthly, Yearly")
+    sheets = [ws.title for ws in wb.worksheets]
+    print(f"  Wrote sheets: {', '.join(sheets)}")
 
 
 if __name__ == "__main__":

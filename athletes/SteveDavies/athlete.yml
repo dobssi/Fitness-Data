@@ -5,6 +5,7 @@
 
 athlete:
   name: "Steve Davies"
+  athlete_id: "A004"
   mass_kg: 75
   date_of_birth: "1969-06-09"
   gender: "male"
