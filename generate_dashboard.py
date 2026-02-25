@@ -119,7 +119,17 @@ def load_and_process_data():
         wt_vals = df['weight_kg'].dropna()
         if len(wt_vals) > 0:
             weight = round(float(wt_vals.iloc[-1]), 1)
-            print(f"  Weight fallback from Master: {weight}kg (static)")
+            print(f"  Weight fallback from Master: {weight}kg")
+    
+    # Final fallback: use config mass (from athlete.yml / --mass-kg)
+    if weight is None:
+        try:
+            from config import ATHLETE_MASS_KG
+            if ATHLETE_MASS_KG and ATHLETE_MASS_KG > 0:
+                weight = round(float(ATHLETE_MASS_KG), 1)
+                print(f"  Weight fallback from config: {weight}kg (static)")
+        except (ImportError, Exception):
+            pass
     
     # --- Get CP, race predictions, and age grade from Master (v43 columns) ---
     critical_power = None
