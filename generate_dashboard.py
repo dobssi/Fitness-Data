@@ -767,6 +767,7 @@ def get_recent_runs(df, n=10):
             
             runs.append({
                 'date': row['date'].strftime('%d %b %y'),
+                'date_iso': row['date'].strftime('%Y-%m-%d'),
                 'name': str(name_val) if name_val else '',
                 'dist': round(dist_km, 1) if dist_km > 0 else None,
                 'pace': pace_str,
@@ -1099,6 +1100,7 @@ def get_top_races(df, n=10):
         
         return {
             'date': row['date'].strftime('%d %b %y'),
+            'date_iso': row['date'].strftime('%Y-%m-%d'),
             'name': str(name_val) if name_val else '',
             'dist': round(dist_km, 1) if dist_km > 0 else None,
             'dist_group': 'long' if dist_km > 5.5 else 'short',
@@ -4179,8 +4181,14 @@ function raceAnnotations(dates) {{
             
             tbody.innerHTML = races.map((race, idx) => {{
                 const nagVal = race.nag ? race.nag + '%' : '-';
+                let rowTitle = '';
+                if (_preRaceTSB && race.date_iso && _preRaceTSB[race.date_iso]) {{
+                    const pr = _preRaceTSB[race.date_iso];
+                    const sign = pr.tsb_pre >= 0 ? '+' : '';
+                    rowTitle = `CTL ${{pr.ctl_pre.toFixed(0)}} · ATL ${{pr.atl_pre.toFixed(0)}} · TSB ${{sign}}${{pr.tsb_pre.toFixed(1)}}`;
+                }}
                 return `
-                <tr>
+                <tr title="${{rowTitle}}">
                     <td>${{race.date}}</td>
                     <td>${{race.name}}</td>
                     <td>${{race.dist ? race.dist + ' km' : '-'}}</td>
@@ -4509,11 +4517,11 @@ function raceAnnotations(dates) {{
                                         const icon = surfaceIcons[surfaces[i]] || '';
                                         lines.push(icon + ' ' + surfaces[i]);
                                     }}
-                                    // Pre-race morning TSB (reverse Banister)
+                                    // Pre-race morning training load (reverse Banister)
                                     if (_preRaceTSB && isoDate && _preRaceTSB[isoDate]) {{
                                         const pr = _preRaceTSB[isoDate];
                                         const sign = pr.tsb_pre >= 0 ? '+' : '';
-                                        lines.push('Pre-race TSB: ' + sign + pr.tsb_pre.toFixed(1) + ' (' + (pr.tsb_pct >= 0 ? '+' : '') + pr.tsb_pct.toFixed(0) + '% of CTL)');
+                                        lines.push('CTL ' + pr.ctl_pre.toFixed(0) + ' · ATL ' + pr.atl_pre.toFixed(0) + ' · TSB ' + sign + pr.tsb_pre.toFixed(1));
                                     }}
                                     return lines;
                                 }}
@@ -4649,6 +4657,17 @@ function raceAnnotations(dates) {{
                                     if (i < 0 || i >= d.values.length) return '';
                                     const prefix = d.parkrun[i] ? '🅿️ parkrun ' : '';
                                     return prefix + d.labels[i] + ': ' + d.values[i] + '%'; 
+                                }},
+                                afterBody: function(ctx) {{
+                                    if (!ctx.length || ctx[0].datasetIndex !== 1) return [];
+                                    const i = ctx[0].dataIndex;
+                                    const isoDate = d.datesISO[i];
+                                    if (_preRaceTSB && isoDate && _preRaceTSB[isoDate]) {{
+                                        const pr = _preRaceTSB[isoDate];
+                                        const sign = pr.tsb_pre >= 0 ? '+' : '';
+                                        return ['CTL ' + pr.ctl_pre.toFixed(0) + ' · ATL ' + pr.atl_pre.toFixed(0) + ' · TSB ' + sign + pr.tsb_pre.toFixed(1)];
+                                    }}
+                                    return [];
                                 }}
                             }}
                         }}
@@ -4712,8 +4731,14 @@ function raceAnnotations(dates) {{
                     else if (modeDelta <= -0.3) deltaHtml = '<span style="color:#dc2626;" title="RFL ' + modeDelta.toFixed(1) + '%"> ▼</span>';
                 }}
                 const rflVal = currentMode === 'gap' ? (run.rfl_gap || '-') : currentMode === 'sim' ? (run.rfl_sim || '-') : (run.rfl || '-');
+                let rowTitle = '';
+                if (run.race && _preRaceTSB && run.date_iso && _preRaceTSB[run.date_iso]) {{
+                    const pr = _preRaceTSB[run.date_iso];
+                    const sign = pr.tsb_pre >= 0 ? '+' : '';
+                    rowTitle = `CTL ${{pr.ctl_pre.toFixed(0)}} · ATL ${{pr.atl_pre.toFixed(0)}} · TSB ${{sign}}${{pr.tsb_pre.toFixed(1)}}`;
+                }}
                 return `
-                <tr>
+                <tr title="${{rowTitle}}">
                     <td>${{run.date}}</td>
                     <td>${{run.name}} ${{run.race ? '<span class="race-badge">RACE</span>' : ''}}${{deltaHtml}}</td>
                     <td>${{run.dist ? run.dist + ' km' : '-'}}</td>
