@@ -1736,31 +1736,42 @@ def get_zone_data(df):
     _rw_ctl = round(float(_latest['CTL']), 1) if _latest is not None and pd.notna(_latest.get('CTL')) else 0
     _rw_atl = round(float(_latest['ATL']), 1) if _latest is not None and pd.notna(_latest.get('ATL')) else 0
     
-    # Pre-race morning TSB/CTL for all races (reverse Banister)
+    # Pre-race morning CTL/ATL/TSB
+    # = previous day's end-of-day values decayed one step with TSS=0
+    # StepB formula: ctl_new = ctl_old + (0 - ctl_old) / tc = ctl_old * (1 - 1/tc)
     _pre_race_tsb = {}
-    if _tss_col and 'CTL' in df.columns and 'ATL' in df.columns:
-        _decay_ctl = _rw_math.exp(-1/_TC_CTL)
-        _decay_atl = _rw_math.exp(-1/_TC_ATL)
-        # Total day TSS (including warmups and multi-run days)
-        _day_tss = df.groupby(df['date'].dt.date)[_tss_col].sum()
-        for _idx, _row in df[df[_race_col] == 1].iterrows():
-            _r_ctl = _row.get('CTL')
-            _r_atl = _row.get('ATL')
-            _r_date = _row['date'].date()
-            _r_tss_total = _day_tss.get(_r_date, 0)
-            if not all(pd.notna(x) and x > 0 for x in [_r_ctl, _r_atl, _r_tss_total]):
-                continue
-            _ctl_pre = (_r_ctl - _r_tss_total * (1 - _decay_ctl)) / _decay_ctl
-            _atl_pre = (_r_atl - _r_tss_total * (1 - _decay_atl)) / _decay_atl
-            _tsb_pre = _ctl_pre - _atl_pre
-            _ratio_pre = (_tsb_pre / _ctl_pre * 100) if _ctl_pre > 0 else 0
-            _date_str = _row['date'].strftime('%Y-%m-%d')
-            _pre_race_tsb[_date_str] = {
-                'ctl_pre': round(_ctl_pre, 1),
-                'atl_pre': round(_atl_pre, 1),
-                'tsb_pre': round(_tsb_pre, 1),
-                'tsb_pct': round(_ratio_pre, 1),
-            }
+    if _tss_col and 'CTL' in df.columns:
+        # Read Daily sheet for day-by-day CTL/ATL
+        try:
+            _daily = pd.read_excel(MASTER_FILE, sheet_name=1)  # Daily sheet
+            _daily['Date'] = pd.to_datetime(_daily['Date'])
+            _daily_lookup = {}
+            for _, _dr in _daily.iterrows():
+                _daily_lookup[_dr['Date'].strftime('%Y-%m-%d')] = {
+                    'ctl': _dr.get('CTL'), 'atl': _dr.get('ATL')
+                }
+        except Exception:
+            _daily_lookup = {}
+        
+        if _daily_lookup:
+            for _idx, _row in df[df[_race_col] == 1].iterrows():
+                _r_date = _row['date']
+                _prev_date_str = (_r_date - pd.Timedelta(days=1)).strftime('%Y-%m-%d')
+                _prev = _daily_lookup.get(_prev_date_str)
+                if not _prev or not all(pd.notna(v) for v in [_prev['ctl'], _prev['atl']]):
+                    continue
+                # Decay one day with TSS=0: ctl_morning = ctl_prev * (1 - 1/tc)
+                _ctl_pre = _prev['ctl'] * (1 - 1 / _TC_CTL)
+                _atl_pre = _prev['atl'] * (1 - 1 / _TC_ATL)
+                _tsb_pre = _ctl_pre - _atl_pre
+                _ratio_pre = (_tsb_pre / _ctl_pre * 100) if _ctl_pre > 0 else 0
+                _date_str = _r_date.strftime('%Y-%m-%d')
+                _pre_race_tsb[_date_str] = {
+                    'ctl_pre': round(_ctl_pre, 1),
+                    'atl_pre': round(_atl_pre, 1),
+                    'tsb_pre': round(_tsb_pre, 1),
+                    'tsb_pct': round(_ratio_pre, 1),
+                }
     
     return {
         'runs': runs, 'current_cp': current_cp, 'current_rfl': round(current_rfl, 4),
