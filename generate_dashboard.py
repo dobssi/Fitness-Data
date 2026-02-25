@@ -4157,6 +4157,9 @@ function raceAnnotations(dates) {{
         // Update on page load
         updateCtlAtl();
         
+        // Pre-race morning training load lookup (used by top races, recent runs, pred chart, AG chart)
+        const _preRaceTSB = {_pre_race_tsb_json};
+        
         // Top Races data and toggle
         const topRacesData = {json.dumps(top_races)};
         
@@ -4927,7 +4930,6 @@ function raceAnnotations(dates) {{
     if (typeof setMode === 'function') setMode(currentMode);
     
     // ── Race Week Plan: TSB mini-charts ──
-    const _preRaceTSB = {_pre_race_tsb_json};
     const _rwpPlans = {_rwp_plans_json};
     
     function drawRWPChart(canvasId, plan) {{
