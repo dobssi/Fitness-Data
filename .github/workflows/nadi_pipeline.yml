@@ -139,6 +139,18 @@ jobs:
             --strava ${{ env.ATHLETE_DIR }}/data/activities.csv \
             --progress-every 50
 
+      # ─── Step 3b: Classify races (FULL only, first time) ────
+      - name: Classify races
+        if: ${{ github.event.inputs.mode == 'FULL' }}
+        run: |
+          python classify_races.py \
+            --master ${{ env.ATHLETE_DIR }}/output/Master_FULL_post.xlsx \
+            --overrides ${{ env.ATHLETE_DIR }}/activity_overrides.xlsx \
+            --athlete-yml ${{ env.ATHLETE_DIR }}/athlete.yml \
+            --from-master \
+            --skip-if-classified
+        continue-on-error: true
+
       # ─── Step 4: Generate dashboard ─────────────────────────
       - name: Generate dashboard
         env:

@@ -237,6 +237,17 @@ jobs:
             --strava ${{ env.ATHLETE_DIR }}/data/activities.csv \
             --progress-every 50
 
+      - name: Classify races
+        if: ${{ steps.gate.outputs.continue == 'true' && env.PIPELINE_MODE == 'FULL' }}
+        run: |
+          python classify_races.py \
+            --master ${{ env.ATHLETE_DIR }}/output/Master_FULL_post.xlsx \
+            --overrides ${{ env.ATHLETE_DIR }}/activity_overrides.xlsx \
+            --athlete-yml ${{ env.ATHLETE_DIR }}/athlete.yml \
+            --from-master \
+            --skip-if-classified
+        continue-on-error: true
+
       - name: Generate dashboard
         if: ${{ steps.gate.outputs.continue == 'true' }}
         env:
