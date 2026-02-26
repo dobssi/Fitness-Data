@@ -665,6 +665,25 @@
             </div>
             <p class="section-subtitle">Upload your running history and optionally connect intervals.icu for ongoing sync. The more history, the better — ideally 2+ years.</p>
 
+            <!-- Power meter question -->
+            <div style="margin-bottom: 20px; padding: 16px; background: rgba(129,140,248,0.06); border: 1px solid var(--card-border); border-radius: 8px;">
+                <label style="color: var(--text); font-weight: 600; font-size: 0.85rem; margin-bottom: 8px; display: block;">Do you use a Stryd power meter?</label>
+                <div class="hint" style="margin-bottom: 12px;">Stryd is a foot pod that measures running power. If you have one, the pipeline uses your power data for higher-accuracy analysis. If not, we use Grade Adjusted Pace (GAP) which works great for most runners.</div>
+                <div style="display: flex; gap: 12px;">
+                    <label style="display: flex; align-items: center; gap: 6px; cursor: pointer; color: var(--text); font-size: 0.85rem;">
+                        <input type="radio" name="stryd" value="no" checked onchange="toggleStrydNote()"> No
+                    </label>
+                    <label style="display: flex; align-items: center; gap: 6px; cursor: pointer; color: var(--text); font-size: 0.85rem;">
+                        <input type="radio" name="stryd" value="yes" onchange="toggleStrydNote()"> Yes
+                    </label>
+                </div>
+                <div id="strydNote" style="display: none; margin-top: 10px; padding: 10px; background: rgba(74,222,128,0.08); border-radius: 6px;">
+                    <div class="hint" style="margin: 0;">
+                        <span style="color: var(--green);">✓</span> Your Stryd power data will be used automatically from your FIT files — no extra setup needed. Garmin's built-in power estimate is <em>not</em> used (only Stryd).
+                    </div>
+                </div>
+            </div>
+
             <!-- FIT file upload -->
             <label style="color: var(--text); font-weight: 600; font-size: 0.85rem; margin-bottom: 4px; display: block;">Running history (FIT files)</label>
             <div class="hint" style="margin-bottom: 12px;">Export your full history from Garmin Connect or Strava. If your entire history is already on intervals.icu you can skip this — but most runners have older data that predates their intervals.icu account.</div>
@@ -924,6 +943,11 @@
     }
 
     // --- intervals.icu toggle ---
+    function toggleStrydNote() {
+        const yes = document.querySelector('input[name=stryd][value=yes]').checked;
+        document.getElementById('strydNote').style.display = yes ? 'block' : 'none';
+    }
+
     function toggleIntervals() {
         const show = document.getElementById('use_intervals').checked;
         document.getElementById('intervalsFields').style.display = show ? 'block' : 'none';
@@ -1051,6 +1075,7 @@
             has_weight_csv: document.getElementById('weightInput').files.length > 0,
             weight_file: document.getElementById('weightInput').files[0]?.name || null,
             submitted_at: new Date().toISOString(),
+            use_stryd: document.querySelector('input[name=stryd][value=yes]').checked,
         };
     }
 
@@ -1118,6 +1143,7 @@
         body += `Max HR: ${data.max_hr}\n`;
         body += `LTHR: ${data.lthr}\n`;
         body += `\nData source: ${data.data_source}\n`;
+        body += `Stryd power meter: ${data.use_stryd ? 'Yes' : 'No'}\n`;
         body += `File uploaded: ${data.has_file ? data.file_name : 'No'}\n`;
         if (data.has_file && !data.use_intervals) body += `  (use Dropbox link if file too large)\n`;
         if (data.use_intervals) {
@@ -1155,6 +1181,9 @@
         body += `  timezone: "${data.timezone}"\n`;
         if (data.max_hr !== 'estimate') body += `  max_hr: ${data.max_hr}\n`;
         if (data.lthr !== 'estimate') body += `  lthr: ${data.lthr}\n`;
+
+        body += `\npower:\n`;
+        body += `  mode: "${data.use_stryd ? 'stryd' : 'gap'}"\n`;
 
         if (data.upcoming_races.length > 0) {
             body += `\nplanned_races:\n`;
