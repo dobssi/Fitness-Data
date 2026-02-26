@@ -214,6 +214,80 @@
             transition: border-color 0.2s, background 0.2s;
             cursor: pointer;
         }
+
+        /* Source tabs */
+        .source-tabs {
+            display: flex;
+            gap: 8px;
+            margin-bottom: 16px;
+        }
+        .source-tab {
+            flex: 1;
+            padding: 10px 16px;
+            background: var(--input-bg);
+            border: 1px solid var(--input-border);
+            border-radius: 8px;
+            color: var(--text-dim);
+            font-family: 'DM Sans', sans-serif;
+            font-size: 0.85rem;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s;
+            text-align: center;
+        }
+        .source-tab:hover {
+            border-color: var(--accent);
+            color: var(--text);
+        }
+        .source-tab.active {
+            border-color: var(--accent);
+            background: rgba(129, 140, 248, 0.08);
+            color: var(--accent);
+        }
+
+        /* intervals.icu panel */
+        .intervals-info {
+            font-size: 0.85rem;
+            color: var(--text-dim);
+            line-height: 1.6;
+        }
+        .intervals-info a {
+            color: var(--accent);
+        }
+        .intervals-note {
+            margin-top: 16px;
+            padding: 12px 16px;
+            background: rgba(74, 222, 128, 0.06);
+            border: 1px solid rgba(74, 222, 128, 0.15);
+            border-radius: 8px;
+            font-size: 0.82rem;
+            line-height: 1.8;
+        }
+
+        /* Small upload box (for activities.csv) */
+        .upload-box-small {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 8px 16px;
+            border: 1px dashed var(--card-border);
+            border-radius: 8px;
+            cursor: pointer;
+            transition: border-color 0.2s;
+            font-size: 0.82rem;
+            color: var(--text-dim);
+        }
+        .upload-box-small:hover {
+            border-color: var(--accent);
+            color: var(--text);
+        }
+        .upload-box-small.has-file {
+            border-color: var(--green);
+            border-style: solid;
+            color: var(--green);
+        }
+        .upload-icon-small { font-size: 1rem; }
+        .upload-text-small { font-size: 0.82rem; }
         .upload-box:hover {
             border-color: var(--accent);
             background: rgba(129, 140, 248, 0.04);
@@ -583,36 +657,103 @@
             <div class="hint">LTHR is roughly your average HR during a hard 10K race, or what your Garmin reports as lactate threshold.</div>
         </div>
 
-        <!-- Section 3: Upload data -->
+        <!-- Section 3: Your data -->
         <div class="section">
             <div class="section-header">
                 <div class="section-num">3</div>
                 <div class="section-title">Your running data</div>
             </div>
-            <p class="section-subtitle">Upload a bulk export from Garmin Connect or Strava. The more history, the better — ideally 6+ months.</p>
+            <p class="section-subtitle">Choose how you'd like to connect your data. The more history, the better — ideally 2+ years.</p>
 
-            <div class="upload-box" id="uploadBox" onclick="document.getElementById('fileInput').click()">
-                <div class="upload-icon">📁</div>
-                <div class="upload-text">Click to select your export zip</div>
-                <div class="upload-hint">.zip file from Garmin Connect or Strava export</div>
-                <div class="upload-filename" id="fileName"></div>
-            </div>
-            <input type="file" id="fileInput" accept=".zip,.gz" onchange="handleFile(this)">
-
-            <div class="export-help">
-                <button class="export-toggle" onclick="toggleExport(this)">
-                    <span class="arrow">▶</span> How do I export my data?
-                </button>
-                <div class="export-instructions" id="exportInstructions">
-                    <h4>🟢 Garmin Connect (recommended)</h4>
-                    Go to <a href="https://www.garmin.com/account" target="_blank">garmin.com/account</a> → Data Management → Export Your Data → Request Data Export. You'll get an email with a download link (usually within a few hours). Upload the zip here.
-
-                    <h4>🟠 Strava</h4>
-                    Go to <a href="https://www.strava.com/athlete/delete_your_account" target="_blank">strava.com/athlete/delete_your_account</a> — don't worry, you're not deleting anything! Click <strong>"Request Your Archive"</strong> at the top. You'll get an email when it's ready (can take a few hours). Upload the zip here.
-
-                    <h4>💡 Tip</h4>
-                    If your zip is very large (>500MB), you can upload it directly via <a href="__DROPBOX_REQUEST_LINK__" target="_blank">this Dropbox link</a> instead, then just submit the form without a file.
+            <!-- Data source selector -->
+            <div class="field">
+                <label>How would you like to provide your data?</label>
+                <div class="source-tabs">
+                    <button class="source-tab active" onclick="switchSource('upload')" id="tab_upload">📁 Upload a zip</button>
+                    <button class="source-tab" onclick="switchSource('intervals')" id="tab_intervals">🔗 intervals.icu</button>
                 </div>
+            </div>
+
+            <!-- Upload panel -->
+            <div class="source-panel" id="panel_upload">
+                <div class="upload-box" id="uploadBox" onclick="document.getElementById('fileInput').click()">
+                    <div class="upload-icon">📁</div>
+                    <div class="upload-text">Click to select your export zip</div>
+                    <div class="upload-hint">.zip file from Garmin Connect or Strava export</div>
+                    <div class="upload-filename" id="fileName"></div>
+                </div>
+                <input type="file" id="fileInput" accept=".zip,.gz" onchange="handleFile(this)">
+
+                <div class="export-help">
+                    <button class="export-toggle" onclick="toggleExport(this)">
+                        <span class="arrow">▶</span> How do I export my data?
+                    </button>
+                    <div class="export-instructions" id="exportInstructions">
+                        <h4>🟢 Garmin Connect (recommended)</h4>
+                        Go to <a href="https://www.garmin.com/account" target="_blank">garmin.com/account</a> → Data Management → Export Your Data → Request Data Export. You'll get an email with a download link (usually within a few hours). Upload the zip here.
+
+                        <h4>🟠 Strava</h4>
+                        Go to <a href="https://www.strava.com/athlete/delete_your_account" target="_blank">strava.com/athlete/delete_your_account</a> — don't worry, you're not deleting anything! Click <strong>"Request Your Archive"</strong> at the top. You'll get an email when it's ready (can take a few hours). Upload the zip here.
+
+                        <h4>💡 Tip</h4>
+                        If your zip is very large (>500MB), you can upload it directly via <a href="__DROPBOX_REQUEST_LINK__" target="_blank">this Dropbox link</a> instead, then just submit the form without a file.
+                    </div>
+                </div>
+
+                <!-- Strava activities.csv -->
+                <div style="margin-top: 16px; padding-top: 16px; border-top: 1px solid var(--card-border);">
+                    <label style="color: var(--text); font-weight: 500; font-size: 0.85rem;">Strava activities.csv <span style="color: var(--text-dim); font-weight: 400;">(optional)</span></label>
+                    <div class="hint" style="margin-bottom: 8px;">If you exported from Strava, or are able to access your Strava history anyway, your zip contains an <code>activities.csv</code> file. Uploading it separately helps us detect which runs were races and also allows us to name your runs.</div>
+                    <div class="upload-box-small" id="activitiesBox" onclick="document.getElementById('activitiesInput').click()">
+                        <span class="upload-icon-small">📄</span>
+                        <span class="upload-text-small" id="activitiesText">Select activities.csv</span>
+                    </div>
+                    <input type="file" id="activitiesInput" accept=".csv" onchange="handleActivities(this)" style="display:none">
+                </div>
+            </div>
+
+            <!-- intervals.icu panel -->
+            <div class="source-panel" id="panel_intervals" style="display: none;">
+                <div class="intervals-info">
+                    <p><a href="https://intervals.icu" target="_blank" style="color: var(--accent);">intervals.icu</a> is a free training platform that syncs with Garmin and Strava. Connecting it gives us automatic daily sync of new runs, weight history, and activity metadata — no manual exports needed.</p>
+                </div>
+                <div class="row" style="margin-top: 16px;">
+                    <div class="field">
+                        <label for="intervals_id">Athlete ID</label>
+                        <input type="text" id="intervals_id" placeholder="i123456">
+                        <div class="hint">Settings → Profile → bottom of page</div>
+                    </div>
+                    <div class="field">
+                        <label for="intervals_key">API Key</label>
+                        <input type="text" id="intervals_key" placeholder="abc123...">
+                        <div class="hint">Settings → Profile → API Key → Show</div>
+                    </div>
+                </div>
+                <div class="intervals-note">
+                    <span style="color: var(--green);">✓</span> Weight history synced automatically<br>
+                    <span style="color: var(--green);">✓</span> New runs picked up daily<br>
+                    <span style="color: var(--green);">✓</span> No manual exports needed
+                </div>
+
+                <div style="margin-top: 16px; padding-top: 16px; border-top: 1px solid var(--card-border);">
+                    <div class="hint">💡 Don't have an intervals.icu account? It's free — <a href="https://intervals.icu" target="_blank" style="color: var(--accent);">sign up here</a>, connect your Garmin or Strava, and it will import your full history. Then come back and enter your ID and API key above.</div>
+                </div>
+            </div>
+
+            <!-- Weight history (shown for upload mode) -->
+            <div id="weightNote" style="margin-top: 16px; padding-top: 16px; border-top: 1px solid var(--card-border);">
+                <label style="color: var(--text); font-weight: 500; font-size: 0.85rem;">⚖️ Weight history <span style="color: var(--text-dim); font-weight: 400;">(optional)</span></label>
+                <div class="hint" style="margin-bottom: 8px;">If you track your weight, upload a CSV with <code>date,weight_kg</code> columns. Otherwise we'll use the constant weight you entered above. If you use intervals.icu (even with zip upload), we can pull your weight automatically — just mention it.</div>
+                <div class="upload-box-small" id="weightBox" onclick="document.getElementById('weightInput').click()">
+                    <span class="upload-icon-small">📄</span>
+                    <span class="upload-text-small" id="weightText">Select weight CSV</span>
+                </div>
+                <input type="file" id="weightInput" accept=".csv" onchange="handleWeight(this)" style="display:none">
+            </div>
+
+            <!-- Overrides note -->
+            <div style="margin-top: 12px;">
+                <div class="hint">📝 <strong>After setup:</strong> Once your dashboard is live, you'll be able to flag corrections — marking which runs were races, tagging trail/XC surfaces, and fixing any data oddities.</div>
             </div>
         </div>
 
@@ -767,6 +908,38 @@
         }
     }
 
+    function handleActivities(input) {
+        const box = document.getElementById('activitiesBox');
+        const textEl = document.getElementById('activitiesText');
+        if (input.files.length > 0) {
+            textEl.textContent = input.files[0].name;
+            box.classList.add('has-file');
+            box.querySelector('.upload-icon-small').textContent = '✅';
+        }
+    }
+
+    function handleWeight(input) {
+        const box = document.getElementById('weightBox');
+        const textEl = document.getElementById('weightText');
+        if (input.files.length > 0) {
+            textEl.textContent = input.files[0].name;
+            box.classList.add('has-file');
+            box.querySelector('.upload-icon-small').textContent = '✅';
+        }
+    }
+
+    // --- Data source switching ---
+    let currentSource = 'upload';
+    function switchSource(source) {
+        currentSource = source;
+        document.getElementById('panel_upload').style.display = source === 'upload' ? 'block' : 'none';
+        document.getElementById('panel_intervals').style.display = source === 'intervals' ? 'block' : 'none';
+        document.getElementById('tab_upload').classList.toggle('active', source === 'upload');
+        document.getElementById('tab_intervals').classList.toggle('active', source === 'intervals');
+        document.getElementById('weightNote').style.display = source === 'upload' ? 'block' : 'none';
+        updateDots();
+    }
+
     // --- Export help toggle ---
     function toggleExport(btn) {
         btn.classList.toggle('open');
@@ -822,16 +995,18 @@
         const email = document.getElementById('email').value.trim();
         const weight = document.getElementById('weight').value;
         const hasFile = document.getElementById('fileInput').files.length > 0;
+        const hasIntervals = document.getElementById('intervals_id').value.trim() && document.getElementById('intervals_key').value.trim();
+        const hasData = currentSource === 'intervals' ? hasIntervals : hasFile;
         const hrDone = document.getElementById('maxhr_unknown').checked || document.getElementById('maxhr').value;
 
         document.getElementById('dot1').className = 'step-dot ' + ((name && email && weight) ? 'done' : 'active');
         document.getElementById('dot2').className = 'step-dot ' + (hrDone ? 'done' : ((name && email) ? 'active' : ''));
-        document.getElementById('dot3').className = 'step-dot ' + (hasFile ? 'done' : (hrDone ? 'active' : ''));
+        document.getElementById('dot3').className = 'step-dot ' + (hasData ? 'done' : (hrDone ? 'active' : ''));
         document.getElementById('dot4').className = 'step-dot ' + ((name && email && weight) ? 'active' : '');
     }
 
     // Attach listeners for dot updates
-    ['name', 'email', 'weight', 'maxhr', 'lthr'].forEach(id => {
+    ['name', 'email', 'weight', 'maxhr', 'lthr', 'intervals_id', 'intervals_key'].forEach(id => {
         document.getElementById(id).addEventListener('input', updateDots);
     });
     ['maxhr_unknown', 'lthr_unknown'].forEach(id => {
@@ -871,10 +1046,17 @@
             timezone: document.getElementById('timezone').value,
             max_hr: document.getElementById('maxhr_unknown').checked ? 'estimate' : (parseInt(document.getElementById('maxhr').value) || 'estimate'),
             lthr: document.getElementById('lthr_unknown').checked ? 'estimate' : (parseInt(document.getElementById('lthr').value) || 'estimate'),
+            data_source: currentSource,
+            intervals_id: document.getElementById('intervals_id').value.trim(),
+            intervals_key: document.getElementById('intervals_key').value.trim(),
             race_results: races,
             upcoming_races: upcoming,
             has_file: document.getElementById('fileInput').files.length > 0,
             file_name: document.getElementById('fileInput').files[0]?.name || null,
+            has_activities_csv: document.getElementById('activitiesInput').files.length > 0,
+            activities_file: document.getElementById('activitiesInput').files[0]?.name || null,
+            has_weight_csv: document.getElementById('weightInput').files.length > 0,
+            weight_file: document.getElementById('weightInput').files[0]?.name || null,
             submitted_at: new Date().toISOString(),
         };
     }
@@ -888,6 +1070,9 @@
         if (!data.email) { alert('Please enter your email.'); return; }
         if (!data.weight_kg) { alert('Please enter your weight.'); return; }
         if (!data.dob) { alert('Please enter your date of birth.'); return; }
+        if (data.data_source === 'intervals' && (!data.intervals_id || !data.intervals_key)) {
+            alert('Please enter your intervals.icu athlete ID and API key.'); return;
+        }
 
         const btn = document.getElementById('submitBtn');
         btn.disabled = true;
@@ -936,7 +1121,15 @@
         body += `Timezone: ${data.timezone}\n`;
         body += `Max HR: ${data.max_hr}\n`;
         body += `LTHR: ${data.lthr}\n`;
-        body += `\nFile uploaded: ${data.has_file ? data.file_name : 'No (use Dropbox link)'}\n`;
+        body += `\nData source: ${data.data_source}\n`;
+        if (data.data_source === 'intervals') {
+            body += `intervals.icu athlete ID: ${data.intervals_id}\n`;
+            body += `intervals.icu API key: ${data.intervals_key}\n`;
+        } else {
+            body += `File uploaded: ${data.has_file ? data.file_name : 'No (use Dropbox link)'}\n`;
+            if (data.has_activities_csv) body += `Strava activities.csv: ${data.activities_file}\n`;
+            if (data.has_weight_csv) body += `Weight CSV: ${data.weight_file}\n`;
+        }
 
         if (data.race_results.length > 0) {
             body += `\nRACE RESULTS\n${'-'.repeat(20)}\n`;
@@ -975,6 +1168,16 @@
                 body += `    priority: ${r.priority}\n`;
                 body += `    surface: road\n`;
             });
+        }
+
+        body += `\ndata:\n`;
+        if (data.data_source === 'intervals') {
+            body += `  source: "intervals"\n`;
+            body += `  intervals:\n`;
+            body += `    athlete_id: "${data.intervals_id}"\n`;
+            body += `    # API key: ${data.intervals_key}  # -> GitHub secret\n`;
+        } else {
+            body += `  source: "fit_folder"\n`;
         }
 
         return body;
