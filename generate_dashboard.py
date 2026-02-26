@@ -1758,7 +1758,7 @@ def get_zone_data(df):
     
     # Set taper starting point: yesterday's end-of-day CTL/ATL
     from datetime import date as _rw_date_cls
-    _yesterday_str = (_rw_date_cls.today() - _td(days=1)).strftime('%Y-%m-%d')
+    _yesterday_str = (_rw_date_cls.today() - timedelta(days=1)).strftime('%Y-%m-%d')
     _yesterday_daily = _daily_lookup.get(_yesterday_str)
     if _yesterday_daily and all(pd.notna(v) for v in [_yesterday_daily['ctl'], _yesterday_daily['atl']]):
         _rw_ctl = round(float(_yesterday_daily['ctl']), 1)
