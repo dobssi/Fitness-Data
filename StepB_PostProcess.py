@@ -1642,21 +1642,26 @@ def calc_ctl_atl(df: pd.DataFrame, athlete_data_path: str = None) -> tuple:
         _daily_cols.append('RFL_sim_Trend')
     daily_agg.columns = _daily_cols
     
-    # v46: Load non-running TSS from athlete_data.csv
+    # v46: Load non-running TSS and weight from athlete_data.csv
     non_running_tss = {}
+    weight_by_date = {}
     if athlete_data_path and os.path.exists(athlete_data_path):
         try:
             ad_df = _read_athlete_csv(athlete_data_path)
+            ad_df['date_str'] = pd.to_datetime(ad_df['date']).dt.strftime('%Y-%m-%d')
             if 'non_running_tss' in ad_df.columns:
-                ad_df['date_str'] = pd.to_datetime(ad_df['date']).dt.strftime('%Y-%m-%d')
                 nr_df = ad_df[ad_df['non_running_tss'].notna()]
                 non_running_tss = nr_df.groupby('date_str')['non_running_tss'].sum().to_dict()
                 print(f"  Loaded {len(non_running_tss)} days of non-running TSS from athlete_data.csv")
             elif 'tss' in ad_df.columns:
                 # Fallback: legacy non_running_tss.csv format
-                ad_df['date_str'] = pd.to_datetime(ad_df['date']).dt.strftime('%Y-%m-%d')
                 non_running_tss = ad_df.groupby('date_str')['tss'].sum().to_dict()
                 print(f"  Loaded {len(non_running_tss)} days of non-running TSS (legacy format)")
+            if 'weight_kg' in ad_df.columns:
+                wt_df = ad_df[ad_df['weight_kg'].notna()]
+                # Take last weight per day (in case of duplicates)
+                weight_by_date = wt_df.groupby('date_str')['weight_kg'].last().to_dict()
+                print(f"  Loaded {len(weight_by_date)} days of weight data from athlete_data.csv")
         except Exception as e:
             print(f"  WARNING: Could not load non-running TSS from {athlete_data_path}: {e}")
     
@@ -1686,6 +1691,10 @@ def calc_ctl_atl(df: pd.DataFrame, athlete_data_path: str = None) -> tuple:
     # Add non-running TSS
     daily_df['tss_other'] = daily_df['date_str'].map(non_running_tss).fillna(0)
     daily_df['tss_total'] = daily_df['tss_running'] + daily_df['tss_other']
+    
+    # Add weight (sparse — only days with measurements, forward-filled for continuity)
+    daily_df['weight_kg'] = daily_df['date_str'].map(weight_by_date)
+    daily_df['weight_kg'] = daily_df['weight_kg'].ffill()
     
     # Debug: show some stats
     total_tss = daily_df['tss_total'].sum()
@@ -1733,9 +1742,9 @@ def calc_ctl_atl(df: pd.DataFrame, athlete_data_path: str = None) -> tuple:
     
     # Clean up daily_df for output
     _out_cols = ['date', 'distance_km', 'tss_running', 'tss_other', 'tss_total', 
-                          'CTL', 'ATL', 'TSB', 'RF_Trend', 'RFL_Trend']
+                          'CTL', 'ATL', 'TSB', 'RF_Trend', 'RFL_Trend', 'weight_kg']
     _out_names = ['Date', 'Distance_km', 'TSS_Running', 'TSS_Other', 'TSS_Total',
-                        'CTL', 'ATL', 'TSB', 'RF_Trend', 'RFL_Trend']
+                        'CTL', 'ATL', 'TSB', 'RF_Trend', 'RFL_Trend', 'Weight_kg']
     if 'RFL_gap_Trend' in daily_df.columns:
         _out_cols.append('RFL_gap_Trend')
         _out_names.append('RFL_gap_Trend')
