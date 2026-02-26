@@ -1,0 +1,1168 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Running Fitness Dashboard — Get Started</title>
+    <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg: #0f1117;
+            --card: #1a1d27;
+            --card-border: #2e3340;
+            --text: #e4e7ef;
+            --text-dim: #8b90a0;
+            --accent: #818cf8;
+            --accent-hover: #a5b4fc;
+            --green: #4ade80;
+            --amber: #fbbf24;
+            --red: #f87171;
+            --input-bg: #141720;
+            --input-border: #363b4a;
+            --input-focus: #818cf8;
+        }
+
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            font-family: 'DM Sans', sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            line-height: 1.6;
+            min-height: 100vh;
+        }
+
+        .container {
+            max-width: 640px;
+            margin: 0 auto;
+            padding: 40px 20px 80px;
+        }
+
+        /* Header */
+        .hero {
+            text-align: center;
+            margin-bottom: 48px;
+        }
+        .hero-icon {
+            font-size: 48px;
+            margin-bottom: 16px;
+        }
+        .hero h1 {
+            font-size: 1.75rem;
+            font-weight: 700;
+            margin-bottom: 8px;
+            letter-spacing: -0.02em;
+        }
+        .hero p {
+            color: var(--text-dim);
+            font-size: 0.95rem;
+            max-width: 480px;
+            margin: 0 auto;
+        }
+
+        /* Steps indicator */
+        .steps {
+            display: flex;
+            justify-content: center;
+            gap: 8px;
+            margin-bottom: 40px;
+        }
+        .step-dot {
+            width: 10px; height: 10px;
+            border-radius: 50%;
+            background: var(--card-border);
+            transition: background 0.3s, transform 0.3s;
+        }
+        .step-dot.active {
+            background: var(--accent);
+            transform: scale(1.2);
+        }
+        .step-dot.done {
+            background: var(--green);
+        }
+
+        /* Sections */
+        .section {
+            background: var(--card);
+            border: 1px solid var(--card-border);
+            border-radius: 12px;
+            padding: 28px 24px;
+            margin-bottom: 20px;
+        }
+        .section-header {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 20px;
+        }
+        .section-num {
+            width: 28px; height: 28px;
+            border-radius: 50%;
+            background: var(--accent);
+            color: #fff;
+            font-size: 0.8rem;
+            font-weight: 700;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex-shrink: 0;
+        }
+        .section-title {
+            font-size: 1.05rem;
+            font-weight: 600;
+        }
+        .section-subtitle {
+            color: var(--text-dim);
+            font-size: 0.82rem;
+            margin-top: -12px;
+            margin-bottom: 16px;
+            padding-left: 38px;
+        }
+
+        /* Form elements */
+        .field {
+            margin-bottom: 16px;
+        }
+        .field:last-child {
+            margin-bottom: 0;
+        }
+        label {
+            display: block;
+            font-size: 0.82rem;
+            font-weight: 500;
+            color: var(--text-dim);
+            margin-bottom: 6px;
+        }
+        input[type="text"],
+        input[type="email"],
+        input[type="number"],
+        input[type="date"],
+        select,
+        textarea {
+            width: 100%;
+            padding: 10px 14px;
+            background: var(--input-bg);
+            border: 1px solid var(--input-border);
+            border-radius: 8px;
+            color: var(--text);
+            font-family: 'DM Sans', sans-serif;
+            font-size: 0.9rem;
+            transition: border-color 0.2s;
+            outline: none;
+        }
+        input:focus, select:focus, textarea:focus {
+            border-color: var(--input-focus);
+        }
+        textarea {
+            resize: vertical;
+            min-height: 80px;
+        }
+        select {
+            cursor: pointer;
+            appearance: none;
+            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath d='M2 4l4 4 4-4' stroke='%238b90a0' stroke-width='1.5' fill='none'/%3E%3C/svg%3E");
+            background-repeat: no-repeat;
+            background-position: right 12px center;
+            padding-right: 32px;
+        }
+        select option {
+            background: var(--card);
+            color: var(--text);
+        }
+
+        .row {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 12px;
+        }
+        .row-3 {
+            display: grid;
+            grid-template-columns: 1fr 1fr 1fr;
+            gap: 12px;
+        }
+
+        .hint {
+            font-size: 0.75rem;
+            color: var(--text-dim);
+            margin-top: 4px;
+        }
+
+        .checkbox-row {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-top: 4px;
+        }
+        .checkbox-row input[type="checkbox"] {
+            width: 16px; height: 16px;
+            accent-color: var(--accent);
+            cursor: pointer;
+        }
+        .checkbox-row label {
+            margin: 0;
+            font-size: 0.85rem;
+            color: var(--text);
+            cursor: pointer;
+        }
+
+        /* Upload area */
+        .upload-box {
+            border: 2px dashed var(--card-border);
+            border-radius: 10px;
+            padding: 32px 20px;
+            text-align: center;
+            transition: border-color 0.2s, background 0.2s;
+            cursor: pointer;
+        }
+
+        /* Source tabs */
+        .source-tabs {
+            display: flex;
+            gap: 8px;
+            margin-bottom: 16px;
+        }
+        .source-tab {
+            flex: 1;
+            padding: 10px 16px;
+            background: var(--input-bg);
+            border: 1px solid var(--input-border);
+            border-radius: 8px;
+            color: var(--text-dim);
+            font-family: 'DM Sans', sans-serif;
+            font-size: 0.85rem;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s;
+            text-align: center;
+        }
+        .source-tab:hover {
+            border-color: var(--accent);
+            color: var(--text);
+        }
+        .source-tab.active {
+            border-color: var(--accent);
+            background: rgba(129, 140, 248, 0.08);
+            color: var(--accent);
+        }
+
+        /* intervals.icu panel */
+        .intervals-info {
+            font-size: 0.85rem;
+            color: var(--text-dim);
+            line-height: 1.6;
+        }
+        .intervals-info a {
+            color: var(--accent);
+        }
+        .intervals-note {
+            margin-top: 16px;
+            padding: 12px 16px;
+            background: rgba(74, 222, 128, 0.06);
+            border: 1px solid rgba(74, 222, 128, 0.15);
+            border-radius: 8px;
+            font-size: 0.82rem;
+            line-height: 1.8;
+        }
+
+        /* Small upload box (for activities.csv) */
+        .upload-box-small {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 8px 16px;
+            border: 1px dashed var(--card-border);
+            border-radius: 8px;
+            cursor: pointer;
+            transition: border-color 0.2s;
+            font-size: 0.82rem;
+            color: var(--text-dim);
+        }
+        .upload-box-small:hover {
+            border-color: var(--accent);
+            color: var(--text);
+        }
+        .upload-box-small.has-file {
+            border-color: var(--green);
+            border-style: solid;
+            color: var(--green);
+        }
+        .upload-icon-small { font-size: 1rem; }
+        .upload-text-small { font-size: 0.82rem; }
+        .upload-box:hover {
+            border-color: var(--accent);
+            background: rgba(129, 140, 248, 0.04);
+        }
+        .upload-box.has-file {
+            border-color: var(--green);
+            border-style: solid;
+            background: rgba(74, 222, 128, 0.04);
+        }
+        .upload-icon {
+            font-size: 32px;
+            margin-bottom: 8px;
+        }
+        .upload-text {
+            font-size: 0.9rem;
+            margin-bottom: 4px;
+        }
+        .upload-hint {
+            font-size: 0.78rem;
+            color: var(--text-dim);
+        }
+        .upload-filename {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 0.82rem;
+            color: var(--green);
+            margin-top: 8px;
+        }
+        #fileInput {
+            display: none;
+        }
+
+        /* Export instructions toggle */
+        .export-help {
+            margin-top: 16px;
+        }
+        .export-toggle {
+            font-size: 0.82rem;
+            color: var(--accent);
+            cursor: pointer;
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            border: none;
+            background: none;
+            font-family: inherit;
+        }
+        .export-toggle:hover {
+            color: var(--accent-hover);
+        }
+        .export-toggle .arrow {
+            transition: transform 0.2s;
+            font-size: 0.7rem;
+        }
+        .export-toggle.open .arrow {
+            transform: rotate(90deg);
+        }
+        .export-instructions {
+            display: none;
+            margin-top: 12px;
+            padding: 16px;
+            background: var(--input-bg);
+            border-radius: 8px;
+            font-size: 0.82rem;
+            line-height: 1.7;
+        }
+        .export-instructions.show {
+            display: block;
+        }
+        .export-instructions h4 {
+            font-size: 0.85rem;
+            color: var(--accent);
+            margin-bottom: 6px;
+            margin-top: 12px;
+        }
+        .export-instructions h4:first-child {
+            margin-top: 0;
+        }
+        .export-instructions a {
+            color: var(--accent);
+        }
+        .export-instructions code {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 0.78rem;
+            background: var(--card);
+            padding: 1px 5px;
+            border-radius: 3px;
+        }
+
+        /* Race entries */
+        .race-list {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+        .race-entry {
+            display: grid;
+            grid-template-columns: 1fr 100px 90px 32px;
+            gap: 8px;
+            align-items: end;
+        }
+        .race-entry input, .race-entry select {
+            padding: 8px 10px;
+            font-size: 0.82rem;
+        }
+        .remove-btn {
+            width: 32px; height: 38px;
+            background: none;
+            border: 1px solid var(--card-border);
+            border-radius: 6px;
+            color: var(--text-dim);
+            cursor: pointer;
+            font-size: 1rem;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: color 0.2s, border-color 0.2s;
+        }
+        .remove-btn:hover {
+            color: var(--red);
+            border-color: var(--red);
+        }
+        .add-btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            margin-top: 8px;
+            padding: 6px 12px;
+            background: none;
+            border: 1px dashed var(--card-border);
+            border-radius: 6px;
+            color: var(--text-dim);
+            font-family: inherit;
+            font-size: 0.8rem;
+            cursor: pointer;
+            transition: color 0.2s, border-color 0.2s;
+        }
+        .add-btn:hover {
+            color: var(--accent);
+            border-color: var(--accent);
+        }
+
+        /* Upcoming race entries */
+        .upcoming-entry {
+            display: grid;
+            grid-template-columns: 1fr 90px 80px 70px 32px;
+            gap: 8px;
+            align-items: end;
+        }
+        .upcoming-entry input, .upcoming-entry select {
+            padding: 8px 10px;
+            font-size: 0.82rem;
+        }
+
+        /* Submit */
+        .submit-section {
+            text-align: center;
+            margin-top: 32px;
+        }
+        .submit-btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 14px 40px;
+            background: var(--accent);
+            color: #fff;
+            border: none;
+            border-radius: 10px;
+            font-family: 'DM Sans', sans-serif;
+            font-size: 1rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: background 0.2s, transform 0.1s;
+        }
+        .submit-btn:hover {
+            background: var(--accent-hover);
+        }
+        .submit-btn:active {
+            transform: scale(0.98);
+        }
+        .submit-btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+        .submit-note {
+            font-size: 0.78rem;
+            color: var(--text-dim);
+            margin-top: 12px;
+        }
+
+        /* Success state */
+        .success-msg {
+            display: none;
+            text-align: center;
+            padding: 40px 20px;
+        }
+        .success-msg.show {
+            display: block;
+        }
+        .success-icon {
+            font-size: 56px;
+            margin-bottom: 16px;
+        }
+        .success-msg h2 {
+            font-size: 1.4rem;
+            margin-bottom: 8px;
+        }
+        .success-msg p {
+            color: var(--text-dim);
+            font-size: 0.9rem;
+        }
+
+        /* What you get section */
+        .features {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 12px;
+            margin-top: 8px;
+        }
+        .feature {
+            padding: 14px;
+            background: var(--input-bg);
+            border-radius: 8px;
+            font-size: 0.82rem;
+        }
+        .feature-icon {
+            font-size: 1.2rem;
+            margin-bottom: 4px;
+        }
+        .feature-name {
+            font-weight: 600;
+            margin-bottom: 2px;
+        }
+        .feature-desc {
+            color: var(--text-dim);
+            font-size: 0.75rem;
+        }
+
+        /* Privacy note */
+        .privacy {
+            text-align: center;
+            padding: 20px;
+            font-size: 0.78rem;
+            color: var(--text-dim);
+        }
+        .privacy a {
+            color: var(--accent);
+            text-decoration: none;
+        }
+
+        /* Responsive */
+        @media (max-width: 480px) {
+            .container { padding: 24px 16px 60px; }
+            .hero h1 { font-size: 1.4rem; }
+            .section { padding: 20px 16px; }
+            .row, .row-3 { grid-template-columns: 1fr; }
+            .race-entry {
+                grid-template-columns: 1fr 1fr 32px;
+            }
+            .race-entry input:first-child {
+                grid-column: 1 / -1;
+            }
+            .upcoming-entry {
+                grid-template-columns: 1fr 1fr 32px;
+            }
+            .upcoming-entry input:first-child {
+                grid-column: 1 / -1;
+            }
+            .upcoming-entry select:first-of-type {
+                grid-column: 1 / -1;
+            }
+            .features { grid-template-columns: 1fr; }
+        }
+    </style>
+</head>
+<body>
+    <div class="container" id="mainForm">
+        <!-- Hero -->
+        <div class="hero">
+            <div class="hero-icon">🏃</div>
+            <h1>Running Fitness Dashboard</h1>
+            <p>Get a personal dashboard showing your fitness trend, training load, race predictions, and more — built from your GPS watch data.</p>
+        </div>
+
+        <!-- Step dots -->
+        <div class="steps">
+            <div class="step-dot active" id="dot1"></div>
+            <div class="step-dot" id="dot2"></div>
+            <div class="step-dot" id="dot3"></div>
+            <div class="step-dot" id="dot4"></div>
+        </div>
+
+        <!-- Section 1: About you -->
+        <div class="section">
+            <div class="section-header">
+                <div class="section-num">1</div>
+                <div class="section-title">About you</div>
+            </div>
+            <div class="field">
+                <label for="name">Name</label>
+                <input type="text" id="name" placeholder="First Last" required>
+            </div>
+            <div class="field">
+                <label for="email">Email</label>
+                <input type="email" id="email" placeholder="you@example.com" required>
+                <div class="hint">We'll send your dashboard link here</div>
+            </div>
+            <div class="row">
+                <div class="field">
+                    <label for="dob">Date of birth</label>
+                    <input type="date" id="dob" required>
+                </div>
+                <div class="field">
+                    <label for="gender">Gender</label>
+                    <select id="gender">
+                        <option value="male">Male</option>
+                        <option value="female">Female</option>
+                    </select>
+                </div>
+            </div>
+            <div class="row">
+                <div class="field">
+                    <label for="weight">Weight (kg)</label>
+                    <input type="number" id="weight" placeholder="75" step="0.1" min="30" max="200" required>
+                </div>
+                <div class="field">
+                    <label for="timezone">Timezone</label>
+                    <select id="timezone">
+                        <option value="Europe/London">UK (London)</option>
+                        <option value="Europe/Stockholm">Sweden (Stockholm)</option>
+                        <option value="Europe/Paris">Central Europe (Paris)</option>
+                        <option value="Europe/Berlin">Germany (Berlin)</option>
+                        <option value="US/Eastern">US Eastern</option>
+                        <option value="US/Central">US Central</option>
+                        <option value="US/Pacific">US Pacific</option>
+                        <option value="Australia/Sydney">Australia (Sydney)</option>
+                        <option value="Asia/Tokyo">Japan (Tokyo)</option>
+                    </select>
+                </div>
+            </div>
+        </div>
+
+        <!-- Section 2: Heart rate -->
+        <div class="section">
+            <div class="section-header">
+                <div class="section-num">2</div>
+                <div class="section-title">Heart rate</div>
+            </div>
+            <p class="section-subtitle">If you don't know these, we'll estimate them from your data — just tick the box.</p>
+            <div class="row">
+                <div class="field">
+                    <label for="maxhr">Max HR</label>
+                    <input type="number" id="maxhr" placeholder="190" min="120" max="220">
+                    <div class="checkbox-row">
+                        <input type="checkbox" id="maxhr_unknown">
+                        <label for="maxhr_unknown">Estimate from my data</label>
+                    </div>
+                </div>
+                <div class="field">
+                    <label for="lthr">Lactate threshold HR</label>
+                    <input type="number" id="lthr" placeholder="170" min="100" max="210">
+                    <div class="checkbox-row">
+                        <input type="checkbox" id="lthr_unknown">
+                        <label for="lthr_unknown">Estimate from my data</label>
+                    </div>
+                </div>
+            </div>
+            <div class="hint">LTHR is roughly your average HR during a hard 10K race, or what your Garmin reports as lactate threshold.</div>
+        </div>
+
+        <!-- Section 3: Your data -->
+        <div class="section">
+            <div class="section-header">
+                <div class="section-num">3</div>
+                <div class="section-title">Your running data</div>
+            </div>
+            <p class="section-subtitle">Choose how you'd like to connect your data. The more history, the better — ideally 6+ months.</p>
+
+            <!-- Data source selector -->
+            <div class="field">
+                <label>How would you like to provide your data?</label>
+                <div class="source-tabs">
+                    <button class="source-tab active" onclick="switchSource('upload')" id="tab_upload">📁 Upload a zip</button>
+                    <button class="source-tab" onclick="switchSource('intervals')" id="tab_intervals">🔗 intervals.icu</button>
+                </div>
+            </div>
+
+            <!-- Upload panel -->
+            <div class="source-panel" id="panel_upload">
+                <div class="upload-box" id="uploadBox" onclick="document.getElementById('fileInput').click()">
+                    <div class="upload-icon">📁</div>
+                    <div class="upload-text">Click to select your export zip</div>
+                    <div class="upload-hint">.zip file from Garmin Connect or Strava export</div>
+                    <div class="upload-filename" id="fileName"></div>
+                </div>
+                <input type="file" id="fileInput" accept=".zip,.gz" onchange="handleFile(this)">
+
+                <div class="export-help">
+                    <button class="export-toggle" onclick="toggleExport(this)">
+                        <span class="arrow">▶</span> How do I export my data?
+                    </button>
+                    <div class="export-instructions" id="exportInstructions">
+                        <h4>🟢 Garmin Connect (recommended)</h4>
+                        Go to <a href="https://www.garmin.com/account" target="_blank">garmin.com/account</a> → Data Management → Export Your Data → Request Data Export. You'll get an email with a download link (usually within a few hours). Upload the zip here.
+
+                        <h4>🟠 Strava</h4>
+                        Go to <a href="https://www.strava.com/athlete/delete_your_account" target="_blank">strava.com/athlete/delete_your_account</a> — don't worry, you're not deleting anything! Click <strong>"Request Your Archive"</strong> at the top. You'll get an email when it's ready (can take a few hours). Upload the zip here.
+
+                        <h4>💡 Tip</h4>
+                        If your zip is very large (>500MB), you can upload it directly via <a href="__DROPBOX_REQUEST_LINK__" target="_blank">this Dropbox link</a> instead, then just submit the form without a file.
+                    </div>
+                </div>
+
+                <!-- Strava activities.csv -->
+                <div style="margin-top: 16px; padding-top: 16px; border-top: 1px solid var(--card-border);">
+                    <label style="color: var(--text); font-weight: 500; font-size: 0.85rem;">Strava activities.csv <span style="color: var(--text-dim); font-weight: 400;">(optional)</span></label>
+                    <div class="hint" style="margin-bottom: 8px;">If you exported from Strava, your zip contains an <code>activities.csv</code> file. Uploading it separately helps us detect which runs were races.</div>
+                    <div class="upload-box-small" id="activitiesBox" onclick="document.getElementById('activitiesInput').click()">
+                        <span class="upload-icon-small">📄</span>
+                        <span class="upload-text-small" id="activitiesText">Select activities.csv</span>
+                    </div>
+                    <input type="file" id="activitiesInput" accept=".csv" onchange="handleActivities(this)" style="display:none">
+                </div>
+            </div>
+
+            <!-- intervals.icu panel -->
+            <div class="source-panel" id="panel_intervals" style="display: none;">
+                <div class="intervals-info">
+                    <p><a href="https://intervals.icu" target="_blank" style="color: var(--accent);">intervals.icu</a> is a free training platform that syncs with Garmin and Strava. Connecting it gives us automatic daily sync of new runs, weight history, and activity metadata — no manual exports needed.</p>
+                </div>
+                <div class="row" style="margin-top: 16px;">
+                    <div class="field">
+                        <label for="intervals_id">Athlete ID</label>
+                        <input type="text" id="intervals_id" placeholder="i123456">
+                        <div class="hint">Settings → Profile → bottom of page</div>
+                    </div>
+                    <div class="field">
+                        <label for="intervals_key">API Key</label>
+                        <input type="text" id="intervals_key" placeholder="abc123...">
+                        <div class="hint">Settings → Profile → API Key → Show</div>
+                    </div>
+                </div>
+                <div class="intervals-note">
+                    <span style="color: var(--green);">✓</span> Weight history synced automatically<br>
+                    <span style="color: var(--green);">✓</span> New runs picked up daily<br>
+                    <span style="color: var(--green);">✓</span> No manual exports needed
+                </div>
+
+                <div style="margin-top: 16px; padding-top: 16px; border-top: 1px solid var(--card-border);">
+                    <div class="hint">💡 Don't have an intervals.icu account? It's free — <a href="https://intervals.icu" target="_blank" style="color: var(--accent);">sign up here</a>, connect your Garmin or Strava, and it will import your full history. Then come back and enter your ID and API key above.</div>
+                </div>
+            </div>
+
+            <!-- Weight note (shown for upload mode) -->
+            <div class="weight-note" id="weightNote" style="margin-top: 16px;">
+                <div class="hint">⚖️ <strong>Weight history:</strong> If you use intervals.icu (even with zip upload), we can pull your weight automatically. Otherwise we'll use the constant weight you entered above. You can also send a CSV with <code>date,weight_kg</code> columns if you have one.</div>
+            </div>
+
+            <!-- Overrides note -->
+            <div style="margin-top: 12px;">
+                <div class="hint">📝 <strong>After setup:</strong> Once your dashboard is live, you'll be able to flag corrections — marking which runs were races, tagging trail/XC surfaces, and fixing any data oddities.</div>
+            </div>
+        </div>
+
+        <!-- Section 4: Race history & upcoming (optional) -->
+        <div class="section">
+            <div class="section-header">
+                <div class="section-num">4</div>
+                <div class="section-title">Races</div>
+            </div>
+            <p class="section-subtitle">Optional but helpful — race results calibrate predictions faster. Add any you remember.</p>
+
+            <label style="margin-bottom: 8px; color: var(--text); font-weight: 600; font-size: 0.85rem;">Recent race results</label>
+            <div class="race-list" id="raceList">
+                <div class="race-entry">
+                    <div>
+                        <label>Date</label>
+                        <input type="date" name="race_date">
+                    </div>
+                    <div>
+                        <label>Distance</label>
+                        <select name="race_dist">
+                            <option value="">—</option>
+                            <option value="5">5K</option>
+                            <option value="10">10K</option>
+                            <option value="21.097">Half Marathon</option>
+                            <option value="42.195">Marathon</option>
+                            <option value="custom">Other</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label>Time</label>
+                        <input type="text" name="race_time" placeholder="25:30">
+                    </div>
+                    <button class="remove-btn" onclick="removeEntry(this, 'race')" title="Remove">×</button>
+                </div>
+            </div>
+            <button class="add-btn" onclick="addRace()">+ Add race</button>
+
+            <div style="margin-top: 24px;">
+                <label style="margin-bottom: 8px; color: var(--text); font-weight: 600; font-size: 0.85rem;">Upcoming races</label>
+                <div class="race-list" id="upcomingList">
+                    <div class="upcoming-entry">
+                        <div>
+                            <label>Date</label>
+                            <input type="date" name="up_date">
+                        </div>
+                        <div>
+                            <label>Distance</label>
+                            <select name="up_dist">
+                                <option value="">—</option>
+                                <option value="5">5K</option>
+                                <option value="10">10K</option>
+                                <option value="21.097">Half Marathon</option>
+                                <option value="42.195">Marathon</option>
+                                <option value="custom">Other</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label>Name</label>
+                            <input type="text" name="up_name" placeholder="Parkrun">
+                        </div>
+                        <div>
+                            <label>Priority</label>
+                            <select name="up_priority">
+                                <option value="C">Fun</option>
+                                <option value="B">Target</option>
+                                <option value="A">Goal</option>
+                            </select>
+                        </div>
+                        <button class="remove-btn" onclick="removeEntry(this, 'upcoming')" title="Remove">×</button>
+                    </div>
+                </div>
+                <button class="add-btn" onclick="addUpcoming()">+ Add race</button>
+            </div>
+        </div>
+
+        <!-- What you'll get -->
+        <div class="section">
+            <div class="section-header">
+                <span style="font-size: 1.2rem;">✨</span>
+                <div class="section-title">What you'll get</div>
+            </div>
+            <div class="features">
+                <div class="feature">
+                    <div class="feature-icon">📈</div>
+                    <div class="feature-name">Fitness trend</div>
+                    <div class="feature-desc">See how your running fitness changes over weeks and months</div>
+                </div>
+                <div class="feature">
+                    <div class="feature-icon">⚡</div>
+                    <div class="feature-name">Training load</div>
+                    <div class="feature-desc">Fitness, fatigue, and freshness balance</div>
+                </div>
+                <div class="feature">
+                    <div class="feature-icon">🏁</div>
+                    <div class="feature-name">Race predictions</div>
+                    <div class="feature-desc">5K to marathon times based on current fitness</div>
+                </div>
+                <div class="feature">
+                    <div class="feature-icon">🎯</div>
+                    <div class="feature-name">Race readiness</div>
+                    <div class="feature-desc">Taper plans and target paces for upcoming races</div>
+                </div>
+                <div class="feature">
+                    <div class="feature-icon">💓</div>
+                    <div class="feature-name">Training zones</div>
+                    <div class="feature-desc">HR and pace zones that adapt to your fitness</div>
+                </div>
+                <div class="feature">
+                    <div class="feature-icon">🏅</div>
+                    <div class="feature-name">Age grading</div>
+                    <div class="feature-desc">Performance scores adjusted for age and gender</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Submit -->
+        <div class="submit-section">
+            <button class="submit-btn" id="submitBtn" onclick="submitForm()">
+                🚀 Submit
+            </button>
+            <div class="submit-note">Your data is processed privately. Dashboard typically ready within 24 hours.</div>
+        </div>
+
+        <div class="privacy">
+            🔒 Your data stays private — not shared with third parties.<br>
+            Dashboard is a personal link only you can access.
+        </div>
+    </div>
+
+    <!-- Success message (hidden by default) -->
+    <div class="container success-msg" id="successMsg">
+        <div class="success-icon">🎉</div>
+        <h2>You're all set!</h2>
+        <p>I've received your details and data. I'll process everything and send your personal dashboard link to <strong id="successEmail"></strong> — usually within 24 hours.</p>
+        <p style="margin-top: 16px; color: var(--text-dim); font-size: 0.82rem;">If your zip was too large to upload here, remember to upload it via the <a href="__DROPBOX_REQUEST_LINK__" style="color: var(--accent);">Dropbox link</a>.</p>
+    </div>
+
+    <script>
+    // --- File handling ---
+    function handleFile(input) {
+        const box = document.getElementById('uploadBox');
+        const nameEl = document.getElementById('fileName');
+        if (input.files.length > 0) {
+            const f = input.files[0];
+            const sizeMB = (f.size / 1024 / 1024).toFixed(1);
+            nameEl.textContent = `${f.name} (${sizeMB} MB)`;
+            box.classList.add('has-file');
+            box.querySelector('.upload-icon').textContent = '✅';
+            box.querySelector('.upload-text').textContent = 'File selected';
+            updateDots();
+        }
+    }
+
+    function handleActivities(input) {
+        const box = document.getElementById('activitiesBox');
+        const textEl = document.getElementById('activitiesText');
+        if (input.files.length > 0) {
+            textEl.textContent = input.files[0].name;
+            box.classList.add('has-file');
+            box.querySelector('.upload-icon-small').textContent = '✅';
+        }
+    }
+
+    // --- Data source switching ---
+    let currentSource = 'upload';
+    function switchSource(source) {
+        currentSource = source;
+        document.getElementById('panel_upload').style.display = source === 'upload' ? 'block' : 'none';
+        document.getElementById('panel_intervals').style.display = source === 'intervals' ? 'block' : 'none';
+        document.getElementById('tab_upload').classList.toggle('active', source === 'upload');
+        document.getElementById('tab_intervals').classList.toggle('active', source === 'intervals');
+        document.getElementById('weightNote').style.display = source === 'upload' ? 'block' : 'none';
+        updateDots();
+    }
+
+    // --- Export help toggle ---
+    function toggleExport(btn) {
+        btn.classList.toggle('open');
+        document.getElementById('exportInstructions').classList.toggle('show');
+    }
+
+    // --- Race entries ---
+    function addRace() {
+        const list = document.getElementById('raceList');
+        const entry = document.createElement('div');
+        entry.className = 'race-entry';
+        entry.innerHTML = `
+            <div><input type="date" name="race_date"></div>
+            <div><select name="race_dist">
+                <option value="">—</option><option value="5">5K</option><option value="10">10K</option>
+                <option value="21.097">Half Marathon</option><option value="42.195">Marathon</option>
+                <option value="custom">Other</option>
+            </select></div>
+            <div><input type="text" name="race_time" placeholder="25:30"></div>
+            <button class="remove-btn" onclick="removeEntry(this, 'race')" title="Remove">×</button>`;
+        list.appendChild(entry);
+    }
+
+    function addUpcoming() {
+        const list = document.getElementById('upcomingList');
+        const entry = document.createElement('div');
+        entry.className = 'upcoming-entry';
+        entry.innerHTML = `
+            <div><input type="date" name="up_date"></div>
+            <div><select name="up_dist">
+                <option value="">—</option><option value="5">5K</option><option value="10">10K</option>
+                <option value="21.097">Half Marathon</option><option value="42.195">Marathon</option>
+                <option value="custom">Other</option>
+            </select></div>
+            <div><input type="text" name="up_name" placeholder="Parkrun"></div>
+            <div><select name="up_priority">
+                <option value="C">Fun</option><option value="B">Target</option><option value="A">Goal</option>
+            </select></div>
+            <button class="remove-btn" onclick="removeEntry(this, 'upcoming')" title="Remove">×</button>`;
+        list.appendChild(entry);
+    }
+
+    function removeEntry(btn, type) {
+        const list = type === 'race' ? document.getElementById('raceList') : document.getElementById('upcomingList');
+        if (list.children.length > 1) {
+            btn.parentElement.remove();
+        }
+    }
+
+    // --- Step dots ---
+    function updateDots() {
+        const name = document.getElementById('name').value.trim();
+        const email = document.getElementById('email').value.trim();
+        const weight = document.getElementById('weight').value;
+        const hasFile = document.getElementById('fileInput').files.length > 0;
+        const hasIntervals = document.getElementById('intervals_id').value.trim() && document.getElementById('intervals_key').value.trim();
+        const hasData = currentSource === 'intervals' ? hasIntervals : hasFile;
+        const hrDone = document.getElementById('maxhr_unknown').checked || document.getElementById('maxhr').value;
+
+        document.getElementById('dot1').className = 'step-dot ' + ((name && email && weight) ? 'done' : 'active');
+        document.getElementById('dot2').className = 'step-dot ' + (hrDone ? 'done' : ((name && email) ? 'active' : ''));
+        document.getElementById('dot3').className = 'step-dot ' + (hasData ? 'done' : (hrDone ? 'active' : ''));
+        document.getElementById('dot4').className = 'step-dot ' + ((name && email && weight) ? 'active' : '');
+    }
+
+    // Attach listeners for dot updates
+    ['name', 'email', 'weight', 'maxhr', 'lthr', 'intervals_id', 'intervals_key'].forEach(id => {
+        document.getElementById(id).addEventListener('input', updateDots);
+    });
+    ['maxhr_unknown', 'lthr_unknown'].forEach(id => {
+        document.getElementById(id).addEventListener('change', function() {
+            const input = document.getElementById(id.replace('_unknown', ''));
+            input.disabled = this.checked;
+            if (this.checked) input.value = '';
+            updateDots();
+        });
+    });
+
+    // --- Collect form data ---
+    function collectData() {
+        const races = [];
+        document.querySelectorAll('.race-entry').forEach(el => {
+            const d = el.querySelector('[name=race_date]').value;
+            const dist = el.querySelector('[name=race_dist]').value;
+            const t = el.querySelector('[name=race_time]').value;
+            if (d && dist && t) races.push({ date: d, distance_km: dist, time: t });
+        });
+
+        const upcoming = [];
+        document.querySelectorAll('.upcoming-entry').forEach(el => {
+            const d = el.querySelector('[name=up_date]').value;
+            const dist = el.querySelector('[name=up_dist]').value;
+            const n = el.querySelector('[name=up_name]').value;
+            const p = el.querySelector('[name=up_priority]').value;
+            if (d && dist) upcoming.push({ date: d, distance_km: dist, name: n || 'Race', priority: p });
+        });
+
+        return {
+            name: document.getElementById('name').value.trim(),
+            email: document.getElementById('email').value.trim(),
+            dob: document.getElementById('dob').value,
+            gender: document.getElementById('gender').value,
+            weight_kg: parseFloat(document.getElementById('weight').value) || null,
+            timezone: document.getElementById('timezone').value,
+            max_hr: document.getElementById('maxhr_unknown').checked ? 'estimate' : (parseInt(document.getElementById('maxhr').value) || 'estimate'),
+            lthr: document.getElementById('lthr_unknown').checked ? 'estimate' : (parseInt(document.getElementById('lthr').value) || 'estimate'),
+            data_source: currentSource,
+            intervals_id: document.getElementById('intervals_id').value.trim(),
+            intervals_key: document.getElementById('intervals_key').value.trim(),
+            race_results: races,
+            upcoming_races: upcoming,
+            has_file: document.getElementById('fileInput').files.length > 0,
+            file_name: document.getElementById('fileInput').files[0]?.name || null,
+            has_activities_csv: document.getElementById('activitiesInput').files.length > 0,
+            activities_file: document.getElementById('activitiesInput').files[0]?.name || null,
+            submitted_at: new Date().toISOString(),
+        };
+    }
+
+    // --- Submit ---
+    function submitForm() {
+        const data = collectData();
+
+        // Basic validation
+        if (!data.name) { alert('Please enter your name.'); return; }
+        if (!data.email) { alert('Please enter your email.'); return; }
+        if (!data.weight_kg) { alert('Please enter your weight.'); return; }
+        if (!data.dob) { alert('Please enter your date of birth.'); return; }
+        if (data.data_source === 'intervals' && (!data.intervals_id || !data.intervals_key)) {
+            alert('Please enter your intervals.icu athlete ID and API key.'); return;
+        }
+
+        const btn = document.getElementById('submitBtn');
+        btn.disabled = true;
+        btn.innerHTML = '⏳ Submitting...';
+
+        // Build mailto body as a formatted summary
+        const body = formatEmailBody(data);
+        const subject = `New athlete signup: ${data.name}`;
+
+        // For now: open mailto link with form data
+        // Replace __YOUR_EMAIL__ with your actual email
+        // In production, replace this with a Formspree/serverless endpoint
+        const mailtoLink = `mailto:__YOUR_EMAIL__?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+
+        // Also store in localStorage as backup
+        try {
+            const existing = JSON.parse(localStorage.getItem('signups') || '[]');
+            existing.push(data);
+            localStorage.setItem('signups', JSON.stringify(existing));
+        } catch(e) {}
+
+        // If there's a file, warn about large uploads
+        if (data.has_file && document.getElementById('fileInput').files[0]?.size > 100 * 1024 * 1024) {
+            alert('Your file is quite large. After submitting the form, please also upload via the Dropbox link in the export instructions.');
+        }
+
+        // Open the mailto
+        window.location.href = mailtoLink;
+
+        // Show success
+        setTimeout(() => {
+            document.getElementById('mainForm').style.display = 'none';
+            document.getElementById('successEmail').textContent = data.email;
+            document.getElementById('successMsg').classList.add('show');
+            window.scrollTo(0, 0);
+        }, 500);
+    }
+
+    function formatEmailBody(data) {
+        let body = `ATHLETE SIGNUP\n${'='.repeat(40)}\n\n`;
+        body += `Name: ${data.name}\n`;
+        body += `Email: ${data.email}\n`;
+        body += `DOB: ${data.dob}\n`;
+        body += `Gender: ${data.gender}\n`;
+        body += `Weight: ${data.weight_kg} kg\n`;
+        body += `Timezone: ${data.timezone}\n`;
+        body += `Max HR: ${data.max_hr}\n`;
+        body += `LTHR: ${data.lthr}\n`;
+        body += `\nData source: ${data.data_source}\n`;
+        if (data.data_source === 'intervals') {
+            body += `intervals.icu athlete ID: ${data.intervals_id}\n`;
+            body += `intervals.icu API key: ${data.intervals_key}\n`;
+        } else {
+            body += `File uploaded: ${data.has_file ? data.file_name : 'No (use Dropbox link)'}\n`;
+            if (data.has_activities_csv) body += `Strava activities.csv: ${data.activities_file}\n`;
+        }
+
+        if (data.race_results.length > 0) {
+            body += `\nRACE RESULTS\n${'-'.repeat(20)}\n`;
+            data.race_results.forEach(r => {
+                body += `  ${r.date}  ${r.distance_km}km  ${r.time}\n`;
+            });
+        }
+
+        if (data.upcoming_races.length > 0) {
+            body += `\nUPCOMING RACES\n${'-'.repeat(20)}\n`;
+            data.upcoming_races.forEach(r => {
+                body += `  ${r.date}  ${r.distance_km}km  "${r.name}"  Priority: ${r.priority}\n`;
+            });
+        }
+
+        body += `\n\nSubmitted: ${data.submitted_at}\n`;
+
+        // Also include as YAML snippet for easy copy-paste
+        body += `\n\n${'='.repeat(40)}\nATHLETE.YML SNIPPET\n${'='.repeat(40)}\n\n`;
+        body += `athlete:\n`;
+        body += `  name: "${data.name}"\n`;
+        body += `  athlete_id: "A___"  # assign next ID\n`;
+        body += `  mass_kg: ${data.weight_kg}\n`;
+        body += `  date_of_birth: "${data.dob}"\n`;
+        body += `  gender: "${data.gender}"\n`;
+        body += `  timezone: "${data.timezone}"\n`;
+        if (data.max_hr !== 'estimate') body += `  max_hr: ${data.max_hr}\n`;
+        if (data.lthr !== 'estimate') body += `  lthr: ${data.lthr}\n`;
+
+        if (data.upcoming_races.length > 0) {
+            body += `\nplanned_races:\n`;
+            data.upcoming_races.forEach(r => {
+                body += `  - name: "${r.name}"\n`;
+                body += `    date: "${r.date}"\n`;
+                body += `    distance_km: ${r.distance_km}\n`;
+                body += `    priority: ${r.priority}\n`;
+                body += `    surface: road\n`;
+            });
+        }
+
+        body += `\ndata:\n`;
+        if (data.data_source === 'intervals') {
+            body += `  source: "intervals"\n`;
+            body += `  intervals:\n`;
+            body += `    athlete_id: "${data.intervals_id}"\n`;
+            body += `    # API key: ${data.intervals_key}  # -> GitHub secret\n`;
+        } else {
+            body += `  source: "fit_folder"\n`;
+        }
+
+        return body;
+    }
+    </script>
+</body>
+</html>
