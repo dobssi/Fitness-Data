@@ -47,6 +47,8 @@ PIPELINE_FILES = [
     # Multi-athlete support
     "re_model_generic.json",
     "master_template.xlsx",
+    "strava_ingest.py",
+    "scan_races.py",
     # CI
     "ci/dropbox_sync.py",
     "ci/apply_run_metadata.py",

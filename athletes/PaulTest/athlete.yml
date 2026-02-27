@@ -1,0 +1,77 @@
+# =============================================================================
+# ATHLETE CONFIGURATION — PaulTest (GAP Mode Demo)
+# Paul's data running through GAP-only pipeline, no Stryd power
+# =============================================================================
+
+athlete:
+  name: "Paul Test"
+  athlete_id: "A000"
+  mass_kg: 76.0
+  date_of_birth: "1969-05-27"
+  gender: "male"
+  timezone: "Europe/Stockholm"
+
+  lthr: 178
+  max_hr: 192
+
+planned_races:
+  - name: "LFOTM 5K"
+    date: "2026-02-27"
+    distance_km: 5.0
+    priority: B
+    surface: road
+  - name: "Premiärhalvan"
+    date: "2026-04-25"
+    distance_km: 21.097
+    priority: A
+    surface: road
+
+power:
+  mode: "gap"
+
+  stryd:
+    peak_cp_watts: 370
+    eras: {}
+    mass_corrections: []
+    re_reference_era: "s4"
+
+  gap:
+    re_constant: 0.92
+
+data:
+  source: "strava_export"
+  intervals:
+    athlete_id: ""
+    api_key: ""
+  fit_folder:
+    path: "./fits"
+  strava_export:
+    zip_path: ""
+
+pipeline:
+  rf_window_duration_s: 2400
+  rf_trend_window_days: 42
+  rf_trend_min_periods: 5
+  ctl_time_constant: 42
+  atl_time_constant: 7
+  temp_baseline_c: 10.0
+  easy_rf:
+    hr_min: 120
+    hr_max: 160                   # LTHR * 0.90
+    np_cp_max: 0.85
+    vi_max: 1.10
+    dist_min_km: 4.0
+    ema_span: 15
+    z_window: 30
+  alerts:
+    alert1_rfl_drop: 0.02
+    alert1_ctl_rise: 3.0
+    alert1_window_days: 28
+    alert1b_rfl_gap: 0.02
+    alert1b_peak_window_days: 90
+    alert1b_race_window_days: 7
+    alert2_tsb_threshold: -15
+    alert2_count: 3
+    alert2_window: 5
+    alert3b_z_threshold: -2.0
+    alert5_gap_threshold: -0.03
