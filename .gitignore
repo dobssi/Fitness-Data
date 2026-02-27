@@ -42,6 +42,7 @@ activities.csv
 athletes/*/data/
 athletes/*/output/
 athletes/*/persec_cache/
+athletes/*/strava_data/
 
 # =============================================================================
 # Generated output
@@ -83,3 +84,4 @@ desktop.ini
 # =============================================================================
 archive/
 analysis/
+athletes/*/export_*.zip
