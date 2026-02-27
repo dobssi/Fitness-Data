@@ -4628,6 +4628,14 @@ def main() -> int:
         if not np.isfinite(rf_gap_raw):
             continue
         
+        # v51: Filter implausible runs (e.g. merged multisport activities like duathlons)
+        # Sub-3:00/km pace over 5km+ is physically impossible for running.
+        # These inflate RF_gap_Trend and corrupt RFL for the entire history.
+        _pace_chk = pd.to_numeric(row.get('avg_pace_min_per_km', np.nan), errors='coerce')
+        _dist_chk = pd.to_numeric(row.get('distance_km', np.nan), errors='coerce')
+        if np.isfinite(_pace_chk) and np.isfinite(_dist_chk) and _pace_chk < 3.0 and _dist_chk > 5.0:
+            continue
+        
         total_adj = pd.to_numeric(row.get('Total_Adj', 1.0), errors='coerce')
         era_adj = pd.to_numeric(row.get('Era_Adj', 1.0), errors='coerce')
         if not (np.isfinite(era_adj) and era_adj > 0):
