@@ -3416,6 +3416,12 @@ def main():
         print(f"Weather: skipping {wx_skipped_cached} runs with existing data, processing {int(_wx_needed_mask.sum())} runs")
 
     # Prepare per-run UTC-naive windows
+    # For runs > 60 min, use the second half of the run for weather averaging.
+    # Rationale: heat stress is cumulative — the later portion of a long run
+    # dominates physiological impact. A marathon starting at 18°C and finishing
+    # at 24°C should report ~22-23°C (second-half avg), not 20°C (full avg).
+    # For shorter runs (<= 60 min), temperature barely changes so use the full window.
+    WX_SECOND_HALF_THRESHOLD_S = 3600  # 60 minutes
     start_naive = []
     end_naive = []
     for _, r in df.iterrows():
@@ -3427,6 +3433,9 @@ def main():
         if getattr(st, "tzinfo", None) is not None:
             st = st.tz_convert("UTC").tz_localize(None)
         en = st + pd.Timedelta(seconds=float(el))
+        if el > WX_SECOND_HALF_THRESHOLD_S:
+            # Use second half: midpoint to end
+            st = st + pd.Timedelta(seconds=float(el) / 2.0)
         start_naive.append(st); end_naive.append(en)
 
     df["_wx_start_utc"] = start_naive
