@@ -3317,9 +3317,15 @@ def main():
         if _sb_count > 0 or getattr(args, "refresh_weather_solar", False):
             if _sb_count > 0:
                 print(f"Solar backfill: {_sb_count} runs have temp but no solar — clearing for refetch")
+                # Debug: check state before clearing
+                _pre_nan = int(df_out["avg_temp_c"].isna().sum())
+                print(f"  DEBUG pre-clear: avg_temp_c NaN count = {_pre_nan}, index type = {type(df_out.index).__name__}, mask sum = {int(_sb_mask.sum())}, mask len = {len(_sb_mask)}, df len = {len(df_out)}")
                 for c in WEATHER_COLS:
                     if c in df_out.columns:
                         df_out.loc[_sb_mask, c] = np.nan
+                # Debug: check state after clearing
+                _post_nan = int(df_out["avg_temp_c"].isna().sum())
+                print(f"  DEBUG post-clear: avg_temp_c NaN count = {_post_nan}")
 
             # Initialise weather cache
             _sb_wx_cache_dir = os.path.join(out_dir, "_weather_cache_openmeteo")
@@ -3344,6 +3350,7 @@ def main():
             _sb_wx_needed = df_out["avg_temp_c"].isna() | ~np.isfinite(pd.to_numeric(df_out["avg_temp_c"], errors="coerce").fillna(np.nan))
             _sb_n_fetch = int(_sb_wx_needed.sum())
             _sb_n_skip = len(df_out) - _sb_n_fetch
+            print(f"  DEBUG wx_needed: n_fetch={_sb_n_fetch}, n_skip={_sb_n_skip}, avg_temp_c dtype={df_out['avg_temp_c'].dtype}, sample values={df_out['avg_temp_c'].head(3).tolist()}")
             if _sb_n_skip > 0:
                 print(f"Weather: skipping {_sb_n_skip} runs with existing data, processing {_sb_n_fetch} runs")
 
