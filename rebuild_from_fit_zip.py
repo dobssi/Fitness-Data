@@ -3301,31 +3301,26 @@ def main():
                 print("WARNING: Strava join failed in append mode:", repr(e))
 
         # Write output (do NOT just copy the base master, as that would drop newly-created Strava columns)
-        # v52: Before writing, check if solar radiation backfill is needed.
-        # This runs weather fetch for rows that have temperature but no solar data,
-        # even when there are no new FIT files (UPDATE mode).
+        # v52: Check if solar radiation backfill is needed.
+        # Detect rows missing solar data — either rows that have temp but no solar
+        # (pre-solar cache), OR rows with no temp at all (e.g. from a previous failed backfill).
+        # Both cases need weather (re)fetch with solar-enabled API params.
         _solar_backfill_needed = False
         if "avg_solar_rad_wm2" not in df_out.columns:
             df_out["avg_solar_rad_wm2"] = np.nan
         for c in WEATHER_COLS:
             if c not in df_out.columns:
                 df_out[c] = np.nan
-        _sb_has_temp = df_out["avg_temp_c"].notna() & np.isfinite(pd.to_numeric(df_out["avg_temp_c"], errors="coerce").fillna(np.nan))
         _sb_no_solar = df_out["avg_solar_rad_wm2"].isna() | ~np.isfinite(pd.to_numeric(df_out["avg_solar_rad_wm2"], errors="coerce").fillna(np.nan))
-        _sb_mask = _sb_has_temp & _sb_no_solar
+        _sb_has_gps = pd.to_numeric(df_out.get("gps_lat_med"), errors="coerce").notna()
+        _sb_mask = _sb_no_solar & _sb_has_gps  # need solar + have GPS (can fetch weather)
         _sb_count = int(_sb_mask.sum())
         if _sb_count > 0 or getattr(args, "refresh_weather_solar", False):
             if _sb_count > 0:
-                print(f"Solar backfill: {_sb_count} runs have temp but no solar — clearing for refetch")
-                # Debug: check state before clearing
-                _pre_nan = int(df_out["avg_temp_c"].isna().sum())
-                print(f"  DEBUG pre-clear: avg_temp_c NaN count = {_pre_nan}, index type = {type(df_out.index).__name__}, mask sum = {int(_sb_mask.sum())}, mask len = {len(_sb_mask)}, df len = {len(df_out)}")
+                print(f"Solar backfill: {_sb_count} runs missing solar data — clearing weather for refetch")
                 for c in WEATHER_COLS:
                     if c in df_out.columns:
                         df_out.loc[_sb_mask, c] = np.nan
-                # Debug: check state after clearing
-                _post_nan = int(df_out["avg_temp_c"].isna().sum())
-                print(f"  DEBUG post-clear: avg_temp_c NaN count = {_post_nan}")
 
             # Initialise weather cache
             _sb_wx_cache_dir = os.path.join(out_dir, "_weather_cache_openmeteo")
@@ -3350,7 +3345,6 @@ def main():
             _sb_wx_needed = df_out["avg_temp_c"].isna() | ~np.isfinite(pd.to_numeric(df_out["avg_temp_c"], errors="coerce").fillna(np.nan))
             _sb_n_fetch = int(_sb_wx_needed.sum())
             _sb_n_skip = len(df_out) - _sb_n_fetch
-            print(f"  DEBUG wx_needed: n_fetch={_sb_n_fetch}, n_skip={_sb_n_skip}, avg_temp_c dtype={df_out['avg_temp_c'].dtype}, sample values={df_out['avg_temp_c'].head(3).tolist()}")
             if _sb_n_skip > 0:
                 print(f"Weather: skipping {_sb_n_skip} runs with existing data, processing {_sb_n_fetch} runs")
 
