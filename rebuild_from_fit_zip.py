@@ -3548,6 +3548,11 @@ def main():
                 wx_failed += 1
                 continue
             try:
+                # Diagnostic: print weather window for long runs on specific dates
+                if en is not None and st is not None and (en - st).total_seconds() > 3600:
+                    _run_date = df.at[i, "date"] if "date" in df.columns else None
+                    if _run_date is not None and "2018-04-22" in str(_run_date):
+                        print(f"  [WX DEBUG] VLM 2018: window {st} to {en} ({(en-st).total_seconds()/60:.0f} min)")
                 wx = compute_weather_averages_from_hourly(hourly, st, en)
             except Exception as e:
                 wx_failed += 1
