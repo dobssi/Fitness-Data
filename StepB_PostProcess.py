@@ -4242,6 +4242,20 @@ def main() -> int:
         temp_c = pd.to_numeric(row.get('avg_temp_c', np.nan), errors='coerce')
         humidity_pct = pd.to_numeric(row.get('avg_humidity_pct', np.nan), errors='coerce')
         temp_trend = pd.to_numeric(row.get('Temp_Trend', np.nan), errors='coerce')
+        
+        # v52: Solar radiation effective temperature boost
+        # Shade temperature underestimates thermal stress for runners in direct sun.
+        # Research: solar radiation adds ~5-7°C effective thermal stress at 800 W/m²
+        # (Liljegren WBGT, Lemke & Kjellstrom 2012, Vernon et al. 2021).
+        # We add a linear boost: +1°C per 200 W/m² of shortwave radiation.
+        # This is conservative: at 600 W/m² (bright midday) → +3°C; at 800 W/m² → +4°C.
+        # Night/dark/indoor runs (0 W/m²) get no boost.
+        solar_rad = pd.to_numeric(row.get('avg_solar_rad_wm2', np.nan), errors='coerce')
+        if np.isfinite(temp_c) and np.isfinite(solar_rad) and solar_rad > 0:
+            solar_temp_boost = solar_rad / 200.0
+            temp_c_effective = temp_c + solar_temp_boost
+        else:
+            temp_c_effective = temp_c
         era_id = str(row.get('calibration_era_id', '')).lower().strip()
         undulation_score = pd.to_numeric(row.get('undulation_score', np.nan), errors='coerce')
         elev_gain_m = pd.to_numeric(row.get('elev_gain_m', np.nan), errors='coerce')
@@ -4253,8 +4267,8 @@ def main() -> int:
         era_data = era_adjusters.get(era_id, {})
         era_median_re = era_data.get('re_median', None)
         
-        # Calculate full Temp_Adj (stored for diagnostics and Power Score)
-        temp_adj_full = calc_temp_adj(temp_c, humidity_pct, temp_trend)
+        # Calculate full Temp_Adj using effective temperature (includes solar boost)
+        temp_adj_full = calc_temp_adj(temp_c_effective, humidity_pct, temp_trend)
         
         # v45: Scale heat portion of Temp_Adj for RF based on RF window duration
         # RF is measured early in the run, so heat hasn't fully accumulated yet
@@ -4263,8 +4277,8 @@ def main() -> int:
         heat_ref_mins = RF_CONSTANTS['heat_reference_mins']
         rf_heat_multiplier = rf_window_mid_mins / heat_ref_mins
         cold_thr = RF_CONSTANTS['temp_cold_threshold']
-        if temp_c is not None and np.isfinite(temp_c) and temp_c < cold_thr:
-            cold_part_rf = max(0, (cold_thr - temp_c)) * RF_CONSTANTS['temp_cold_factor']
+        if temp_c_effective is not None and np.isfinite(temp_c_effective) and temp_c_effective < cold_thr:
+            cold_part_rf = max(0, (cold_thr - temp_c_effective)) * RF_CONSTANTS['temp_cold_factor']
             heat_part_rf = 0.0
         else:
             cold_part_rf = 0.0

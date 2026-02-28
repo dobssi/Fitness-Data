@@ -422,11 +422,17 @@ def _wx_db_init(db_path: str):
                 relative_humidity_2m REAL,
                 wind_speed_10m REAL,
                 wind_direction_10m REAL,
+                shortwave_radiation REAL,
                 PRIMARY KEY (lat_r, lon_r, time)
             )
             """
         )
         con.execute("CREATE INDEX IF NOT EXISTS ix_wx_time ON wx_hourly(time)")
+        # Migration: add shortwave_radiation column to existing DBs
+        try:
+            con.execute("ALTER TABLE wx_hourly ADD COLUMN shortwave_radiation REAL")
+        except sqlite3.OperationalError:
+            pass  # column already exists
         con.commit()
     finally:
         con.close()
@@ -445,7 +451,7 @@ def _wx_db_get_hourly(db_path: str, lat_r: float, lon_r: float, t_start: pd.Time
         a = (pd.Timestamp(t_start) - pd.Timedelta(hours=1)).strftime("%Y-%m-%dT%H:%M")
         b = (pd.Timestamp(t_end) + pd.Timedelta(hours=1)).strftime("%Y-%m-%dT%H:%M")
         q = """
-            SELECT time, temperature_2m, relative_humidity_2m, wind_speed_10m, wind_direction_10m
+            SELECT time, temperature_2m, relative_humidity_2m, wind_speed_10m, wind_direction_10m, shortwave_radiation
             FROM wx_hourly
             WHERE lat_r=? AND lon_r=? AND time>=? AND time<=?
             ORDER BY time
@@ -453,7 +459,7 @@ def _wx_db_get_hourly(db_path: str, lat_r: float, lon_r: float, t_start: pd.Time
         rows = con.execute(q, (float(lat_r), float(lon_r), a, b)).fetchall()
         if not rows:
             return pd.DataFrame()
-        dfh = pd.DataFrame(rows, columns=["time","temperature_2m","relative_humidity_2m","wind_speed_10m","wind_direction_10m"])
+        dfh = pd.DataFrame(rows, columns=["time","temperature_2m","relative_humidity_2m","wind_speed_10m","wind_direction_10m","shortwave_radiation"])
         dfh["time"] = pd.to_datetime(dfh["time"], errors="coerce")
         dfh = dfh.dropna(subset=["time"]).sort_values("time").drop_duplicates(subset=["time"], keep="last").reset_index(drop=True)
         return dfh
@@ -480,19 +486,21 @@ def _wx_db_upsert_hourly(db_path: str, lat_r: float, lon_r: float, dfh: pd.DataF
             pd.to_numeric(dfh2["relative_humidity_2m"], errors="coerce").tolist(),
             pd.to_numeric(dfh2["wind_speed_10m"], errors="coerce").tolist(),
             pd.to_numeric(dfh2["wind_direction_10m"], errors="coerce").tolist(),
+            pd.to_numeric(dfh2.get("shortwave_radiation", pd.Series([np.nan]*len(dfh2))), errors="coerce").tolist(),
         )
     )
     con = sqlite3.connect(db_path)
     try:
         con.executemany(
             """
-            INSERT INTO wx_hourly(lat_r, lon_r, time, temperature_2m, relative_humidity_2m, wind_speed_10m, wind_direction_10m)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO wx_hourly(lat_r, lon_r, time, temperature_2m, relative_humidity_2m, wind_speed_10m, wind_direction_10m, shortwave_radiation)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(lat_r, lon_r, time) DO UPDATE SET
                 temperature_2m=excluded.temperature_2m,
                 relative_humidity_2m=excluded.relative_humidity_2m,
                 wind_speed_10m=excluded.wind_speed_10m,
-                wind_direction_10m=excluded.wind_direction_10m
+                wind_direction_10m=excluded.wind_direction_10m,
+                shortwave_radiation=excluded.shortwave_radiation
             """,
             recs,
         )
@@ -537,7 +545,7 @@ FORWARD_STEP_S = 5
 OPEN_METEO_ARCHIVE = "https://archive-api.open-meteo.com/v1/archive"
 OPEN_METEO_FORECAST = "https://api.open-meteo.com/v1/forecast"
 
-WEATHER_COLS = ["avg_temp_c", "avg_humidity_pct", "avg_wind_ms", "avg_wind_dir_deg"]
+WEATHER_COLS = ["avg_temp_c", "avg_humidity_pct", "avg_wind_ms", "avg_wind_dir_deg", "avg_solar_rad_wm2"]
 
 # Round GPS coordinates to 1 decimal place (~10 km) for weather grouping.
 # This clusters nearby runs into the same location, reducing API calls from
@@ -680,7 +688,7 @@ def _wx_cache_key(lat: float, lon: float, start_date: str | None, end_date: str 
         f"{float(lon):.4f}",
         (str(start_date)[:10] if start_date else ""),
         (str(end_date)[:10] if end_date else ""),
-        "temperature_2m,relative_humidity_2m,wind_speed_10m,wind_direction_10m",
+        "temperature_2m,relative_humidity_2m,wind_speed_10m,wind_direction_10m,shortwave_radiation",
     ]
     if extra_params:
         for k in sorted(extra_params.keys()):
@@ -722,7 +730,7 @@ def _fetch_open_meteo(
     params = {
         "latitude": float(lat),
         "longitude": float(lon),
-        "hourly": "temperature_2m,relative_humidity_2m,wind_speed_10m,wind_direction_10m",
+        "hourly": "temperature_2m,relative_humidity_2m,wind_speed_10m,wind_direction_10m,shortwave_radiation",
         "timezone": "UTC",
         "wind_speed_unit": "ms",
         "temperature_unit": "celsius",
@@ -818,16 +826,17 @@ def _fetch_open_meteo(
 def _hourly_to_df(hourly: dict) -> pd.DataFrame:
     """Convert Open-Meteo hourly dict to DataFrame (UTC-naive timestamps)."""
     if not hourly or not hourly.get("time"):
-        return pd.DataFrame(columns=["time","temperature_2m","relative_humidity_2m","wind_speed_10m","wind_direction_10m"])
+        return pd.DataFrame(columns=["time","temperature_2m","relative_humidity_2m","wind_speed_10m","wind_direction_10m","shortwave_radiation"])
     dfh = pd.DataFrame({
         "time": hourly.get("time", []),
         "temperature_2m": hourly.get("temperature_2m", []),
         "relative_humidity_2m": hourly.get("relative_humidity_2m", []),
         "wind_speed_10m": hourly.get("wind_speed_10m", []),
         "wind_direction_10m": hourly.get("wind_direction_10m", []),
+        "shortwave_radiation": hourly.get("shortwave_radiation", [None]*len(hourly.get("time", []))),
     })
     dfh["time"] = pd.to_datetime(dfh["time"], utc=True).dt.tz_convert("UTC").dt.tz_localize(None)
-    for c in ["temperature_2m","relative_humidity_2m","wind_speed_10m","wind_direction_10m"]:
+    for c in ["temperature_2m","relative_humidity_2m","wind_speed_10m","wind_direction_10m","shortwave_radiation"]:
         dfh[c] = pd.to_numeric(dfh[c], errors="coerce")
     dfh = dfh.dropna(subset=["time"]).sort_values("time")
     dfh = dfh.drop_duplicates(subset=["time"], keep="last").reset_index(drop=True)
@@ -837,7 +846,7 @@ def _hourly_to_df(hourly: dict) -> pd.DataFrame:
 def _df_to_hourly(dfh: pd.DataFrame) -> dict:
     """Convert hourly DataFrame back to dict (ISO timestamps)."""
     if dfh is None or dfh.empty:
-        return {"time": [], "temperature_2m": [], "relative_humidity_2m": [], "wind_speed_10m": [], "wind_direction_10m": []}
+        return {"time": [], "temperature_2m": [], "relative_humidity_2m": [], "wind_speed_10m": [], "wind_direction_10m": [], "shortwave_radiation": []}
     t = pd.to_datetime(dfh["time"]).dt.strftime("%Y-%m-%dT%H:%M").tolist()
     return {
         "time": t,
@@ -845,6 +854,7 @@ def _df_to_hourly(dfh: pd.DataFrame) -> dict:
         "relative_humidity_2m": dfh["relative_humidity_2m"].tolist(),
         "wind_speed_10m": dfh["wind_speed_10m"].tolist(),
         "wind_direction_10m": dfh["wind_direction_10m"].tolist(),
+        "shortwave_radiation": dfh["shortwave_radiation"].tolist() if "shortwave_radiation" in dfh.columns else [None]*len(dfh),
     }
 
 
@@ -890,6 +900,8 @@ def compute_weather_averages_from_hourly(hourly: dict, start_utc: pd.Timestamp, 
     RH = np.asarray(hourly.get("relative_humidity_2m") or [], float)
     W = np.asarray(hourly.get("wind_speed_10m") or [], float)
     D = np.asarray(hourly.get("wind_direction_10m") or [], float)
+    SR_raw = hourly.get("shortwave_radiation") or []
+    SR = np.asarray(SR_raw if SR_raw else [np.nan]*len(T), float)
 
     # overlap select (pad 1h)
     startp = pd.Timestamp(start_utc)
@@ -899,11 +911,12 @@ def compute_weather_averages_from_hourly(hourly: dict, start_utc: pd.Timestamp, 
         return {c: np.nan for c in WEATHER_COLS}
 
     tt2 = tt[sel]
-    T2, RH2, W2, D2 = T[sel], RH[sel], W[sel], D[sel]
+    T2, RH2, W2, D2, SR2 = T[sel], RH[sel], W[sel], D[sel], SR[sel]
 
     avg_t, _ = _time_weighted_mean(T2, tt2, startp, endp)
     avg_rh, _ = _time_weighted_mean(RH2, tt2, startp, endp)
     avg_w, _ = _time_weighted_mean(W2, tt2, startp, endp)
+    avg_sr, _ = _time_weighted_mean(SR2, tt2, startp, endp)
 
     weights = _segment_weights(tt2, startp, endp)
     avg_dir = _circular_mean_deg(D2, weights) if weights.sum() > 0 else np.nan
@@ -913,6 +926,7 @@ def compute_weather_averages_from_hourly(hourly: dict, start_utc: pd.Timestamp, 
         "avg_humidity_pct": float(avg_rh) if np.isfinite(avg_rh) else np.nan,
         "avg_wind_ms": float(avg_w) if np.isfinite(avg_w) else np.nan,
         "avg_wind_dir_deg": float(avg_dir) if np.isfinite(avg_dir) else np.nan,
+        "avg_solar_rad_wm2": float(avg_sr) if np.isfinite(avg_sr) else np.nan,
     }
 
 
@@ -3135,6 +3149,7 @@ def main():
     ap.add_argument("--cache-force", action="store_true", help="Always rewrite cache")
     ap.add_argument("--clear-weather-cache", action="store_true", help="Delete weather SQLite cache before processing (forces re-fetch)")
     ap.add_argument("--refresh-weather-long", action="store_true", help="Clear avg_temp_c for runs > 60 min so weather is refetched with second-half window")
+    ap.add_argument("--refresh-weather-solar", action="store_true", help="Clear avg_solar_rad_wm2 for all runs missing solar data, forcing refetch with new API params")
     ap.add_argument("--append-master-in", default="", help="Existing master .xlsx to append only new runs (skip full rebuild).")
     ap.add_argument("--weather-cache-db", default="", help="Optional SQLite cache for Open-Meteo hourly data (recommended). If blank, uses <out_dir>/_weather_cache_openmeteo/openmeteo_cache.sqlite")
     ap.add_argument("--override-file", default="activity_overrides.xlsx", help="Activity overrides Excel file (indoor runs identified by temp_override column)")
@@ -3386,6 +3401,18 @@ def main():
     try:
         _wx_db_init(wx_db_path)
         print(f"Weather SQLite cache: {wx_db_path}")
+        # If refreshing solar data, clear SQLite rows that lack shortwave_radiation
+        # so they'll be re-fetched from Open-Meteo with the new params
+        if getattr(args, "refresh_weather_solar", False) and wx_db_path:
+            try:
+                _con = sqlite3.connect(wx_db_path)
+                _n_del = _con.execute("DELETE FROM wx_hourly WHERE shortwave_radiation IS NULL").rowcount
+                _con.commit()
+                _con.close()
+                if _n_del > 0:
+                    print(f"Weather SQLite: cleared {_n_del} rows missing solar data")
+            except Exception as e:
+                print(f"Weather SQLite solar cleanup failed: {e}")
     except Exception as e:
         wx_db_path = ""
         print(f"Weather SQLite cache disabled (init failed): {e}")
@@ -3421,6 +3448,21 @@ def main():
                 if c in df.columns:
                     df.loc[_long_mask, c] = np.nan
             print(f"Weather: cleared {n_cleared} long runs (>60 min) for refetch with second-half window")
+
+    # --refresh-weather-solar: clear weather for runs missing solar data so they get
+    # refetched with the new API params that include shortwave_radiation.
+    if getattr(args, "refresh_weather_solar", False):
+        if "avg_solar_rad_wm2" not in df.columns:
+            df["avg_solar_rad_wm2"] = np.nan
+        _has_temp = df["avg_temp_c"].notna()
+        _no_solar = df["avg_solar_rad_wm2"].isna() | ~np.isfinite(pd.to_numeric(df["avg_solar_rad_wm2"], errors="coerce").fillna(np.nan))
+        _solar_needed = _has_temp & _no_solar
+        n_solar = int(_solar_needed.sum())
+        if n_solar > 0:
+            for c in WEATHER_COLS:
+                if c in df.columns:
+                    df.loc[_solar_needed, c] = np.nan
+            print(f"Weather: cleared {n_solar} runs missing solar data for refetch")
 
     # Skip rows that already have valid weather (UPDATE optimisation)
     _wx_already = df["avg_temp_c"].notna() & np.isfinite(pd.to_numeric(df["avg_temp_c"], errors="coerce").fillna(np.nan))
@@ -3548,11 +3590,6 @@ def main():
                 wx_failed += 1
                 continue
             try:
-                # Diagnostic: print weather window for long runs on specific dates
-                if en is not None and st is not None and (en - st).total_seconds() > 3600:
-                    _run_date = df.at[i, "date"] if "date" in df.columns else None
-                    if _run_date is not None and "2018-04-22" in str(_run_date):
-                        print(f"  [WX DEBUG] VLM 2018: window {st} to {en} ({(en-st).total_seconds()/60:.0f} min)")
                 wx = compute_weather_averages_from_hourly(hourly, st, en)
             except Exception as e:
                 wx_failed += 1
@@ -3596,7 +3633,7 @@ def main():
     # Round weather outputs for readability (agreed: wind speed 1 dp, others 0 dp)
     if "avg_wind_ms" in df.columns:
         df["avg_wind_ms"] = pd.to_numeric(df["avg_wind_ms"], errors="coerce").round(1)
-    for c in ["avg_temp_c", "avg_humidity_pct", "avg_wind_dir_deg"]:
+    for c in ["avg_temp_c", "avg_humidity_pct", "avg_wind_dir_deg", "avg_solar_rad_wm2"]:
         if c in df.columns:
             df[c] = pd.to_numeric(df[c], errors="coerce").round(0)
     if first_wx_error is not None:

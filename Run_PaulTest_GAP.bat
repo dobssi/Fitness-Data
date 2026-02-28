@@ -76,7 +76,7 @@ python -u rebuild_from_fit_zip.py ^
     --override-file "%ATHLETE_DIR%\activity_overrides.xlsx" ^
     --tz "Europe/Stockholm" ^
     --weight 76 ^
-    --refresh-weather-long
+    --refresh-weather-solar
 if errorlevel 1 (
     echo FAILED: Rebuild
     pause
