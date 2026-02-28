@@ -4918,13 +4918,17 @@ def main() -> int:
                   f"HM={format_time(pred_hm)}, Mar={format_time(pred_mara)}")
             
             # v51: Populate predictions on ALL runs (not just last row)
-            # CP and predictions are simple functions of RFL_Trend with fixed constants
-            rfl_valid = dfm['RFL_Trend'].notna() & (dfm['RFL_Trend'] > 0)
-            dfm.loc[rfl_valid, 'CP'] = (dfm.loc[rfl_valid, 'RFL_Trend'] * PEAK_CP_WATTS).round(0)
+            # v52: Use PREVIOUS row's RFL_Trend for predictions.  The prediction answers
+            # "what could you race today?" which depends on fitness coming INTO this run,
+            # not fitness including this run's own result.  This prevents race-day
+            # conditions (temperature, PS floor) from contaminating the unadjusted prediction.
+            rfl_prev = dfm['RFL_Trend'].shift(1)
+            rfl_valid = rfl_prev.notna() & (rfl_prev > 0)
+            dfm.loc[rfl_valid, 'CP'] = (rfl_prev[rfl_valid] * PEAK_CP_WATTS).round(0)
             
             for dist_key, col_name in [('5k', 'pred_5k_s'), ('10k', 'pred_10k_s'), 
                                         ('hm', 'pred_hm_s'), ('marathon', 'pred_marathon_s')]:
-                dfm.loc[rfl_valid, col_name] = dfm.loc[rfl_valid, 'RFL_Trend'].apply(
+                dfm.loc[rfl_valid, col_name] = rfl_prev[rfl_valid].apply(
                     lambda rfl: round(calc_race_prediction(rfl, dist_key, re_p90, PEAK_CP_WATTS, mass_kg), 0)
                 )
             
@@ -4964,27 +4968,29 @@ def main() -> int:
             for mode, rfl_col in [('gap', 'RFL_gap_Trend'), ('sim', 'RFL_sim_Trend')]:
                 if rfl_col not in dfm.columns:
                     continue
-                rfl_mode_valid = dfm[rfl_col].notna() & (dfm[rfl_col] > 0)
+                # v52: Use previous row's RFL for predictions (same rationale as legacy mode)
+                rfl_prev_mode = dfm[rfl_col].shift(1)
+                rfl_mode_valid = rfl_prev_mode.notna() & (rfl_prev_mode > 0)
                 
                 if mode == 'gap':
                     # GAP: predictions from peak_speed (RE-independent)
                     # time = distance / (RFL × peak_speed × factor)
-                    dfm.loc[rfl_mode_valid, f'CP_{mode}'] = (dfm.loc[rfl_mode_valid, rfl_col] * gap_peak_cp).round(0)
+                    dfm.loc[rfl_mode_valid, f'CP_{mode}'] = (rfl_prev_mode[rfl_mode_valid] * gap_peak_cp).round(0)
                     for dist_key, col_suffix in [('5k', 'pred_5k_s'), ('10k', 'pred_10k_s'),
                                                   ('hm', 'pred_hm_s'), ('marathon', 'pred_marathon_s')]:
                         col_name = f'{col_suffix}_{mode}'
                         factor = RACE_FACTORS_BS[dist_key]
                         dist_m = RACE_DISTANCES_BS[dist_key]
-                        dfm.loc[rfl_mode_valid, col_name] = dfm.loc[rfl_mode_valid, rfl_col].apply(
+                        dfm.loc[rfl_mode_valid, col_name] = rfl_prev_mode[rfl_mode_valid].apply(
                             lambda rfl, f=factor, d=dist_m: round(d / (rfl * gap_peak_speed * f), 0)
                         )
                 else:
                     # SIM: uses Stryd PEAK_CP and RE_p90 (same hardware basis)
-                    dfm.loc[rfl_mode_valid, f'CP_{mode}'] = (dfm.loc[rfl_mode_valid, rfl_col] * PEAK_CP_WATTS).round(0)
+                    dfm.loc[rfl_mode_valid, f'CP_{mode}'] = (rfl_prev_mode[rfl_mode_valid] * PEAK_CP_WATTS).round(0)
                     for dist_key, col_suffix in [('5k', 'pred_5k_s'), ('10k', 'pred_10k_s'),
                                                   ('hm', 'pred_hm_s'), ('marathon', 'pred_marathon_s')]:
                         col_name = f'{col_suffix}_{mode}'
-                        dfm.loc[rfl_mode_valid, col_name] = dfm.loc[rfl_mode_valid, rfl_col].apply(
+                        dfm.loc[rfl_mode_valid, col_name] = rfl_prev_mode[rfl_mode_valid].apply(
                             lambda rfl: round(calc_race_prediction(rfl, dist_key, re_p90, PEAK_CP_WATTS, mass_kg), 0)
                         )
                 
