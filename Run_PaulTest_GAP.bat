@@ -75,7 +75,8 @@ python -u rebuild_from_fit_zip.py ^
     --persec-cache-dir "%ATHLETE_DIR%\persec_cache" ^
     --override-file "%ATHLETE_DIR%\activity_overrides.xlsx" ^
     --tz "Europe/Stockholm" ^
-    --weight 76
+    --weight 76 ^
+    --refresh-weather-long
 if errorlevel 1 (
     echo FAILED: Rebuild
     pause

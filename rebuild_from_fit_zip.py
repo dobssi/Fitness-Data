@@ -3134,6 +3134,7 @@ def main():
                     help="Disable rewrite-if-newer check")
     ap.add_argument("--cache-force", action="store_true", help="Always rewrite cache")
     ap.add_argument("--clear-weather-cache", action="store_true", help="Delete weather SQLite cache before processing (forces re-fetch)")
+    ap.add_argument("--refresh-weather-long", action="store_true", help="Clear avg_temp_c for runs > 60 min so weather is refetched with second-half window")
     ap.add_argument("--append-master-in", default="", help="Existing master .xlsx to append only new runs (skip full rebuild).")
     ap.add_argument("--weather-cache-db", default="", help="Optional SQLite cache for Open-Meteo hourly data (recommended). If blank, uses <out_dir>/_weather_cache_openmeteo/openmeteo_cache.sqlite")
     ap.add_argument("--override-file", default="activity_overrides.xlsx", help="Activity overrides Excel file (indoor runs identified by temp_override column)")
@@ -3407,6 +3408,19 @@ def main():
     wx_skipped_no_gps = 0
     wx_failed = 0
     first_wx_error = None
+
+    # --refresh-weather-long: clear weather for runs > 60 min so they get refetched
+    # with the second-half averaging window (midpoint-to-end instead of start-to-end).
+    if getattr(args, "refresh_weather_long", False):
+        _elapsed = pd.to_numeric(df.get("elapsed_time_s"), errors="coerce")
+        _long_mask = _elapsed > 3600
+        _had_wx = df["avg_temp_c"].notna() & _long_mask
+        n_cleared = int(_had_wx.sum())
+        if n_cleared > 0:
+            for c in WEATHER_COLS:
+                if c in df.columns:
+                    df.loc[_long_mask, c] = np.nan
+            print(f"Weather: cleared {n_cleared} long runs (>60 min) for refetch with second-half window")
 
     # Skip rows that already have valid weather (UPDATE optimisation)
     _wx_already = df["avg_temp_c"].notna() & np.isfinite(pd.to_numeric(df["avg_temp_c"], errors="coerce").fillna(np.nan))
