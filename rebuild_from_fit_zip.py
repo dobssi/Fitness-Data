@@ -3312,7 +3312,7 @@ def main():
             if c not in df_out.columns:
                 df_out[c] = np.nan
         _sb_no_solar = df_out["avg_solar_rad_wm2"].isna() | ~np.isfinite(pd.to_numeric(df_out["avg_solar_rad_wm2"], errors="coerce").fillna(np.nan))
-        _sb_has_gps = pd.to_numeric(df_out.get("gps_lat_med"), errors="coerce").notna()
+        _sb_has_gps = pd.to_numeric(df_out["gps_lat_med"], errors="coerce").notna() if "gps_lat_med" in df_out.columns else pd.Series([False]*len(df_out), index=df_out.index)
         _sb_mask = _sb_no_solar & _sb_has_gps  # need solar + have GPS (can fetch weather)
         _sb_count = int(_sb_mask.sum())
         if _sb_count > 0 or getattr(args, "refresh_weather_solar", False):
