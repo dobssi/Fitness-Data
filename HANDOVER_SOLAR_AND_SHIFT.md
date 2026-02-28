@@ -111,16 +111,18 @@ Paul's main pipeline has a manual temp override of 25°C for VLM. The solar boos
 - All 3,076 runs have solar data
 - Predictions and condition adjustments look reasonable
 
-### Main pipeline
+### Main pipeline (and all athletes)
 - Deploy updated `rebuild_from_fit_zip.py` and `StepB_PostProcess.py`
-- First run: use `--refresh-weather-solar` flag to populate solar data (will re-fetch ALL weather — budget ~60 min for the weather pass, or run as part of a full rebuild)
-- Remove `--refresh-weather-solar` after first run
-- Consider removing VLM 25°C temp override once solar-boosted Temp_Adj is validated
+- **No flag needed**: the pipeline automatically detects rows with temperature but missing solar radiation, clears their weather, and re-fetches with the new API params. The SQLite cache also auto-cleans rows without `shortwave_radiation` on startup.
+- First run for each athlete will be slower (~60 min weather pass to backfill solar for all existing rows). Subsequent runs only fetch weather for new activities.
+- The `--refresh-weather-solar` flag still exists as a manual override but is not required for normal operation.
+- Consider removing VLM 25°C temp override once solar-boosted Temp_Adj is validated on main pipeline
 - The JSON cache key has changed, so old cache files are orphaned — can delete `_weather_cache_openmeteo/openmeteo_*.json` to reclaim space if desired
 
 ### CI/GitHub Actions
-- pipeline.yml: add `--refresh-weather-solar` for ONE run, then remove
+- No pipeline.yml changes needed — solar backfill is automatic
 - The SQLite migration (`ALTER TABLE ADD COLUMN`) runs automatically on existing DBs
+- First CI run after deploy will take longer (weather refetch); subsequent runs normal speed
 
 ---
 

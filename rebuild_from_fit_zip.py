@@ -3301,6 +3301,161 @@ def main():
                 print("WARNING: Strava join failed in append mode:", repr(e))
 
         # Write output (do NOT just copy the base master, as that would drop newly-created Strava columns)
+        # v52: Before writing, check if solar radiation backfill is needed.
+        # This runs weather fetch for rows that have temperature but no solar data,
+        # even when there are no new FIT files (UPDATE mode).
+        _solar_backfill_needed = False
+        if "avg_solar_rad_wm2" not in df_out.columns:
+            df_out["avg_solar_rad_wm2"] = np.nan
+        for c in WEATHER_COLS:
+            if c not in df_out.columns:
+                df_out[c] = np.nan
+        _sb_has_temp = df_out["avg_temp_c"].notna() & np.isfinite(pd.to_numeric(df_out["avg_temp_c"], errors="coerce").fillna(np.nan))
+        _sb_no_solar = df_out["avg_solar_rad_wm2"].isna() | ~np.isfinite(pd.to_numeric(df_out["avg_solar_rad_wm2"], errors="coerce").fillna(np.nan))
+        _sb_mask = _sb_has_temp & _sb_no_solar
+        _sb_count = int(_sb_mask.sum())
+        if _sb_count > 0 or getattr(args, "refresh_weather_solar", False):
+            if _sb_count > 0:
+                print(f"Solar backfill: {_sb_count} runs have temp but no solar — clearing for refetch")
+                for c in WEATHER_COLS:
+                    if c in df_out.columns:
+                        df_out.loc[_sb_mask, c] = np.nan
+
+            # Initialise weather cache
+            _sb_wx_cache_dir = os.path.join(out_dir, "_weather_cache_openmeteo")
+            _sb_wx_db_path = args.weather_cache_db.strip() if hasattr(args, "weather_cache_db") and args.weather_cache_db else os.path.join(_sb_wx_cache_dir, "openmeteo_cache.sqlite")
+            try:
+                _wx_db_init(_sb_wx_db_path)
+                # Auto-clean SQLite rows missing solar
+                try:
+                    _con = sqlite3.connect(_sb_wx_db_path)
+                    _n_del = _con.execute("DELETE FROM wx_hourly WHERE shortwave_radiation IS NULL").rowcount
+                    _con.commit()
+                    _con.close()
+                    if _n_del > 0:
+                        print(f"Weather SQLite: cleared {_n_del} rows missing solar data")
+                except Exception as e:
+                    print(f"Weather SQLite solar cleanup failed: {e}")
+            except Exception as e:
+                _sb_wx_db_path = ""
+                print(f"Weather SQLite cache disabled (init failed): {e}")
+
+            # Identify rows needing weather
+            _sb_wx_needed = df_out["avg_temp_c"].isna() | ~np.isfinite(pd.to_numeric(df_out["avg_temp_c"], errors="coerce").fillna(np.nan))
+            _sb_n_fetch = int(_sb_wx_needed.sum())
+            _sb_n_skip = len(df_out) - _sb_n_fetch
+            if _sb_n_skip > 0:
+                print(f"Weather: skipping {_sb_n_skip} runs with existing data, processing {_sb_n_fetch} runs")
+
+            if _sb_n_fetch > 0:
+                WX_SECOND_HALF_THRESHOLD_S = 3600
+                _sb_starts = []
+                _sb_ends = []
+                for _, r in df_out.iterrows():
+                    st = r.get("start_time_utc", None)
+                    el = pd.to_numeric(r.get("elapsed_time_s"), errors="coerce")
+                    if st is None or (isinstance(st, float) and not np.isfinite(st)) or not (np.isfinite(el) and el > 0):
+                        _sb_starts.append(None); _sb_ends.append(None); continue
+                    st = pd.Timestamp(st)
+                    if getattr(st, "tzinfo", None) is not None:
+                        st = st.tz_convert("UTC").tz_localize(None)
+                    en = st + pd.Timedelta(seconds=float(el))
+                    if el > WX_SECOND_HALF_THRESHOLD_S:
+                        st = st + pd.Timedelta(seconds=float(el) / 2.0)
+                    _sb_starts.append(st); _sb_ends.append(en)
+                df_out["_wx_start_utc"] = _sb_starts
+                df_out["_wx_end_utc"] = _sb_ends
+
+                # Group by rounded location + year
+                WX_GPS_ROUND_DP_SB = WX_GPS_ROUND_DP
+                _sb_loc_keys = []
+                for i, r in df_out.iterrows():
+                    lat = pd.to_numeric(r.get("gps_lat_med"), errors="coerce")
+                    lon = pd.to_numeric(r.get("gps_lon_med"), errors="coerce")
+                    st = df_out.at[i, "_wx_start_utc"] if "_wx_start_utc" in df_out.columns else None
+                    if not (np.isfinite(lat) and np.isfinite(lon)) or st is None:
+                        _sb_loc_keys.append(None)
+                    else:
+                        yr = pd.Timestamp(st).year
+                        _sb_loc_keys.append((float(np.round(lat, WX_GPS_ROUND_DP_SB)), float(np.round(lon, WX_GPS_ROUND_DP_SB)), yr))
+                df_out["_wx_loc"] = _sb_loc_keys
+
+                _sb_groups = {}
+                for i, k in enumerate(df_out["_wx_loc"].tolist()):
+                    if k is None:
+                        continue
+                    if not _sb_wx_needed.iloc[i]:
+                        continue
+                    _sb_groups.setdefault(k, []).append(i)
+
+                _sb_filled = 0
+                _sb_failed = 0
+                _sb_total_groups = len(_sb_groups)
+                _sb_done = 0
+
+                for (lat_r, lon_r, year), idxs in _sb_groups.items():
+                    _sb_done += 1
+                    starts = [df_out.at[i, "_wx_start_utc"] for i in idxs if df_out.at[i, "_wx_start_utc"] is not None]
+                    ends = [df_out.at[i, "_wx_end_utc"] for i in idxs if df_out.at[i, "_wx_end_utc"] is not None]
+                    if not starts or not ends:
+                        continue
+                    date_min = (min(starts).normalize() - pd.Timedelta(days=1)).date().isoformat()
+                    date_max = (max(ends).normalize() + pd.Timedelta(days=1)).date().isoformat()
+                    print(f"Weather group {_sb_done}/{_sb_total_groups}: lat={lat_r:.1f}, lon={lon_r:.1f}, {date_min}..{date_max} ({len(idxs)} runs)")
+
+                    try:
+                        today = pd.Timestamp.now('UTC').date()
+                        date_max_archive = pd.to_datetime(_clamp_end_to_today(date_max)).date()
+                        dfh_all = pd.DataFrame()
+                        for s_iso, e_iso in _split_date_ranges(date_min, date_max_archive.isoformat(), max_days=366):
+                            data = fetch_open_meteo_hourly_archive(lat_r, lon_r, s_iso, e_iso, _sb_wx_cache_dir)
+                            dfh = _hourly_to_df((data.get("hourly") or {}))
+                            if _sb_wx_db_path and not dfh.empty:
+                                _wx_db_upsert_hourly(_sb_wx_db_path, lat_r, lon_r, dfh)
+                            if not dfh.empty:
+                                dfh_all = pd.concat([dfh_all, dfh], ignore_index=True)
+                        if not dfh_all.empty:
+                            dfh_all = dfh_all.sort_values("time").drop_duplicates(subset=["time"], keep="last").reset_index(drop=True)
+                        # Forecast for recent tail
+                        date_max_req = pd.to_datetime(date_max).date()
+                        date_min_req = pd.to_datetime(date_min).date()
+                        if date_max_req >= (today - dt.timedelta(days=10)):
+                            recent_start = max(date_min_req, today - dt.timedelta(days=10))
+                            s2 = recent_start.isoformat()
+                            e2 = max(date_max_req, today).isoformat()
+                            data2 = fetch_open_meteo_hourly_forecast(lat_r, lon_r, s2, e2, _sb_wx_cache_dir)
+                            dfh2 = _hourly_to_df((data2.get("hourly") or {}))
+                            if _sb_wx_db_path and not dfh2.empty:
+                                _wx_db_upsert_hourly(_sb_wx_db_path, lat_r, lon_r, dfh2)
+                            if not dfh2.empty:
+                                dfh_all = pd.concat([dfh_all, dfh2], ignore_index=True)
+                                dfh_all = dfh_all.sort_values("time").drop_duplicates(subset=["time"], keep="last").reset_index(drop=True)
+                        hourly = _df_to_hourly(dfh_all)
+                    except Exception as e:
+                        _sb_failed += len(idxs)
+                        print(f"  Weather fetch failed: {repr(e)}")
+                        continue
+
+                    for j, i in enumerate(idxs, start=1):
+                        st = df_out.at[i, "_wx_start_utc"]
+                        en = df_out.at[i, "_wx_end_utc"]
+                        if st is None or en is None:
+                            continue
+                        wx = compute_weather_averages_from_hourly(hourly, st, en)
+                        if wx:
+                            for wk, wv in wx.items():
+                                if wk in WEATHER_COLS:
+                                    df_out.at[i, wk] = wv
+                            _sb_filled += 1
+
+                # Cleanup temp columns
+                for _tc in ["_wx_start_utc", "_wx_end_utc", "_wx_loc"]:
+                    if _tc in df_out.columns:
+                        df_out.drop(columns=[_tc], inplace=True)
+
+                print(f"Solar backfill complete: filled {_sb_filled}, failed {_sb_failed}")
+
+
         # v41: Sort by date before writing (fixes chronological order after manual additions)
         df_out = df_out.sort_values("date").reset_index(drop=True)
         out_path = args.out if args.out else args.append_master_in
