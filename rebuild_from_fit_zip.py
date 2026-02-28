@@ -3401,18 +3401,18 @@ def main():
     try:
         _wx_db_init(wx_db_path)
         print(f"Weather SQLite cache: {wx_db_path}")
-        # If refreshing solar data, clear SQLite rows that lack shortwave_radiation
-        # so they'll be re-fetched from Open-Meteo with the new params
-        if getattr(args, "refresh_weather_solar", False) and wx_db_path:
-            try:
-                _con = sqlite3.connect(wx_db_path)
-                _n_del = _con.execute("DELETE FROM wx_hourly WHERE shortwave_radiation IS NULL").rowcount
-                _con.commit()
-                _con.close()
-                if _n_del > 0:
-                    print(f"Weather SQLite: cleared {_n_del} rows missing solar data")
-            except Exception as e:
-                print(f"Weather SQLite solar cleanup failed: {e}")
+        # Auto-clean: delete SQLite rows that lack shortwave_radiation
+        # so they'll be re-fetched from Open-Meteo with the new params.
+        # Also runs when --refresh-weather-solar is set explicitly.
+        try:
+            _con = sqlite3.connect(wx_db_path)
+            _n_del = _con.execute("DELETE FROM wx_hourly WHERE shortwave_radiation IS NULL").rowcount
+            _con.commit()
+            _con.close()
+            if _n_del > 0:
+                print(f"Weather SQLite: cleared {_n_del} rows missing solar data")
+        except Exception as e:
+            print(f"Weather SQLite solar cleanup failed: {e}")
     except Exception as e:
         wx_db_path = ""
         print(f"Weather SQLite cache disabled (init failed): {e}")
@@ -3449,8 +3449,7 @@ def main():
                     df.loc[_long_mask, c] = np.nan
             print(f"Weather: cleared {n_cleared} long runs (>60 min) for refetch with second-half window")
 
-    # --refresh-weather-solar: clear weather for runs missing solar data so they get
-    # refetched with the new API params that include shortwave_radiation.
+    # --refresh-weather-solar: force clear ALL weather for runs missing solar (manual trigger)
     if getattr(args, "refresh_weather_solar", False):
         if "avg_solar_rad_wm2" not in df.columns:
             df["avg_solar_rad_wm2"] = np.nan
@@ -3462,7 +3461,22 @@ def main():
             for c in WEATHER_COLS:
                 if c in df.columns:
                     df.loc[_solar_needed, c] = np.nan
-            print(f"Weather: cleared {n_solar} runs missing solar data for refetch")
+            print(f"Weather: cleared {n_solar} runs missing solar data for refetch (--refresh-weather-solar)")
+
+    # Auto-detect runs with temperature but missing solar radiation.
+    # These are rows cached before solar was added to the API request.
+    # Clear their weather so they get refetched with the new params.
+    if "avg_solar_rad_wm2" not in df.columns:
+        df["avg_solar_rad_wm2"] = np.nan
+    _has_temp_auto = df["avg_temp_c"].notna() & np.isfinite(pd.to_numeric(df["avg_temp_c"], errors="coerce").fillna(np.nan))
+    _no_solar_auto = df["avg_solar_rad_wm2"].isna() | ~np.isfinite(pd.to_numeric(df["avg_solar_rad_wm2"], errors="coerce").fillna(np.nan))
+    _solar_backfill = _has_temp_auto & _no_solar_auto
+    n_solar_backfill = int(_solar_backfill.sum())
+    if n_solar_backfill > 0:
+        for c in WEATHER_COLS:
+            if c in df.columns:
+                df.loc[_solar_backfill, c] = np.nan
+        print(f"Weather: {n_solar_backfill} runs have temp but no solar data — clearing for refetch")
 
     # Skip rows that already have valid weather (UPDATE optimisation)
     _wx_already = df["avg_temp_c"].notna() & np.isfinite(pd.to_numeric(df["avg_temp_c"], errors="coerce").fillna(np.nan))
