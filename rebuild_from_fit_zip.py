@@ -2976,6 +2976,11 @@ def write_master(template_xlsx: str, out_xlsx: str, df: pd.DataFrame, df_fail: p
         if wcol not in out_cols:
             out_cols.append(wcol)
 
+    # Ensure GPS lat/lon medians survive in output (needed for weather backfill in UPDATE mode)
+    for gcol in ["gps_lat_med", "gps_lon_med"]:
+        if gcol in df.columns and gcol not in out_cols:
+            out_cols.append(gcol)
+
     # Extra v32 columns (only added if present in df)
 
     # Minimal extra columns (keep master readable)
