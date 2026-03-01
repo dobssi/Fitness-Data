@@ -1260,7 +1260,18 @@ def get_prediction_trend_data(df):
                 if pd.notna(pv) and float(pv) > 0:
                     mode_preds.append(round(float(pv), 0))
                 else:
-                    mode_preds.append(None)
+                    # Nearby fallback: find closest prediction within 7 days
+                    race_dt = race_row['date']
+                    if mode_col in df.columns:
+                        nearby = df[(df['date'] - race_dt).abs() <= pd.Timedelta(days=7)]
+                        nearby_pred = nearby[mode_col].dropna()
+                        nearby_pred = nearby_pred[nearby_pred > 0]
+                        if len(nearby_pred) > 0:
+                            mode_preds.append(round(float(nearby_pred.iloc[-1]), 0))
+                        else:
+                            mode_preds.append(None)
+                    else:
+                        mode_preds.append(None)
             result[dist_key][f'predicted_{mode}'] = mode_preds
         
         # Add full prediction trend line (weekly samples, all rows with predictions)
