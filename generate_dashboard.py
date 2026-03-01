@@ -2764,7 +2764,7 @@ def get_recent_achievements(df, lookback_days=30):
                     'description': 'RFL Trend peak', 'icon': '\U0001f4c8',
                     'significance': 2 if best_window[0] >= 12 else 1, 'window': best_window[1]})
 
-    achievements.sort(key=lambda a: -a['significance'])
+    achievements.sort(key=lambda a: (-int(a['date'].replace('-','')), -a['significance']))
     
     # Deduplicate: per distance keep best overall achievement + best surface PB
     # For AG, keep only the most significant
@@ -2829,8 +2829,16 @@ def get_milestones_data(df):
 
     # --- RACE PBs ---
     races = df[df['race_flag'] == 1].copy()
-    dist_names = {3.0: '3K', 5.0: '5K', 10.0: '10K', 21.097: 'Half Marathon', 42.195: 'Marathon'}
-    for dist in [3.0, 5.0, 10.0, 21.097, 42.195]:
+    dist_names = {1.0: '1K', 1.5: '1500m', 1.609: 'Mile', 3.0: '3K', 5.0: '5K', 
+                  10.0: '10K', 15.0: '15K', 16.09: '10M', 21.097: 'Half Marathon', 42.195: 'Marathon'}
+    # Core distances always included if they have data; others included if 2+ races
+    core_dists = {3.0, 5.0, 10.0, 21.097, 42.195}
+    race_dist_counts = races['official_distance_km'].value_counts()
+    pb_dists = sorted(set(
+        [d for d in core_dists if d in race_dist_counts.index] +
+        [d for d, c in race_dist_counts.items() if c >= 2 and d in dist_names]
+    ))
+    for dist in pb_dists:
         dist_races = races[races['official_distance_km'] == dist].sort_values('date')
         if len(dist_races) == 0:
             continue
@@ -2865,7 +2873,7 @@ def get_milestones_data(df):
         if len(ag_races) > 0:
             ag_races = ag_races.copy()
             ag_races['_sgroup'] = ag_races['surface'].apply(_ag_surface_group) if 'surface' in ag_races.columns else 'road'
-            for dist in [3.0, 5.0, 10.0, 21.097, 42.195]:
+            for dist in pb_dists:
                 dist_name = dist_names.get(dist, f'{dist}km')
                 dist_ag = ag_races[ag_races['official_distance_km'] == dist]
                 if len(dist_ag) == 0:
