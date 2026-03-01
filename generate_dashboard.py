@@ -2829,8 +2829,8 @@ def get_milestones_data(df):
 
     # --- RACE PBs ---
     races = df[df['race_flag'] == 1].copy()
-    dist_names = {5.0: '5K', 10.0: '10K', 21.097: 'Half Marathon', 42.195: 'Marathon'}
-    for dist in [5.0, 10.0, 21.097, 42.195]:
+    dist_names = {3.0: '3K', 5.0: '5K', 10.0: '10K', 21.097: 'Half Marathon', 42.195: 'Marathon'}
+    for dist in [3.0, 5.0, 10.0, 21.097, 42.195]:
         dist_races = races[races['official_distance_km'] == dist].sort_values('date')
         if len(dist_races) == 0:
             continue
@@ -2850,6 +2850,61 @@ def get_milestones_data(df):
                 'title': f'{dist_name} PB: {time_str}', 'description': name if isinstance(name, str) else '',
                 'icon': '\U0001f3c5' if is_latest else '\U0001f3af', 'importance': importance,
                 'value': t, 'distance_km': dist, 'is_current_pb': is_latest})
+
+    # --- AG PBs per distance (current best only, + surface variants) ---
+    def _ag_surface_group(s):
+        if pd.isna(s): return 'road'
+        s = str(s).upper()
+        if 'INDOOR' in s: return 'indoor'
+        if s == 'TRACK': return 'track'
+        return 'road'
+
+    ag_surface_labels = {'road': '', 'indoor': 'Indoor ', 'track': 'Track '}
+    if 'age_grade_pct' in df.columns:
+        ag_races = races[races['age_grade_pct'].notna()].copy()
+        if len(ag_races) > 0:
+            ag_races = ag_races.copy()
+            ag_races['_sgroup'] = ag_races['surface'].apply(_ag_surface_group) if 'surface' in ag_races.columns else 'road'
+            for dist in [3.0, 5.0, 10.0, 21.097, 42.195]:
+                dist_name = dist_names.get(dist, f'{dist}km')
+                dist_ag = ag_races[ag_races['official_distance_km'] == dist]
+                if len(dist_ag) == 0:
+                    continue
+                # Overall AG PB for this distance
+                best_idx = dist_ag['age_grade_pct'].idxmax()
+                best = df.loc[best_idx]
+                ag_val = best['age_grade_pct']
+                t = best['elapsed_time_s']
+                hrs, mins, secs = int(t // 3600), int((t % 3600) // 60), int(t % 60)
+                time_str = f'{hrs}:{mins:02d}:{secs:02d}' if hrs > 0 else f'{mins}:{secs:02d}'
+                name = best.get('activity_name', '')
+                if isinstance(name, str) and len(name) > 50:
+                    name = name[:47] + '...'
+                milestones.append({'date': best['date'].strftime('%Y-%m-%d'), 'category': 'pb',
+                    'title': f'{dist_name} AG: {ag_val:.1f}%', 'description': f'{time_str} \u2014 {name}',
+                    'icon': '\U0001f3c6', 'importance': 2, 'value': ag_val,
+                    'is_current_pb': True, 'is_ag_pb': True})
+                # Surface-specific AG PBs (indoor/track only, if different from overall)
+                for sgrp in ['indoor', 'track']:
+                    surf_ag = dist_ag[dist_ag['_sgroup'] == sgrp]
+                    if len(surf_ag) < 1:
+                        continue
+                    sbest_idx = surf_ag['age_grade_pct'].idxmax()
+                    sbest = df.loc[sbest_idx]
+                    sag = sbest['age_grade_pct']
+                    if sbest_idx == best_idx:
+                        continue  # same as overall, skip
+                    st = sbest['elapsed_time_s']
+                    shrs, smins, ssecs = int(st // 3600), int((st % 3600) // 60), int(st % 60)
+                    stime_str = f'{shrs}:{smins:02d}:{ssecs:02d}' if shrs > 0 else f'{smins}:{ssecs:02d}'
+                    sname = sbest.get('activity_name', '')
+                    if isinstance(sname, str) and len(sname) > 50:
+                        sname = sname[:47] + '...'
+                    slabel = ag_surface_labels.get(sgrp, '')
+                    milestones.append({'date': sbest['date'].strftime('%Y-%m-%d'), 'category': 'pb',
+                        'title': f'{slabel}{dist_name} AG: {sag:.1f}%', 'description': f'{stime_str} \u2014 {sname}',
+                        'icon': '\U0001f3c6', 'importance': 1, 'value': sag,
+                        'is_current_pb': True, 'is_ag_pb': True})
 
     # --- FITNESS (RFL_Trend) ---
     rfl = df[['date', 'RFL_Trend']].dropna(subset=['RFL_Trend'])
