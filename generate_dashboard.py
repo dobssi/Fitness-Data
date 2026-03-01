@@ -2859,6 +2859,44 @@ def get_milestones_data(df):
                 'icon': '\U0001f3c5' if is_latest else '\U0001f3af', 'importance': importance,
                 'value': t, 'distance_km': dist, 'is_current_pb': is_latest})
 
+    # --- Surface-specific time PBs (indoor/track only, current best) ---
+    def _time_surface_group(s):
+        if pd.isna(s): return 'road'
+        s = str(s).upper()
+        if 'INDOOR' in s: return 'indoor'
+        if s == 'TRACK': return 'track'
+        return 'road'
+    
+    time_surface_labels = {'indoor': 'Indoor ', 'track': 'Track '}
+    if 'surface' in races.columns:
+        races_sg = races.copy()
+        races_sg['_sgroup'] = races_sg['surface'].apply(_time_surface_group)
+        for dist in pb_dists:
+            dist_name = dist_names.get(dist, f'{dist}km')
+            dist_races = races_sg[races_sg['official_distance_km'] == dist]
+            # Find overall best for comparison
+            overall_best_t = dist_races['elapsed_time_s'].min() if len(dist_races) > 0 else None
+            for sgrp in ['indoor', 'track']:
+                surf_races = dist_races[dist_races['_sgroup'] == sgrp].sort_values('date')
+                if len(surf_races) < 2:
+                    continue  # need 2+ races on this surface to be meaningful
+                best_idx = surf_races['elapsed_time_s'].idxmin()
+                best = df.loc[best_idx]
+                t = best['elapsed_time_s']
+                # Skip if this is also the overall PB (already shown)
+                if overall_best_t is not None and t <= overall_best_t:
+                    continue
+                hrs, mins, secs = int(t // 3600), int((t % 3600) // 60), int(t % 60)
+                time_str = f'{hrs}:{mins:02d}:{secs:02d}' if hrs > 0 else f'{mins}:{secs:02d}'
+                slabel = time_surface_labels[sgrp]
+                name = best.get('activity_name', '')
+                if isinstance(name, str) and len(name) > 50:
+                    name = name[:47] + '...'
+                milestones.append({'date': best['date'].strftime('%Y-%m-%d'), 'category': 'pb',
+                    'title': f'{slabel}{dist_name} PB: {time_str}', 'description': name if isinstance(name, str) else '',
+                    'icon': '\U0001f3c5', 'importance': 2, 'value': t,
+                    'distance_km': dist, 'is_current_pb': True})
+
     # --- AG PBs per distance (current best only, + surface variants) ---
     def _ag_surface_group(s):
         if pd.isna(s): return 'road'
