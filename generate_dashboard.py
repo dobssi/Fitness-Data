@@ -2660,7 +2660,9 @@ def get_recent_achievements(df, lookback_days=30):
         for years_back, label in lookback_windows:
             lookback_start = r['date'] - pd.Timedelta(days=365 * years_back)
             prev = races[(races['date'] >= lookback_start) & (races['date'] < r['date']) & races['age_grade_pct'].notna()]
-            if len(prev) > 0 and ag >= prev['age_grade_pct'].max():
+            if len(prev) == 0:
+                best_window = (years_back, label)
+            elif ag >= prev['age_grade_pct'].max():
                 best_window = (years_back, label)
             else:
                 break
@@ -2675,26 +2677,50 @@ def get_recent_achievements(df, lookback_days=30):
                 'title': f'Best Age Grade in {best_window[1]}: {ag:.1f}%', 'description': r.get('activity_name', ''),
                 'icon': '\U0001f396\ufe0f', 'significance': min(best_window[0], 4), 'window': best_window[1]})
 
-    # --- RACE TIMES ---
+    # --- RACE TIMES (overall + surface-specific PBs) ---
     dist_names = {5.0: '5K', 10.0: '10K', 21.097: 'Half Marathon', 42.195: 'Marathon', 3.0: '3K'}
+    
+    # Surface grouping for surface-specific PBs
+    def _surface_group(s):
+        if pd.isna(s): return 'road'
+        s = str(s).upper()
+        if 'INDOOR' in s: return 'indoor'
+        if s == 'TRACK': return 'track'
+        if s in ('TRAIL', 'SNOW', 'HEAVY_SNOW'): return 'trail'
+        return 'road'
+    
+    surface_labels = {'road': '', 'indoor': 'Indoor ', 'track': 'Track ', 'trail': 'Trail '}
+    
+    if 'surface' in races.columns:
+        races = races.copy()
+        races['_sgroup'] = races['surface'].apply(_surface_group)
+    else:
+        races = races.copy()
+        races['_sgroup'] = 'road'
+    
     for dist in [5.0, 10.0, 21.097, 42.195, 3.0]:
         dist_races = races[races['official_distance_km'] == dist].sort_values('date')
         recent_dist = dist_races[dist_races['date'] >= cutoff]
         for _, r in recent_dist.iterrows():
             t = r['elapsed_time_s']
+            dist_name = dist_names.get(dist, f'{dist}km')
+            hrs, mins, secs = int(t // 3600), int((t % 3600) // 60), int(t % 60)
+            time_str = f'{hrs}:{mins:02d}:{secs:02d}' if hrs > 0 else f'{mins}:{secs:02d}'
+            
+            # --- Overall PB/best-in-period ---
             best_window = None
             for years_back, label in lookback_windows:
                 lookback_start = r['date'] - pd.Timedelta(days=365 * years_back)
                 prev = dist_races[(dist_races['date'] >= lookback_start) & (dist_races['date'] < r['date'])]
-                if len(prev) > 0 and t <= prev['elapsed_time_s'].min():
+                if len(prev) == 0:
+                    best_window = (years_back, label)
+                elif t <= prev['elapsed_time_s'].min():
                     best_window = (years_back, label)
                 else:
                     break
             all_prev = dist_races[dist_races['date'] < r['date']]
             is_pb = len(all_prev) == 0 or t <= all_prev['elapsed_time_s'].min()
-            dist_name = dist_names.get(dist, f'{dist}km')
-            hrs, mins, secs = int(t // 3600), int((t % 3600) // 60), int(t % 60)
-            time_str = f'{hrs}:{mins:02d}:{secs:02d}' if hrs > 0 else f'{mins}:{secs:02d}'
+            
             if is_pb and len(all_prev) > 0:
                 achievements.append({'date': r['date'].strftime('%Y-%m-%d'), 'type': 'race_pb',
                     'title': f'{dist_name} PB: {time_str}', 'description': r.get('activity_name', ''),
@@ -2703,6 +2729,19 @@ def get_recent_achievements(df, lookback_days=30):
                 achievements.append({'date': r['date'].strftime('%Y-%m-%d'), 'type': 'race_time',
                     'title': f'Fastest {dist_name} in {best_window[1]}: {time_str}', 'description': r.get('activity_name', ''),
                     'icon': '\u26a1', 'significance': min(best_window[0], 4), 'window': best_window[1]})
+            
+            # --- Surface-specific PB (only if surface != road, to avoid duplicating the overall PB) ---
+            sgroup = r.get('_sgroup', 'road')
+            if sgroup != 'road':
+                surface_dist = dist_races[dist_races['_sgroup'] == sgroup].sort_values('date')
+                surf_prev = surface_dist[surface_dist['date'] < r['date']]
+                is_surface_pb = len(surf_prev) > 0 and t <= surf_prev['elapsed_time_s'].min()
+                # Only show if it's a surface PB but NOT an overall PB (avoid double-reporting)
+                if is_surface_pb and not is_pb:
+                    slabel = surface_labels.get(sgroup, '')
+                    achievements.append({'date': r['date'].strftime('%Y-%m-%d'), 'type': 'surface_pb',
+                        'title': f'{slabel}{dist_name} PB: {time_str}', 'description': r.get('activity_name', ''),
+                        'icon': '\U0001f3c5', 'significance': 4, 'window': f'{slabel.strip()} PB'})
 
     # --- RFL TREND ---
     recent_all = df[df['date'] >= cutoff]
@@ -2726,7 +2765,37 @@ def get_recent_achievements(df, lookback_days=30):
                     'significance': 2 if best_window[0] >= 12 else 1, 'window': best_window[1]})
 
     achievements.sort(key=lambda a: -a['significance'])
-    return achievements
+    
+    # Deduplicate: per distance keep best overall achievement + best surface PB
+    # For AG, keep only the most significant
+    seen_overall = set()  # track dist for race_time/race_pb
+    seen_surface = set()  # track dist+surface for surface_pb
+    seen_ag = False
+    deduped = []
+    for a in achievements:
+        if a['type'] in ('race_time', 'race_pb'):
+            dist_word = a['title'].split(':')[0].split()[-1] if ':' in a['title'] else a['title'].split()[0]
+            # Extract just the distance name (5K, 3K, etc)
+            for dw in ['3K', '5K', '10K', 'Half', 'Marathon']:
+                if dw in a['title']:
+                    dist_word = dw
+                    break
+            if dist_word not in seen_overall:
+                seen_overall.add(dist_word)
+                deduped.append(a)
+        elif a['type'] == 'surface_pb':
+            key = a['title'].split(':')[0]  # e.g. "Indoor 3K PB"
+            if key not in seen_surface:
+                seen_surface.add(key)
+                deduped.append(a)
+        elif a['type'] == 'age_grade':
+            if not seen_ag:
+                seen_ag = True
+                deduped.append(a)
+        else:
+            deduped.append(a)
+    
+    return deduped
 
 
 def get_milestones_data(df):
@@ -2906,7 +2975,7 @@ def get_milestones_data(df):
             break
 
     milestones.sort(key=lambda m: m['date'])
-    recent_achievements = get_recent_achievements(df, lookback_days=30)
+    recent_achievements = get_recent_achievements(df, lookback_days=60)
     return {'milestones': milestones, 'next_milestones': next_ms, 'recent_achievements': recent_achievements,
         'summary': {'total_distance_km': td, 'total_runs': tr, 'total_races': trc,
             'years_active': len(df['date'].dt.year.unique()),
@@ -2922,7 +2991,7 @@ def _generate_recent_achievements_html(milestone_data):
     return f'''
     <div class="chart-container" id="recentAchievementsSection">
         <div class="chart-title">\U0001f525 Recent Achievements</div>
-        <div class="chart-desc">Last 30 days</div>
+        <div class="chart-desc">Last 60 days</div>
         <div id="recentAchievementsList"></div>
     </div>
     <script>
@@ -3792,11 +3861,11 @@ function raceAnnotations(dates) {{
     
     <!-- RF Trend Chart -->
     
+    <!-- Recent Achievements (first thing after stats) -->
+    {_generate_recent_achievements_html(milestone_data) if milestone_data else ''}
+    
     <!-- Training Zones Section -->
     {_generate_zone_html(zone_data, stats)}
-    
-    <!-- Recent Achievements (after zones, before RFL chart) -->
-    {_generate_recent_achievements_html(milestone_data) if milestone_data else ''}
     
     <!-- RF Trend Chart -->
     <div class="chart-container">
