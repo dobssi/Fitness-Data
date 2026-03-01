@@ -3077,6 +3077,21 @@ def get_milestones_data(df):
 
     milestones.sort(key=lambda m: m['date'])
     recent_achievements = get_recent_achievements(df, lookback_days=60)
+    
+    # Sanitize numpy types for JSON serialization
+    import numpy as np
+    def _sanitize(obj):
+        if isinstance(obj, dict):
+            return {k: _sanitize(v) for k, v in obj.items()}
+        elif isinstance(obj, list):
+            return [_sanitize(v) for v in obj]
+        elif isinstance(obj, (np.integer,)):
+            return int(obj)
+        elif isinstance(obj, (np.floating,)):
+            return float(obj)
+        return obj
+    milestones = _sanitize(milestones)
+    recent_achievements = _sanitize(recent_achievements)
     return {'milestones': milestones, 'next_milestones': next_ms, 'recent_achievements': recent_achievements,
         'summary': {'total_distance_km': td, 'total_runs': tr, 'total_races': trc,
             'years_active': len(df['date'].dt.year.unique()),
