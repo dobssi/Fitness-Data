@@ -93,7 +93,7 @@ set "OVERRIDE_FILE=activity_overrides.xlsx"
 set "ATHLETE_DATA=athlete_data.csv"
 
 REM ---- Outputs / working dirs (v47) ----
-set "PIPELINE_VER=50"
+set "PIPELINE_VER=52"
 set "CACHE_DIR=persec_cache_%SIZE%"
 set "MODEL_JSON=re_model_s4_%SIZE%.json"
 set "OUT_MASTER=Master_%SIZE%_GPSQ_ID.xlsx"

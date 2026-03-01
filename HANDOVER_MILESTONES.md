@@ -1,98 +1,125 @@
-# Handover: Milestones Feature + Bug Fixes
+# Handover: Milestones Feature Implementation
 ## Date: 2026-03-01
 
 ---
 
-## What to do next
+## Summary
 
-### 1. Implement Milestones feature (new)
-
-Full design spec in `DESIGN_MILESTONES.md` (attached). Summary:
-
-**Hero banner** above Race Predictions section showing the most recent significant milestone (gold/silver tier, 28-day expiry). **Inline badges** in Recent Runs table for all milestone tiers.
-
-**Four milestone types per run:**
-1. **Overall AG** — best age grade across all distances/surfaces ("Best AG in 5y 8m")
-2. **Distance+surface AG PB** — "5K AG PB", "trail HM AG PB"
-3. **Distance+surface time PB** — "Marathon time PB" (a PB is a PB, clock time matters)
-4. **Distance+surface condition-adjusted time PB** — only flagged when it differs from #3 (suppressed when clock time was also a PB). Uses duration-scaled Temp_Adj × surface_adj.
-
-**Three tiers:**
-- 🏆 Gold: all-time PB or best in 5+ years → banner + badge
-- ⭐ Silver: best in 3+ years → banner + badge
-- ✨ Bronze: best in 1+ year → badge only
-
-**Key rules:**
-- Applies to any run with valid `age_grade_pct` (races + parkruns)
-- Surface categories: road (default/NaN), trail (TRAIL/SNOW/HEAVY_SNOW), track (TRACK), indoor (INDOOR_TRACK)
-- 2-attempt rule: distance PBs need ≥1 prior attempt at same distance+surface (2nd marathon can be a PB, 1st cannot)
-- Overall AG needs ≥5 prior AG runs
-- Banner: 28-day expiry, most recent banner-worthy milestone wins
-- Badge: show highest-tier milestone only per row
-- "Previously" reference line in banner: date, name, AG%, time of the run that was bettered
-
-**Validated against Paul's data:** ~3 banners/year, ~10 badges/year across 60 AG runs in 2 years. Not spammy.
-
-**Implementation:** ~175 lines, all in `generate_dashboard.py`. No StepB/config changes needed.
+Added two new dashboard sections to `generate_dashboard.py`: **Recent Achievements** and **All-Time Milestones**. Both deployed to CI and tested. One CI failure (numpy int64 JSON serialization) caught and fixed during session.
 
 ---
 
-### 2. Fix: Prediction chart nearby-fallback for mode predictions (ready to deploy)
+## What was built
 
-**Bug:** Race prediction chart dashed line (condition-adjusted) diverges wildly from the solid line, especially for Steve's marathon view and Paul's GAP mode.
+### 1. Recent Achievements (position: after Stats Cards, before Training Zones)
 
-**Root cause:** `get_race_prediction_chart_data()` builds `predicted_gap` and `predicted_sim` arrays WITHOUT the 7-day nearby fallback that the main `predicted` array has. For Steve's 7 marathon races, only 3 have `pred_marathon_s_gap` on the race row itself — the other 4 are null. Chart.js Bézier tension:0.3 interpolating through 3 points over 8 years creates wild curves.
+Scans last 60 days for noteworthy performances using cascading lookback windows (1y, 2y, 3y, 5y, 10y, all-time):
 
-**Fix:** Added nearby-fallback to the mode prediction loop (lines ~1255-1276). Fixed file: `generate_dashboard.py` in outputs.
+- **Age Grade best-in-period**: e.g. "Best Age Grade in 5 years: 77.9%"
+- **Race time best-in-period**: e.g. "Fastest 5K in 3 years: 19:42"  
+- **Surface-specific PBs**: e.g. "Indoor 3K PB: 11:21" (compares only within same surface)
+- **RFL Trend peaks**: e.g. "Highest Fitness in 6 months: 91.1%"
 
-**The fix is already in the `generate_dashboard.py` output file from this session.**
+Sorted by date (newest first), then significance as tiebreaker. Deduplicated: one entry per distance (best window wins), one AG entry, surface PBs kept separate.
 
----
+**Current output for Paul (as of 2026-03-01):**
+- 🎖️ Best Age Grade in 5 years: 77.9% — LFOTM Feb 2026 (27 Feb)
+- ⚡ Fastest 5K in 3 years: 19:42 — LFOTM Feb 2026 (27 Feb)
+- ⚡ Fastest 3K in 5 years: 11:21 — Vinthundsvintern (24 Jan)
+- 🏅 Indoor 3K PB: 11:21 — Vinthundsvintern (24 Jan)
+- 📈 Highest Fitness in 6 months: 91.1% (6 Jan)
 
-### 3. Bug: Race readiness card shows past races + wrong prep window
+Section is hidden if no recent achievements exist.
 
-Two issues with the Race Readiness section:
+### 2. All-Time Milestones (position: after Top Races, bottom of dashboard)
 
-**a) Race card still shows after the race has been run.** LFOTM on 27 Feb was still showing in the race readiness section on the day (after the race). The card should disappear once the race date has passed, or at least once a race-flagged activity exists on that date.
+Tabs: **PBs** (default) | Volume | Fitness | All
 
-**b) Prep window is race-7 days, should be race-6 days.** The specificity/preparation calculation looks back 7 days from race day, but the useful training window is the 6 days before the race (race-6 to race-1). Race day itself and 7 days back are both wrong boundaries. Warmup runs on race day (before the race) should count towards preparation.
+**PBs tab includes:**
+- Progressive time PBs per distance (e.g. 15 progressive 5K PBs from 23:11→17:52)
+- Current AG PBs per distance (🏆 5K AG: 81.1%, 10K AG: 78.8%, etc.)
+- Surface-specific time PBs (🏅 Indoor 3K PB: 11:21, Track 5K PB: 18:25)
+- Surface-specific AG PBs (🏆 Indoor 3K AG: 71.8%, Track Mile AG: 75.4%)
+- Current PBs highlighted with gold left border
 
-**c) Warmup runs not included in prep.** Runs on race day that aren't the race itself (e.g. a warmup jog flagged as a separate activity) should count towards the preparation specificity minutes. Currently only runs before race day are included.
+**Volume tab:** Distance milestones (1K-30K km), run counts (#100-3000), race counts (#50-300), yearly volume firsts
 
-These are in `generate_dashboard.py` in the race readiness / planned races section. Look for `calcSpecificity()` in the JS and the planned_races card rendering logic.
+**Fitness tab:** RFL threshold firsts, peak fitness, best AG thresholds, consistency streaks
 
----
+**All tab:** Everything chronologically
 
-## Files for next session
+**Next Milestones:** Progress bars at top showing upcoming milestones (e.g. "🚀 30,000 km Total Distance — 1773 km to go ~249d")
 
-Upload to Claude:
-1. `checkpoint_v52_*.zip` (latest checkpoint with all scripts)
-2. `DESIGN_MILESTONES.md` (this session's output — the feature spec)
-3. `generate_dashboard.py` (this session's output — contains the prediction chart fix)
-4. This handover document
-5. `Master_FULL_GPSQ_ID_post.xlsx` (Paul's master, for testing milestones)
-6. Optionally `Master_FULL_post.xlsx` (Steve's master, for testing cross-athlete)
+**Dynamic distance list:** Core distances (3K, 5K, 10K, HM, Marathon) always included. Others (Mile, 1500m, 1K, 15K, 10M) included if 2+ races at that distance.
 
----
-
-## What was done this session
-
-1. **Investigated Steve's dashboard Temp_Adj discrepancy** — London Marathon 2018 tooltip showing +1.3% vs Excel 5.2%. Traced to stale dashboard HTML generated before FULL rebuild completed. New master has correct Temp_Adj=1.052 with solar radiation (671 W/m², +3.4°C effective temp boost). Dashboard just needs regeneration.
-
-2. **Found and fixed prediction chart nearby-fallback bug** — mode predictions (predicted_gap/predicted_sim) missing 7-day fallback, causing sparse data + Bézier interpolation artefacts.
-
-3. **Analysed Paul's LFOTM AG achievement** — 77.87% AG, best in 5 years 8 months (since Jun 2020 BMAF virtual 5K). This sparked the milestones feature idea.
-
-4. **Designed milestones feature** through iterative discussion:
-   - Started with AG-only milestones
-   - Paul requested both time and AG PBs ("a PB is a PB")
-   - Added surface differentiation (road/trail/track/indoor)
-   - Added 2-attempt rule (2nd marathon can be a PB)
-   - Added condition-adjusted time PBs (suppressed when clock PB also achieved)
-   - Settled on 28-day banner expiry
+**Surface groups:** road (default/NaN), indoor (INDOOR_TRACK), track (TRACK). Trail/snow grouped with road for AG purposes.
 
 ---
 
-## Current state of generate_dashboard.py
+## Key design decisions
 
-The output file contains ONE fix (prediction chart nearby-fallback) but NOT the milestones feature — that's to be built in the next session from the design spec.
+| Decision | Rationale |
+|---|---|
+| 60-day lookback (not 30) | 30 days missed Vinthundsvintern 3K from Jan 24 |
+| Cascade fix for empty windows | When no races exist in a window, continue to wider windows instead of breaking |
+| Surface PBs separate from overall | Indoor 3K 11:21 is a genuine PB even though road 3K is 10:49 |
+| Dates instead of stars | Stars were noise — window badge already shows significance |
+| No "Top" tab | PBs as default is cleaner, other filters (Volume/Fitness/All) sufficient |
+| Dedup by distance | Only show best achievement per distance in Recent Achievements |
+| numpy sanitization | `json.dumps` fails on numpy int64/float64 — recursive sanitize before return |
+
+---
+
+## Bugs found and fixed during session
+
+1. **Cascade break bug**: When no races exist in a lookback window (e.g. no 3K in past year), code broke instead of continuing to wider windows. Fixed: empty window = "no competition, continue".
+
+2. **numpy int64 serialization**: Milestone dicts contained numpy types from DataFrame reads. `json.dumps()` in `_generate_milestones_html` failed on CI. Fixed: recursive sanitize converting numpy types to Python native before returning from `get_milestones_data()`.
+
+3. **3K missing from dist_names**: `get_milestones_data` had `dist_names` without 3.0 key, producing "3.0km" labels. Fixed: added 3.0:'3K' and included 3K in PB tracking loops.
+
+---
+
+## Files changed
+
+Only `generate_dashboard.py` — from 5205 lines (pre-session) to 5777 lines (+572 lines).
+
+New functions added:
+- `get_recent_achievements(df, lookback_days=60)` — Recent Achievements computation
+- `get_milestones_data(df)` — All-time milestones computation
+- `_generate_recent_achievements_html(milestone_data)` — Recent Achievements HTML/JS
+- `_generate_milestones_html(milestone_data)` — Milestones HTML/JS with tab filters
+
+Integration points in `main()`:
+- After `get_zone_data(df)`: calls `get_milestones_data(df)`, passes to `generate_html()`
+- `generate_html()` signature: added `milestone_data=None` parameter
+- Recent Achievements inserted after Stats Cards, before Training Zones
+- Milestones inserted after Top Races, before footer
+- Milestone CSS added before `.footer` styles
+
+---
+
+## Standalone test file
+
+`milestones_feature.py` — generates test dashboards at 8 different cutoff dates showing milestone progression from 2014 (87 runs) to current (3117 runs). Useful for visual testing but NOT needed for production. Not integrated into pipeline.
+
+---
+
+## TODOs identified
+
+### For next session
+- **(a) Onboarding PB entry page**: Times, distances, optional dates → override `elapsed_time_s` in matching races. This would fix data quality issues like Ian's 94.4% AG mile.
+- **(b) AG sanity check**: Flag any AG >85% for non-elite review. Ian's 94.4% mile at Ladywell Track is likely GPS undershoot on tight bends → moving_time_s too fast for actual distance.
+- **(c) Race readiness 2-week window**: Awaiting Ian's feedback on whether the activity window for A races is useful or noise.
+
+### Pre-existing TODOs unchanged
+- Surface-specific effort specificity for race readiness cards
+- Auto-flag Stryd power outliers (RE z<-2.5σ)
+- gap_equiv_time_s from Minetti integral
+- Refactor athlete folders to numeric IDs
+
+---
+
+## For next Claude
+
+"Milestones feature is complete and deployed. Two sections added to generate_dashboard.py: Recent Achievements (after stats cards) shows best-in-period races from last 60 days with surface PBs. All-time Milestones (after top races) has PBs/Volume/Fitness/All tabs with progressive time PBs, AG PBs per distance/surface, and next-milestone progress bars. One CI bug fixed (numpy int64 JSON serialization). See HANDOVER_MILESTONES.md for full context. Next TODOs: onboarding PB entry page, AG sanity check (>85%), race readiness feedback from Ian."

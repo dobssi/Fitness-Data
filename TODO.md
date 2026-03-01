@@ -1,11 +1,11 @@
-# Pipeline TODO — v51
-## Updated: 2026-02-17
+# Pipeline TODO — v52
+## Updated: 2026-03-01
 
 ---
 
 ## Current State Summary
 
-v51 is a mature three-mode pipeline (Stryd/GAP/SIM) processing 3,100+ runs from 2013–2026. Phase 1 (YAML athlete config) is wired in. Dashboard has dark theme, training zones, race readiness cards, and full mode switching. CI runs daily via GitHub Actions with Dropbox sync.
+v52 is a mature three-mode pipeline (Stryd/GAP/SIM) processing 3,100+ runs from 2013–2026. Phase 1 (YAML athlete config) is wired in. Dashboard has dark theme, training zones, race readiness cards, milestones, and full mode switching. CI runs daily via GitHub Actions with Dropbox sync. Four athletes onboarded (Paul Stryd, Ian/Nadi/Steve GAP). shift(1) predictions, solar radiation temperature adjustments, and taper alerts all active.
 
 ### What's working
 - Three parallel RF models (Stryd power, GAP physics, SIM athlete-specific) correlating >0.989

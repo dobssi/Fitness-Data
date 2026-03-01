@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
-# File: StepB_PostProcess_v51.py
+# File: StepB_PostProcess_v52.py
+#
+# Changelist v52 (2026-03-01):
+#   - Version bump from v51. See v51 changelog below for accumulated changes.
 #
 # Changelist v51 (2026-02-07):
 #   - Easy RF EMA: exponentially weighted mean (span=15) of easy-run RF_adj
@@ -1192,7 +1195,7 @@ def calc_easy_rf_metrics(df: pd.DataFrame) -> pd.DataFrame:
       RFL_Trend_Delta   - Change in RFL_Trend from previous run
       Easy_RFL_Gap      - Gap between Easy_RF_EMA (normalised) and RFL_Trend
     """
-    print("\n=== v51: Calculating Easy RF metrics ===")
+    print("\n=== v52: Calculating Easy RF metrics ===")
     
     # --- Easy run mask (v51: power-based ceiling replaces HR ceiling) ---
     # nPower < 85% CP captures genuine easy efforts even with elevated HR (post-illness, heat)
@@ -1545,13 +1548,13 @@ def get_current_alerts(df: pd.DataFrame) -> list:
 def print_alerts(alerts: list) -> None:
     """Print alert summary to console."""
     if not alerts:
-        print("\n=== v51 Health Check: All clear ===")
+        print("\n=== v52 Health Check: All clear ===")
         return
     
     level_order = {'concern': 0, 'watch': 1, 'info': 2}
     alerts.sort(key=lambda a: level_order.get(a['level'], 9))
     
-    print(f"\n=== v51 Health Check: {len(alerts)} alert(s) ===")
+    print(f"\n=== v52 Health Check: {len(alerts)} alert(s) ===")
     for a in alerts:
         print(f"  {a['icon']} {a['alert']}")
         print(f"      {a['message']}")

@@ -6,7 +6,7 @@ Usage:
     python make_checkpoint.py --tag "dashboard_restyle"
     python make_checkpoint.py --tag "pre_v52" --output C:\\Users\\Paul\\Desktop
 
-Creates: checkpoint_v51_<tag>_<date>.zip in the current directory (or --output path).
+Creates: checkpoint_v52_<tag>_<date>.zip in the current directory (or --output path).
 """
 
 import os
@@ -43,12 +43,14 @@ PIPELINE_FILES = [
     "athlete.yml",
     "gap_power.py",
     "add_gap_power.py",
-    "run_multi_mode_pipeline.py",
     # Multi-athlete support
     "re_model_generic.json",
     "master_template.xlsx",
     "strava_ingest.py",
     "scan_races.py",
+    "classify_races.py",
+    "onboard_athlete.py",
+    "athlete_template.yml",
     # CI
     "ci/dropbox_sync.py",
     "ci/apply_run_metadata.py",
@@ -167,7 +169,7 @@ def main():
         return
 
     date_str = datetime.now().strftime("%Y%m%d_%H%M")
-    zip_name = "checkpoint_v51_%s_%s.zip" % (args.tag, date_str)
+    zip_name = "checkpoint_v52_%s_%s.zip" % (args.tag, date_str)
     output_dir = args.output or base_dir
     zip_path = os.path.join(output_dir, zip_name)
 

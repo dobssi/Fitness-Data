@@ -1,5 +1,5 @@
 """
-run_pipeline.py — Cross-platform pipeline orchestrator v51
+run_pipeline.py — Cross-platform pipeline orchestrator v52
 ============================================================
 Replaces Run_Full_Pipeline.bat for both local and CI/CD execution.
 
@@ -39,7 +39,7 @@ from datetime import datetime
 # =============================================================================
 # CONFIGURATION
 # =============================================================================
-PIPELINE_VER = 51
+PIPELINE_VER = 52
 PY = sys.executable  # Use the same Python that's running this script
 
 # File naming templates
@@ -68,7 +68,7 @@ STRAVA_CSV = "activities.csv"
 OVERRIDE_FILE = "activity_overrides.xlsx"
 ATHLETE_DATA = "athlete_data.csv"
 
-# Pipeline settings — loaded from config (athlete.yml or v51 defaults)
+# Pipeline settings — loaded from config (athlete.yml or v52 defaults)
 try:
     from config import ATHLETE_MASS_KG, ATHLETE_DOB, ATHLETE_GENDER, ATHLETE_TZ
     MASS_KG = int(ATHLETE_MASS_KG)

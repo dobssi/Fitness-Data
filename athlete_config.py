@@ -2,7 +2,7 @@
 Athlete configuration loader for multi-athlete pipeline v60.
 
 Loads athlete-specific settings from athlete.yml and provides backward
-compatibility with v51 hardcoded config.py values.
+compatibility with v52 hardcoded config.py values.
 
 Usage:
     from athlete_config import AthleteConfig
@@ -24,7 +24,7 @@ from typing import Any, Dict, List, Optional
 try:
     import yaml
 except ImportError:
-    yaml = None  # Graceful degradation for v51 compatibility
+    yaml = None  # Graceful degradation for v52 compatibility
 
 
 @dataclass

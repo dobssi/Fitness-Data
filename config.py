@@ -2,7 +2,7 @@
 Central configuration file for all pipeline constants.
 
 v60: Now loads athlete-specific values from athlete.yml via athlete_config module.
-Falls back to v51 hardcoded values if no YAML is provided (backward compatible).
+Falls back to v52 hardcoded values if no YAML is provided (backward compatible).
 
 All scripts should import from here to ensure consistency.
 Edit athlete.yml for athlete-specific values, or edit constants below for defaults.
@@ -76,7 +76,7 @@ PLANNED_RACES = [
 ]
 
 # Stryd mass correction history
-# Convert to v51 format: list of (start, end, kg) tuples
+# Convert to pipeline format: list of (start, end, kg) tuples
 STRYD_MASS_HISTORY = [
     (mc.start_date, mc.end_date, mc.configured_kg)
     for mc in _ATHLETE_CONFIG.stryd_mass_corrections
@@ -154,7 +154,7 @@ TERRAIN_STRAVA_ELEV_MIN = 8.0       # Strava elev gate: m/km minimum to allow te
 DURATION_PENALTY_DAMPING = 0.33     # Fraction of R2 used when penalising (asymmetric)
 
 # =============================================================================
-# EASY RF EMA PARAMETERS (v51)
+# EASY RF EMA PARAMETERS
 # =============================================================================
 
 EASY_RF_HR_MIN = _ATHLETE_CONFIG.pipeline.easy_rf_hr_min
@@ -169,7 +169,7 @@ EASY_RF_HR_MAX = _ATHLETE_CONFIG.pipeline.easy_rf_hr_max if _ATHLETE_CONFIG.pipe
 EASY_RF_LTHR = ATHLETE_LTHR                    # Alias for backward compat in StepB
 
 # =============================================================================
-# ALERT THRESHOLDS (v51)
+# ALERT THRESHOLDS
 # =============================================================================
 
 ALERT1_RFL_DROP = _ATHLETE_CONFIG.pipeline.alert1_rfl_drop
@@ -197,7 +197,7 @@ ALERT5_GAP_THRESHOLD = _ATHLETE_CONFIG.pipeline.alert5_gap_threshold
 # =============================================================================
 
 def get_athlete_config():
-    """Return the loaded athlete config object (or None if using v51 defaults)."""
+    """Return the loaded athlete config object (or None if using v52 defaults)."""
     return _ATHLETE_CONFIG
 
 
