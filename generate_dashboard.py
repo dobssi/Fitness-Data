@@ -2636,6 +2636,374 @@ def _generate_zone_html(zone_data, stats=None):
 # ============================================================================
 # v51: ALERT BANNER GENERATOR
 # ============================================================================
+# ============================================================
+# MILESTONES FEATURE
+# ============================================================
+
+def get_recent_achievements(df, lookback_days=30):
+    """Scan recent races for 'best X in Y years' achievements."""
+    df = df.sort_values('date').reset_index(drop=True)
+    if len(df) == 0:
+        return []
+    achievements = []
+    cutoff = df['date'].max() - pd.Timedelta(days=lookback_days)
+    races = df[df['race_flag'] == 1].copy()
+    lookback_windows = [(1, '1 year'), (2, '2 years'), (3, '3 years'), (5, '5 years'), (10, '10 years')]
+
+    # --- AGE GRADE ---
+    recent_races = races[races['date'] >= cutoff]
+    for _, r in recent_races.iterrows():
+        ag = r.get('age_grade_pct', None)
+        if pd.isna(ag):
+            continue
+        best_window = None
+        for years_back, label in lookback_windows:
+            lookback_start = r['date'] - pd.Timedelta(days=365 * years_back)
+            prev = races[(races['date'] >= lookback_start) & (races['date'] < r['date']) & races['age_grade_pct'].notna()]
+            if len(prev) > 0 and ag >= prev['age_grade_pct'].max():
+                best_window = (years_back, label)
+            else:
+                break
+        all_prev = races[(races['date'] < r['date']) & races['age_grade_pct'].notna()]
+        is_all_time = len(all_prev) == 0 or ag >= all_prev['age_grade_pct'].max()
+        if is_all_time:
+            achievements.append({'date': r['date'].strftime('%Y-%m-%d'), 'type': 'age_grade',
+                'title': f'Best Ever Age Grade: {ag:.1f}%', 'description': r.get('activity_name', ''),
+                'icon': '\U0001f451', 'significance': 5, 'window': 'all-time'})
+        elif best_window and best_window[0] >= 2:
+            achievements.append({'date': r['date'].strftime('%Y-%m-%d'), 'type': 'age_grade',
+                'title': f'Best Age Grade in {best_window[1]}: {ag:.1f}%', 'description': r.get('activity_name', ''),
+                'icon': '\U0001f396\ufe0f', 'significance': min(best_window[0], 4), 'window': best_window[1]})
+
+    # --- RACE TIMES ---
+    dist_names = {5.0: '5K', 10.0: '10K', 21.097: 'Half Marathon', 42.195: 'Marathon', 3.0: '3K'}
+    for dist in [5.0, 10.0, 21.097, 42.195, 3.0]:
+        dist_races = races[races['official_distance_km'] == dist].sort_values('date')
+        recent_dist = dist_races[dist_races['date'] >= cutoff]
+        for _, r in recent_dist.iterrows():
+            t = r['elapsed_time_s']
+            best_window = None
+            for years_back, label in lookback_windows:
+                lookback_start = r['date'] - pd.Timedelta(days=365 * years_back)
+                prev = dist_races[(dist_races['date'] >= lookback_start) & (dist_races['date'] < r['date'])]
+                if len(prev) > 0 and t <= prev['elapsed_time_s'].min():
+                    best_window = (years_back, label)
+                else:
+                    break
+            all_prev = dist_races[dist_races['date'] < r['date']]
+            is_pb = len(all_prev) == 0 or t <= all_prev['elapsed_time_s'].min()
+            dist_name = dist_names.get(dist, f'{dist}km')
+            hrs, mins, secs = int(t // 3600), int((t % 3600) // 60), int(t % 60)
+            time_str = f'{hrs}:{mins:02d}:{secs:02d}' if hrs > 0 else f'{mins}:{secs:02d}'
+            if is_pb and len(all_prev) > 0:
+                achievements.append({'date': r['date'].strftime('%Y-%m-%d'), 'type': 'race_pb',
+                    'title': f'{dist_name} PB: {time_str}', 'description': r.get('activity_name', ''),
+                    'icon': '\U0001f3c5', 'significance': 5, 'window': 'all-time'})
+            elif best_window and best_window[0] >= 2:
+                achievements.append({'date': r['date'].strftime('%Y-%m-%d'), 'type': 'race_time',
+                    'title': f'Fastest {dist_name} in {best_window[1]}: {time_str}', 'description': r.get('activity_name', ''),
+                    'icon': '\u26a1', 'significance': min(best_window[0], 4), 'window': best_window[1]})
+
+    # --- RFL TREND ---
+    recent_all = df[df['date'] >= cutoff]
+    if len(recent_all) > 0 and 'RFL_Trend' in df.columns:
+        rfl_recent = recent_all[['date', 'RFL_Trend']].dropna()
+        if len(rfl_recent) > 0:
+            peak_row = rfl_recent.loc[rfl_recent['RFL_Trend'].idxmax()]
+            peak_val, peak_date = peak_row['RFL_Trend'], peak_row['date']
+            best_window = None
+            for months_back, label in [(3, '3 months'), (6, '6 months'), (12, '1 year'), (24, '2 years')]:
+                lookback_start = peak_date - pd.Timedelta(days=30 * months_back)
+                prev = df[(df['date'] >= lookback_start) & (df['date'] < peak_date)]['RFL_Trend'].dropna()
+                if len(prev) > 0 and peak_val >= prev.max():
+                    best_window = (months_back, label)
+                else:
+                    break
+            if best_window and best_window[0] >= 6:
+                achievements.append({'date': peak_date.strftime('%Y-%m-%d'), 'type': 'fitness',
+                    'title': f'Highest Fitness in {best_window[1]}: {peak_val:.1%}',
+                    'description': 'RFL Trend peak', 'icon': '\U0001f4c8',
+                    'significance': 2 if best_window[0] >= 12 else 1, 'window': best_window[1]})
+
+    achievements.sort(key=lambda a: -a['significance'])
+    return achievements
+
+
+def get_milestones_data(df):
+    """Compute all-time milestones from master dataframe."""
+    df = df.sort_values('date').reset_index(drop=True)
+    if len(df) == 0:
+        return {'milestones': [], 'next_milestones': [], 'recent_achievements': [], 'summary': {}}
+    milestones = []
+
+    # --- CUMULATIVE DISTANCE ---
+    cum_dist = df['distance_km'].cumsum()
+    for threshold, label, icon, importance in [
+        (1000,'1,000 km','\U0001f30d',2),(2000,'2,000 km','\U0001f30d',1),(5000,'5,000 km','\U0001f30f',2),
+        (10000,'10,000 km','\U0001f30e',3),(15000,'15,000 km','\U0001f310',2),(20000,'20,000 km','\U0001f6e4\ufe0f',3),
+        (25000,'25,000 km','\U0001f3d4\ufe0f',3),(30000,'30,000 km','\U0001f680',3)]:
+        idx = cum_dist[cum_dist >= threshold].index
+        if len(idx) > 0:
+            row = df.loc[idx[0]]
+            milestones.append({'date': row['date'].strftime('%Y-%m-%d'), 'category': 'distance',
+                'title': f'{label} Total Distance', 'description': f'Reached {label} on run #{idx[0]+1:,}',
+                'icon': icon, 'importance': importance, 'value': threshold})
+
+    # --- RUN COUNTS ---
+    for threshold, icon, importance in [(100,'\U0001f4af',2),(250,'\U0001f4ca',1),(500,'\U0001f4ca',2),(1000,'\U0001f525',3),
+            (1500,'\U0001f525',2),(2000,'\u26a1',3),(2500,'\u26a1',2),(3000,'\U0001f48e',3)]:
+        if threshold <= len(df):
+            row = df.iloc[threshold - 1]
+            milestones.append({'date': row['date'].strftime('%Y-%m-%d'), 'category': 'runs',
+                'title': f'Run #{threshold:,}', 'description': f'{row["distance_km"]:.1f}km \u2014 {row.get("activity_name", "")}',
+                'icon': icon, 'importance': importance, 'value': threshold})
+
+    # --- RACE PBs ---
+    races = df[df['race_flag'] == 1].copy()
+    dist_names = {5.0: '5K', 10.0: '10K', 21.097: 'Half Marathon', 42.195: 'Marathon'}
+    for dist in [5.0, 10.0, 21.097, 42.195]:
+        dist_races = races[races['official_distance_km'] == dist].sort_values('date')
+        if len(dist_races) == 0:
+            continue
+        running_best = dist_races['elapsed_time_s'].cummin()
+        pb_runs = dist_races[dist_races['elapsed_time_s'] == running_best]
+        for i, (idx, row) in enumerate(pb_runs.iterrows()):
+            t = row['elapsed_time_s']
+            hrs, mins, secs = int(t // 3600), int((t % 3600) // 60), int(t % 60)
+            time_str = f'{hrs}:{mins:02d}:{secs:02d}' if hrs > 0 else f'{mins}:{secs:02d}'
+            dist_name = dist_names.get(dist, f'{dist}km')
+            is_first, is_latest = (i == 0), (i == len(pb_runs) - 1)
+            importance = 3 if is_latest else 1
+            name = row.get('activity_name', '')
+            if isinstance(name, str) and len(name) > 50:
+                name = name[:47] + '...'
+            milestones.append({'date': row['date'].strftime('%Y-%m-%d'), 'category': 'pb',
+                'title': f'{dist_name} PB: {time_str}', 'description': name if isinstance(name, str) else '',
+                'icon': '\U0001f3c5' if is_latest else '\U0001f3af', 'importance': importance,
+                'value': t, 'distance_km': dist, 'is_current_pb': is_latest})
+
+    # --- FITNESS (RFL_Trend) ---
+    rfl = df[['date', 'RFL_Trend']].dropna(subset=['RFL_Trend'])
+    if len(rfl) > 0:
+        peak_idx = rfl['RFL_Trend'].idxmax()
+        peak_row = df.loc[peak_idx]
+        milestones.append({'date': peak_row['date'].strftime('%Y-%m-%d'), 'category': 'fitness',
+            'title': f'Peak Fitness: {peak_row["RFL_Trend"]:.1%}', 'description': 'All-time highest RFL',
+            'icon': '\u2b50', 'importance': 3, 'value': peak_row['RFL_Trend']})
+        for threshold, label, imp in [(0.50,'50%',1),(0.60,'60%',1),(0.70,'70%',2),(0.80,'80%',2),(0.90,'90%',3),(0.95,'95%',3)]:
+            above = rfl[rfl['RFL_Trend'] >= threshold]
+            if len(above) > 0:
+                first_row = df.loc[above.index[0]]
+                milestones.append({'date': first_row['date'].strftime('%Y-%m-%d'), 'category': 'fitness',
+                    'title': f'First {label} RFL', 'description': f'Running Fitness Level first reached {label}',
+                    'icon': '\U0001f4c8', 'importance': imp, 'value': threshold})
+
+    # --- AGE GRADE ---
+    if 'age_grade_pct' in df.columns:
+        ag = df[df['age_grade_pct'].notna() & (df['race_flag'] == 1)].copy()
+        if len(ag) > 0:
+            best_ag = df.loc[ag['age_grade_pct'].idxmax()]
+            milestones.append({'date': best_ag['date'].strftime('%Y-%m-%d'), 'category': 'age_grade',
+                'title': f'Best Age Grade: {best_ag["age_grade_pct"]:.1f}%',
+                'description': best_ag.get('activity_name', ''), 'icon': '\U0001f451', 'importance': 3,
+                'value': best_ag['age_grade_pct']})
+            for threshold, label, level, imp in [(60,'60%','Regional',1),(65,'65%','Regional+',1),
+                    (70,'70%','Local',2),(75,'75%','National',2),(80,'80%','National+',3)]:
+                ag_sorted = ag.sort_values('date')
+                above = ag_sorted[ag_sorted['age_grade_pct'].cummax() >= threshold]
+                if len(above) > 0:
+                    first_row = df.loc[above.index[0]]
+                    milestones.append({'date': first_row['date'].strftime('%Y-%m-%d'), 'category': 'age_grade',
+                        'title': f'First {label} Age Grade', 'description': f'{level} class',
+                        'icon': '\U0001f396\ufe0f', 'importance': imp, 'value': threshold})
+
+    # --- YEARLY VOLUME ---
+    yearly = df.groupby(df['date'].dt.year).agg(total_dist=('distance_km', 'sum'))
+    for threshold, label, imp in [(1000,'1,000 km Year',1),(1500,'1,500 km Year',2),(2000,'2,000 km Year',2),
+            (2500,'2,500 km Year',3),(3000,'3,000 km Year',3)]:
+        years_above = yearly[yearly['total_dist'] >= threshold]
+        if len(years_above) > 0:
+            fy = years_above.index[0]
+            yr = df[df['date'].dt.year == fy].copy()
+            cross = yr['distance_km'].cumsum()
+            cidx = cross[cross >= threshold].index
+            if len(cidx) > 0:
+                cr = df.loc[cidx[0]]
+                milestones.append({'date': cr['date'].strftime('%Y-%m-%d'), 'category': 'yearly',
+                    'title': f'{label} ({fy})', 'description': f'First year reaching {label}',
+                    'icon': '\U0001f4c5', 'importance': imp, 'value': threshold})
+
+    # --- CONSISTENCY ---
+    run_dates = sorted(df['date'].dt.date.unique())
+    if len(run_dates) > 1:
+        streak = max_streak = 1
+        max_streak_end = best_start = cur_start = run_dates[0]
+        for i in range(1, len(run_dates)):
+            if (run_dates[i] - run_dates[i-1]).days == 1:
+                streak += 1
+                if streak > max_streak:
+                    max_streak, max_streak_end, best_start = streak, run_dates[i], cur_start
+            else:
+                streak, cur_start = 1, run_dates[i]
+        if max_streak >= 7:
+            milestones.append({'date': max_streak_end.strftime('%Y-%m-%d'), 'category': 'consistency',
+                'title': f'{max_streak}-Day Streak',
+                'description': f'{best_start.strftime("%d %b")} to {max_streak_end.strftime("%d %b %Y")}',
+                'icon': '\U0001f525', 'importance': 2 if max_streak >= 14 else 1, 'value': max_streak})
+
+    df_c = df.copy()
+    df_c['iso_year'] = df_c['date'].dt.isocalendar().year.astype(int)
+    df_c['iso_week'] = df_c['date'].dt.isocalendar().week.astype(int)
+    wc = df_c.groupby(['iso_year', 'iso_week']).size().reset_index(name='runs').sort_values(['iso_year', 'iso_week'])
+    for min_r, label in [(4, '4+ runs/week'), (5, '5+ runs/week')]:
+        streak = mx = 0; mx_row = None
+        for _, wr in wc.iterrows():
+            if wr['runs'] >= min_r:
+                streak += 1
+                if streak > mx: mx, mx_row = streak, wr
+            else:
+                streak = 0
+        if mx >= 10 and mx_row is not None:
+            ed = datetime.strptime(f"{int(mx_row['iso_year'])}-W{int(mx_row['iso_week']):02d}-7", "%G-W%V-%u").date()
+            milestones.append({'date': ed.strftime('%Y-%m-%d'), 'category': 'consistency',
+                'title': f'{mx} Weeks of {label}', 'description': 'Longest streak of consistent training',
+                'icon': '\U0001f4c6', 'importance': 2 if mx >= 26 else 1, 'value': mx})
+
+    # --- RACE COUNTS ---
+    rc = (df['race_flag'] == 1).cumsum()
+    for threshold, label, icon, imp in [(50,'50th Race','\U0001f3c1',1),(100,'100th Race','\U0001f3c1',2),
+            (200,'200th Race','\U0001f3c1',2),(300,'300th Race','\U0001f3c1',3)]:
+        idx = rc[rc >= threshold].index
+        if len(idx) > 0:
+            row = df.loc[idx[0]]
+            milestones.append({'date': row['date'].strftime('%Y-%m-%d'), 'category': 'races',
+                'title': label, 'description': row.get('activity_name', ''),
+                'icon': icon, 'importance': imp, 'value': threshold})
+
+    # --- NEXT MILESTONES ---
+    next_ms = []
+    td, tr, trc = df['distance_km'].sum(), len(df), int((df['race_flag']==1).sum())
+    for thr, lab, ic in [(1000,'1,000 km','\U0001f30d'),(2000,'2,000 km','\U0001f30d'),(5000,'5,000 km','\U0001f30f'),
+            (10000,'10,000 km','\U0001f30e'),(15000,'15,000 km','\U0001f310'),(20000,'20,000 km','\U0001f6e4\ufe0f'),
+            (25000,'25,000 km','\U0001f3d4\ufe0f'),(30000,'30,000 km','\U0001f680')]:
+        if td < thr:
+            rem = thr - td
+            rec = df[df['date'] >= df['date'].max() - pd.Timedelta(days=90)]
+            da = rec['distance_km'].sum() / 90 if len(rec) > 0 else 0
+            next_ms.append({'category':'distance','title':f'{lab} Total Distance','remaining':f'{rem:.0f} km to go',
+                'est_days': int(rem/da) if da > 0 else None, 'icon':ic, 'pct_complete': td/thr*100})
+            break
+    for thr, ic in [(100,'\U0001f4af'),(250,'\U0001f4ca'),(500,'\U0001f4ca'),(1000,'\U0001f525'),
+            (1500,'\U0001f525'),(2000,'\u26a1'),(2500,'\u26a1'),(3000,'\U0001f48e')]:
+        if tr < thr:
+            next_ms.append({'category':'runs','title':f'Run #{thr:,}','remaining':f'{thr-tr} runs to go',
+                'icon':ic,'pct_complete':tr/thr*100})
+            break
+    for thr, ic in [(50,'\U0001f3c1'),(100,'\U0001f3c1'),(200,'\U0001f3c1'),(300,'\U0001f3c1')]:
+        if trc < thr:
+            next_ms.append({'category':'races','title':f'{thr}th Race','remaining':f'{thr-trc} races to go',
+                'icon':ic,'pct_complete':trc/thr*100})
+            break
+
+    milestones.sort(key=lambda m: m['date'])
+    recent_achievements = get_recent_achievements(df, lookback_days=30)
+    return {'milestones': milestones, 'next_milestones': next_ms, 'recent_achievements': recent_achievements,
+        'summary': {'total_distance_km': td, 'total_runs': tr, 'total_races': trc,
+            'years_active': len(df['date'].dt.year.unique()),
+            'first_run': df['date'].min().strftime('%Y-%m-%d'), 'latest_run': df['date'].max().strftime('%Y-%m-%d')}}
+
+
+def _generate_recent_achievements_html(milestone_data):
+    """Generate Recent Achievements card (hidden if none)."""
+    recent = milestone_data.get('recent_achievements', [])
+    if not recent:
+        return '<!-- recent achievements: none -->'
+    recent_json = json.dumps(recent)
+    return f'''
+    <div class="chart-container" id="recentAchievementsSection">
+        <div class="chart-title">\U0001f525 Recent Achievements</div>
+        <div class="chart-desc">Last 30 days</div>
+        <div id="recentAchievementsList"></div>
+    </div>
+    <script>
+    (function() {{
+        const ra = {recent_json};
+        document.getElementById('recentAchievementsList').innerHTML = ra.map(a => {{
+            const wb = a.window==='all-time'
+                ? '<span style="font-size:9px;padding:1px 5px;border-radius:3px;background:#f59e0b22;color:#f59e0b;font-weight:600;">ALL-TIME</span>'
+                : `<span style="font-size:9px;padding:1px 5px;border-radius:3px;background:#818cf822;color:#818cf8;font-weight:500;">${{a.window}}</span>`;
+            const nm = a.description&&a.description.length>60?a.description.slice(0,57)+'...':(a.description||'');
+            const sc = a.significance>=5?'#f59e0b':(a.significance>=3?'#818cf8':'#94a3b8');
+            const st = a.significance>=5?'\u2605\u2605\u2605':(a.significance>=3?'\u2605\u2605':'\u2605');
+            return `<div style="padding:8px 10px;border-bottom:1px solid var(--border,#2e3340);display:flex;align-items:center;gap:8px;">
+                <span style="font-size:22px;">${{a.icon}}</span>
+                <div style="flex:1;min-width:0;">
+                    <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
+                        <span style="font-weight:600;color:var(--text,#e4e7ef);font-size:13px;">${{a.title}}</span>
+                        ${{wb}}
+                    </div>
+                    <div style="font-size:11px;color:var(--text-dim,#8b8fa3);margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${{nm}}</div>
+                </div>
+                <div style="font-size:10px;color:${{sc}};white-space:nowrap;">${{st}}</div>
+            </div>`;
+        }}).join('');
+    }})();
+    </script>
+    '''
+
+
+def _generate_milestones_html(milestone_data):
+    """Generate all-time Milestones card with toggle filters."""
+    milestones = milestone_data.get('milestones', [])
+    next_milestones = milestone_data.get('next_milestones', [])
+    summary = milestone_data.get('summary', {})
+    if not milestones:
+        return '<!-- milestones: no data -->'
+    mj = json.dumps(milestones)
+    nj = json.dumps(next_milestones)
+    tr, td, trc, ya = summary.get('total_runs',0), summary.get('total_distance_km',0), summary.get('total_races',0), summary.get('years_active',0)
+    return f'''
+    <div class="chart-container" id="milestonesSection">
+        <div class="chart-title-row">
+            <span class="chart-title">\U0001f3c6 Milestones</span>
+            <div class="chart-toggle" id="milestoneToggle">
+                <button class="active" data-filter="highlights">Top</button>
+                <button data-filter="pbs">PBs</button>
+                <button data-filter="volume">Volume</button>
+                <button data-filter="fitness">Fitness</button>
+                <button data-filter="all">All</button>
+            </div>
+        </div>
+        <div class="chart-desc">{tr:,} runs \u00b7 {td:,.0f} km \u00b7 {trc} races \u00b7 {ya} years</div>
+        <div id="nextMilestones" style="display:flex;gap:8px;flex-wrap:wrap;margin:10px 0 14px 0;"></div>
+        <div id="milestoneTimeline" style="max-height:420px;overflow-y:auto;padding-right:4px;"></div>
+    </div>
+    <script>
+    (function() {{
+        const allM={mj}; const nextM={nj};
+        const nc=document.getElementById('nextMilestones');
+        if(nextM.length>0){{nc.innerHTML=nextM.map(m=>{{const p=Math.min(m.pct_complete,100).toFixed(1);const e=m.est_days?` \u00b7 ~${{m.est_days}}d`:'';return `<div style="flex:1;min-width:140px;background:var(--card-bg,#1a1d27);border:1px solid var(--border,#2e3340);border-radius:8px;padding:8px 10px;"><div style="font-size:11px;color:var(--text-dim,#8b8fa3);margin-bottom:4px;">${{m.icon}} ${{m.title}}</div><div style="background:var(--bg,#0f1117);border-radius:4px;height:6px;overflow:hidden;"><div style="width:${{p}}%;height:100%;background:var(--accent,#818cf8);border-radius:4px;"></div></div><div style="font-size:10px;color:var(--text-dim,#8b8fa3);margin-top:3px;">${{m.remaining}}${{e}}</div></div>`;}}).join('')}}else{{nc.style.display='none'}}
+        const cc={{distance:'#818cf8',runs:'#60a5fa',pb:'#f59e0b',fitness:'#4ade80',age_grade:'#f472b6',yearly:'#38bdf8',consistency:'#fb923c',races:'#a78bfa'}};
+        const cl={{distance:'Distance',runs:'Runs',pb:'PB',fitness:'Fitness',age_grade:'Age Grade',yearly:'Yearly',consistency:'Streak',races:'Races'}};
+        function fd(s){{const d=new Date(s);return d.getDate()+' '+['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][d.getMonth()]+' '+d.getFullYear()}}
+        function render(f){{let fl;if(f==='highlights')fl=[...allM].filter(m=>m.importance>=2).sort((a,b)=>b.importance!==a.importance?b.importance-a.importance:new Date(b.date)-new Date(a.date));else if(f==='pbs')fl=allM.filter(m=>m.category==='pb').sort((a,b)=>new Date(b.date)-new Date(a.date));else if(f==='volume')fl=allM.filter(m=>['distance','runs','yearly','races'].includes(m.category)).sort((a,b)=>new Date(b.date)-new Date(a.date));else if(f==='fitness')fl=allM.filter(m=>['fitness','age_grade','consistency'].includes(m.category)).sort((a,b)=>new Date(b.date)-new Date(a.date));else fl=[...allM].sort((a,b)=>new Date(b.date)-new Date(a.date));const c=document.getElementById('milestoneTimeline');if(!fl.length){{c.innerHTML='<div style="color:var(--text-dim,#8b8fa3);padding:20px;text-align:center;">No milestones yet</div>';return}}c.innerHTML=fl.map(m=>{{const co=cc[m.category]||'#818cf8';const st=m.importance>=3?'\u2605\u2605\u2605':(m.importance>=2?'\u2605\u2605':'\u2605');const sc=m.importance>=3?'#f59e0b':(m.importance>=2?'#94a3b8':'#475569');const pb=m.is_current_pb?' style="border-left:3px solid #f59e0b;"':'';return `<div class="milestone-item"${{pb}}><div style="display:flex;align-items:center;gap:8px;"><span style="font-size:20px;">${{m.icon}}</span><div style="flex:1;min-width:0;"><div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;"><span style="font-weight:600;color:var(--text,#e4e7ef);font-size:13px;">${{m.title}}</span><span style="font-size:9px;padding:1px 5px;border-radius:3px;background:${{co}}22;color:${{co}};font-weight:500;">${{cl[m.category]||m.category}}</span><span style="font-size:10px;color:${{sc}};">${{st}}</span></div><div style="font-size:11px;color:var(--text-dim,#8b8fa3);margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${{m.description}}</div></div><div style="font-size:11px;color:var(--text-dim,#8b8fa3);white-space:nowrap;">${{fd(m.date)}}</div></div></div>`}}).join('')}}
+        document.querySelectorAll('#milestoneToggle button').forEach(b=>{{b.addEventListener('click',function(){{document.querySelectorAll('#milestoneToggle button').forEach(x=>x.classList.remove('active'));this.classList.add('active');render(this.dataset.filter)}})}}); render('highlights');
+    }})();
+    </script>
+    '''
+
+
+# --- Add milestone-item CSS to existing styles ---
+_MILESTONE_CSS = '''
+    .milestone-item { padding: 8px 10px; border-bottom: 1px solid var(--border, #2e3340); transition: background 0.15s; }
+    .milestone-item:hover { background: rgba(129, 140, 248, 0.04); }
+    .milestone-item:last-child { border-bottom: none; }
+    #milestoneTimeline::-webkit-scrollbar { width: 4px; }
+    #milestoneTimeline::-webkit-scrollbar-track { background: transparent; }
+    #milestoneTimeline::-webkit-scrollbar-thumb { background: var(--border, #2e3340); border-radius: 2px; }
+'''
+
+
 def _generate_alert_banner(alert_data, critical_power=None):
     """Generate dark-themed alert banner with per-mode switching."""
     import json as _json
@@ -2683,7 +3051,7 @@ def _generate_alert_banner(alert_data, critical_power=None):
     # The initial call uses the fallback CP value.
 
 
-def generate_html(stats, rf_data, volume_data, ctl_atl_data, ctl_atl_lookup, rfl_trend_dates, rfl_trend_values, rfl_trendline, rfl_projection, rfl_ci_upper, rfl_ci_lower, alltime_rfl_dates, alltime_rfl_values, recent_runs, top_races, alert_data=None, weight_data=None, prediction_data=None, ag_data=None, zone_data=None, rfl_trend_gap=None, rfl_trend_sim=None):
+def generate_html(stats, rf_data, volume_data, ctl_atl_data, ctl_atl_lookup, rfl_trend_dates, rfl_trend_values, rfl_trendline, rfl_projection, rfl_ci_upper, rfl_ci_lower, alltime_rfl_dates, alltime_rfl_values, recent_runs, top_races, alert_data=None, weight_data=None, prediction_data=None, ag_data=None, zone_data=None, rfl_trend_gap=None, rfl_trend_sim=None, milestone_data=None):
     """Generate the HTML dashboard."""
     
     # --- Helper for None-safe delta formatting ---
@@ -3127,6 +3495,14 @@ def generate_html(stats, rf_data, volume_data, ctl_atl_data, ctl_atl_lookup, rfl
             font-weight: bold;
         }}
         
+        /* Milestones */
+        .milestone-item {{ padding: 8px 10px; border-bottom: 1px solid var(--border); transition: background 0.15s; }}
+        .milestone-item:hover {{ background: rgba(129, 140, 248, 0.04); }}
+        .milestone-item:last-child {{ border-bottom: none; }}
+        #milestoneTimeline::-webkit-scrollbar {{ width: 4px; }}
+        #milestoneTimeline::-webkit-scrollbar-track {{ background: transparent; }}
+        #milestoneTimeline::-webkit-scrollbar-thumb {{ background: var(--border); border-radius: 2px; }}
+        
         .footer {{
             text-align: center;
             font-size: 0.72em;
@@ -3419,6 +3795,9 @@ function raceAnnotations(dates) {{
     <!-- Training Zones Section -->
     {_generate_zone_html(zone_data, stats)}
     
+    <!-- Recent Achievements (after zones, before RFL chart) -->
+    {_generate_recent_achievements_html(milestone_data) if milestone_data else ''}
+    
     <!-- RF Trend Chart -->
     <div class="chart-container">
         <div class="chart-header">
@@ -3644,6 +4023,9 @@ function raceAnnotations(dates) {{
         </div>
     </div>
     """]) if top_races and any(top_races.get(k) for k in top_races) else ''}
+    
+    <!-- All-Time Milestones (career retrospective at bottom) -->
+    {_generate_milestones_html(milestone_data) if milestone_data else ''}
     
     <div class="footer">
         Updated: {datetime.now().strftime('%Y-%m-%d %H:%M')}<br>
@@ -5183,9 +5565,16 @@ def main():
     print("Getting zone data...")
     zone_data = get_zone_data(df)
     
+    # Milestones data
+    print("Computing milestones...")
+    milestone_data = get_milestones_data(df)
+    n_ms = len(milestone_data.get('milestones', []))
+    n_ra = len(milestone_data.get('recent_achievements', []))
+    print(f"  {n_ms} milestones, {n_ra} recent achievements")
+    
     # Generate HTML
     print("Generating HTML...")
-    html = generate_html(stats, rf_data, volume_data, ctl_atl_data, ctl_atl_lookup, rfl_trend_dates, rfl_trend_values, rfl_trendline, rfl_projection, rfl_ci_upper, rfl_ci_lower, alltime_rfl_dates, alltime_rfl_values, recent_runs, top_races, alert_data=alert_data, weight_data=weight_data, prediction_data=prediction_data, ag_data=ag_data, zone_data=zone_data, rfl_trend_gap={'values': rfl_trend_gap_values, 'trendline': rfl_trendline_gap, 'projection': rfl_proj_gap, 'ci_upper': rfl_ci_upper_gap, 'ci_lower': rfl_ci_lower_gap}, rfl_trend_sim={'values': rfl_trend_sim_values, 'trendline': rfl_trendline_sim, 'projection': rfl_proj_sim, 'ci_upper': rfl_ci_upper_sim, 'ci_lower': rfl_ci_lower_sim})
+    html = generate_html(stats, rf_data, volume_data, ctl_atl_data, ctl_atl_lookup, rfl_trend_dates, rfl_trend_values, rfl_trendline, rfl_projection, rfl_ci_upper, rfl_ci_lower, alltime_rfl_dates, alltime_rfl_values, recent_runs, top_races, alert_data=alert_data, weight_data=weight_data, prediction_data=prediction_data, ag_data=ag_data, zone_data=zone_data, rfl_trend_gap={'values': rfl_trend_gap_values, 'trendline': rfl_trendline_gap, 'projection': rfl_proj_gap, 'ci_upper': rfl_ci_upper_gap, 'ci_lower': rfl_ci_lower_gap}, rfl_trend_sim={'values': rfl_trend_sim_values, 'trendline': rfl_trendline_sim, 'projection': rfl_proj_sim, 'ci_upper': rfl_ci_upper_sim, 'ci_lower': rfl_ci_lower_sim}, milestone_data=milestone_data)
     
     # Write file
     with open(OUTPUT_FILE, 'w', encoding='utf-8') as f:
