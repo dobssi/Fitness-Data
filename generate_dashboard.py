@@ -2743,17 +2743,20 @@ def get_recent_achievements(df, lookback_days=30):
                         'title': f'{slabel}{dist_name} PB: {time_str}', 'description': r.get('activity_name', ''),
                         'icon': '\U0001f3c5', 'significance': 4, 'window': f'{slabel.strip()} PB'})
 
-    # --- RFL TREND ---
+    # --- RFL TREND (mode-aware) ---
+    _rfl_trend_col = {'gap': 'RFL_gap_Trend', 'sim': 'RFL_sim_Trend'}.get(_cfg_power_mode, 'RFL_Trend')
+    if _rfl_trend_col not in df.columns or df[_rfl_trend_col].dropna().empty:
+        _rfl_trend_col = 'RFL_Trend'  # fallback
     recent_all = df[df['date'] >= cutoff]
-    if len(recent_all) > 0 and 'RFL_Trend' in df.columns:
-        rfl_recent = recent_all[['date', 'RFL_Trend']].dropna()
+    if len(recent_all) > 0 and _rfl_trend_col in df.columns:
+        rfl_recent = recent_all[['date', _rfl_trend_col]].dropna()
         if len(rfl_recent) > 0:
-            peak_row = rfl_recent.loc[rfl_recent['RFL_Trend'].idxmax()]
-            peak_val, peak_date = peak_row['RFL_Trend'], peak_row['date']
+            peak_row = rfl_recent.loc[rfl_recent[_rfl_trend_col].idxmax()]
+            peak_val, peak_date = peak_row[_rfl_trend_col], peak_row['date']
             best_window = None
             for months_back, label in [(3, '3 months'), (6, '6 months'), (12, '1 year'), (24, '2 years')]:
                 lookback_start = peak_date - pd.Timedelta(days=30 * months_back)
-                prev = df[(df['date'] >= lookback_start) & (df['date'] < peak_date)]['RFL_Trend'].dropna()
+                prev = df[(df['date'] >= lookback_start) & (df['date'] < peak_date)][_rfl_trend_col].dropna()
                 if len(prev) > 0 and peak_val >= prev.max():
                     best_window = (months_back, label)
                 else:
@@ -2952,16 +2955,19 @@ def get_milestones_data(df):
                         'icon': '\U0001f3c6', 'importance': 1, 'value': sag,
                         'is_current_pb': True, 'is_ag_pb': True})
 
-    # --- FITNESS (RFL_Trend) ---
-    rfl = df[['date', 'RFL_Trend']].dropna(subset=['RFL_Trend'])
+    # --- FITNESS (RFL_Trend - mode-aware) ---
+    _rfl_trend_col = {'gap': 'RFL_gap_Trend', 'sim': 'RFL_sim_Trend'}.get(_cfg_power_mode, 'RFL_Trend')
+    if _rfl_trend_col not in df.columns or df[_rfl_trend_col].dropna().empty:
+        _rfl_trend_col = 'RFL_Trend'  # fallback
+    rfl = df[['date', _rfl_trend_col]].dropna(subset=[_rfl_trend_col])
     if len(rfl) > 0:
-        peak_idx = rfl['RFL_Trend'].idxmax()
+        peak_idx = rfl[_rfl_trend_col].idxmax()
         peak_row = df.loc[peak_idx]
         milestones.append({'date': peak_row['date'].strftime('%Y-%m-%d'), 'category': 'fitness',
-            'title': f'Peak Fitness: {peak_row["RFL_Trend"]:.1%}', 'description': 'All-time highest RFL',
-            'icon': '\u2b50', 'importance': 3, 'value': peak_row['RFL_Trend']})
+            'title': f'Peak Fitness: {peak_row[_rfl_trend_col]:.1%}', 'description': 'All-time highest RFL',
+            'icon': '\u2b50', 'importance': 3, 'value': peak_row[_rfl_trend_col]})
         for threshold, label, imp in [(0.50,'50%',1),(0.60,'60%',1),(0.70,'70%',2),(0.80,'80%',2),(0.90,'90%',3),(0.95,'95%',3)]:
-            above = rfl[rfl['RFL_Trend'] >= threshold]
+            above = rfl[rfl[_rfl_trend_col] >= threshold]
             if len(above) > 0:
                 first_row = df.loc[above.index[0]]
                 milestones.append({'date': first_row['date'].strftime('%Y-%m-%d'), 'category': 'fitness',
