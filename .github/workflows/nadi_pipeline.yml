@@ -37,7 +37,7 @@ concurrency:
 jobs:
   pipeline:
     runs-on: ubuntu-latest
-    timeout-minutes: 240
+    timeout-minutes: 600
 
     env:
       DROPBOX_TOKEN: ${{ secrets.DROPBOX_TOKEN }}

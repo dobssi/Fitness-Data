@@ -86,7 +86,7 @@ concurrency:
 jobs:
   pipeline:
     runs-on: ubuntu-latest
-    timeout-minutes: 300
+    timeout-minutes: 600
     
     env:
       INTERVALS_API_KEY: ${{ secrets.INTERVALS_API_KEY }}
