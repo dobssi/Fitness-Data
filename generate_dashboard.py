@@ -2997,13 +2997,12 @@ def _generate_recent_achievements_html(milestone_data):
     <script>
     (function() {{
         const ra = {recent_json};
+        function fmtDate(s) {{ const d=new Date(s); const m=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']; return d.getDate()+' '+m[d.getMonth()]; }}
         document.getElementById('recentAchievementsList').innerHTML = ra.map(a => {{
             const wb = a.window==='all-time'
                 ? '<span style="font-size:9px;padding:1px 5px;border-radius:3px;background:#f59e0b22;color:#f59e0b;font-weight:600;">ALL-TIME</span>'
                 : `<span style="font-size:9px;padding:1px 5px;border-radius:3px;background:#818cf822;color:#818cf8;font-weight:500;">${{a.window}}</span>`;
             const nm = a.description&&a.description.length>60?a.description.slice(0,57)+'...':(a.description||'');
-            const sc = a.significance>=5?'#f59e0b':(a.significance>=3?'#818cf8':'#94a3b8');
-            const st = a.significance>=5?'\u2605\u2605\u2605':(a.significance>=3?'\u2605\u2605':'\u2605');
             return `<div style="padding:8px 10px;border-bottom:1px solid var(--border,#2e3340);display:flex;align-items:center;gap:8px;">
                 <span style="font-size:22px;">${{a.icon}}</span>
                 <div style="flex:1;min-width:0;">
@@ -3013,7 +3012,7 @@ def _generate_recent_achievements_html(milestone_data):
                     </div>
                     <div style="font-size:11px;color:var(--text-dim,#8b8fa3);margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${{nm}}</div>
                 </div>
-                <div style="font-size:10px;color:${{sc}};white-space:nowrap;">${{st}}</div>
+                <div style="font-size:11px;color:var(--text-dim,#8b8fa3);white-space:nowrap;">${{fmtDate(a.date)}}</div>
             </div>`;
         }}).join('');
     }})();
