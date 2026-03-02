@@ -411,12 +411,11 @@
 
     <div class="success-msg" id="successMsg">
         <h2>✅ Profile Submitted!</h2>
-        <p style="color: var(--text-muted); font-size: 0.88rem; margin-bottom: 0.5rem;">
-            Your config file has been downloaded and your email is ready to send.
+        <p style="color: var(--text-muted); font-size: 0.88rem; margin-bottom: 1rem;">
+            Your email is ready to send — all your details are included in the body.
         </p>
         <p style="color: var(--warning); font-size: 0.85rem; margin-bottom: 1rem;">
-            📎 Attach the downloaded <strong>.json file</strong> to your email before sending.<br>
-            📤 Then upload your Garmin/Strava data via the Dropbox link.
+            📤 Now upload your Garmin/Strava data via the Dropbox link below.
         </p>
         <div class="actions" style="justify-content: center;">
             <a href="https://www.dropbox.com/request/UWGoW1kajiL1H9FacteU" target="_blank" class="btn btn-primary" style="text-decoration: none;">Upload Data →</a>
@@ -659,44 +658,6 @@ function submitProfile() {
     }
     saveProfile(data);
 
-    // Build the JSON config for onboard_athlete.py
-    const config = {
-        name: data.name,
-        email: data.email,
-        dob: data.dob,
-        gender: data.gender,
-        mass_kg: parseFloat(data.weight_kg) || 70,
-        timezone: data.timezone,
-        max_hr: data.max_hr === 'estimate' ? null : (parseInt(data.max_hr) || null),
-        lthr: data.lthr === 'estimate' ? null : (parseInt(data.lthr) || null),
-        data_source: data.intervals_id ? 'intervals' : 'strava_export',
-        intervals_id: data.intervals_id || null,
-        intervals_key: data.intervals_key || null,
-        planned_races: data.upcoming.map(r => ({
-            name: r.name, date: r.date,
-            distance_km: parseFloat(r.dist_km), priority: r.priority, surface: 'road'
-        })),
-        race_times: data.pbs.map(p => ({
-            date: p.date || null,
-            distance_km: parseFloat(p.dist_km),
-            time_s: p.time_s
-        }))
-    };
-
-    // Download JSON config file automatically
-    const jsonStr = JSON.stringify(config, null, 2);
-    const blob = new Blob([jsonStr], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    const safeName = data.name.replace(/[^a-zA-Z0-9]/g, '_').toLowerCase();
-    a.href = url;
-    a.download = `${safeName}_config.json`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
-
-    // Build and open mailto with human-readable summary
     let body = buildEmailBody(data);
     const subject = encodeURIComponent(`Running Profile — ${data.name}`);
     const bodyEnc = encodeURIComponent(body);
@@ -763,7 +724,29 @@ function buildEmailBody(d) {
     }
 
     b += `\nSubmitted: ${new Date().toISOString()}\n`;
-    b += `\n(Config file attached as ${d.name.replace(/[^a-zA-Z0-9]/g, '_').toLowerCase()}_config.json)\n`;
+
+    // Machine-readable JSON config — save as new_athlete.json and run:
+    // python onboard_athlete.py --config new_athlete.json
+    const config = {
+        name: d.name, email: d.email, dob: d.dob, gender: d.gender,
+        mass_kg: parseFloat(d.weight_kg) || 70, timezone: d.timezone,
+        max_hr: d.max_hr === 'estimate' ? null : (parseInt(d.max_hr) || null),
+        lthr: d.lthr === 'estimate' ? null : (parseInt(d.lthr) || null),
+        data_source: d.intervals_id ? 'intervals' : 'strava_export',
+        intervals_id: d.intervals_id || null,
+        intervals_key: d.intervals_key || null,
+        planned_races: d.upcoming.map(r => ({
+            name: r.name, date: r.date,
+            distance_km: parseFloat(r.dist_km), priority: r.priority, surface: 'road'
+        })),
+        race_times: d.pbs.map(p => ({
+            date: p.date || null, distance_km: parseFloat(p.dist_km), time_s: p.time_s
+        }))
+    };
+
+    b += `\n${'='.repeat(40)}\nCONFIG JSON — save as new_athlete.json\n${'='.repeat(40)}\n`;
+    b += JSON.stringify(config, null, 2);
+    b += '\n';
 
     return b;
 }
