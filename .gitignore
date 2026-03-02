@@ -87,3 +87,9 @@ analysis/
 athletes/*/export_*.zip
 checkpoint_v51_*.zip 
 checkpoint_v51_*.zip 
+
+# =============================================================================
+# Onboarding
+# =============================================================================
+new_athlete.txt
+checkpoint_v52_*.zip
