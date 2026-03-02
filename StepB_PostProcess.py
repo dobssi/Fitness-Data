@@ -3556,6 +3556,8 @@ def main() -> int:
         "RF_sim_Trend",
         "RFL_sim",
         "RFL_sim_Trend",
+        # v52: Z5 intensity fraction for TSS boost
+        "z5_frac",
     ]
     for c in needed_cols:
         if c not in dfm.columns:
@@ -3925,6 +3927,16 @@ def main() -> int:
             if hrun.size:
                 dfm.at[i, "avg_hr"] = float(np.nanmean(hrun))
                 dfm.at[i, "max_hr"] = float(np.nanmax(hrun))
+
+            # v52: Z5 fraction — time with HR >= LTHR / total running time with valid HR
+            # Used as TSS intensity multiplier: TSS *= (1 + z5_frac)
+            _z5_threshold = float(ATHLETE_LTHR)
+            if hrun.size > 0 and _z5_threshold > 0:
+                _z5_count = float(np.sum(hrun >= _z5_threshold))
+                _z5_frac = _z5_count / float(hrun.size)
+                dfm.at[i, "z5_frac"] = _z5_frac
+            else:
+                dfm.at[i, "z5_frac"] = 0.0
 
             p_run = p[running_mask]
             npw = _calc_np(p_run, win=30)
@@ -4847,6 +4859,7 @@ def main() -> int:
     # Recalculate TSS with RFL now available
     _tss_rfl_col = 'RFL_gap' if POWER_MODE == 'gap' and 'RFL_gap' in dfm.columns else 'RFL'
     print(f"  Recalculating TSS with RFL (using {_tss_rfl_col})...")
+    _z5_boost_count = 0
     for i, row in dfm.iterrows():
         rfl = row.get(_tss_rfl_col)
         if pd.notna(rfl) and rfl > 0:
@@ -4857,7 +4870,14 @@ def main() -> int:
             is_race = bool(row.get('race_flag', 0))
             tss = calc_tss(moving_time_s, avg_hr, rfl, terrain_adj, distance_m, is_race)
             if np.isfinite(tss):
+                # v52: Z5 intensity boost — TSS *= (1 + z5_frac)
+                z5_frac = row.get('z5_frac', 0.0)
+                if pd.notna(z5_frac) and z5_frac > 0:
+                    tss *= (1.0 + z5_frac)
+                    _z5_boost_count += 1
                 dfm.at[i, 'TSS'] = float(tss)
+    if _z5_boost_count > 0:
+        print(f"  Z5 intensity boost applied to {_z5_boost_count} runs")
     
     # Calculate CTL/ATL/TSB
     athlete_data_path = args.athlete_data if hasattr(args, 'athlete_data') else "athlete_data.csv"
@@ -5209,7 +5229,7 @@ def main() -> int:
         "RF_adj", "Factor", "RF_Trend", "RFL", "RFL_Trend",
         # v44.3: Power Score and Combined RFL
         "Power_Score", "Power_Score_Decayed", "RFL_from_Power", "RFL_Combined", "RF_Combined",
-        "TSS", "CTL", "ATL", "TSB",
+        "TSS", "z5_frac", "CTL", "ATL", "TSB",
         "weight_kg",
         # v51: Easy RF metrics and alerts
         "Easy_RF_EMA", "Easy_RF_z", "RFL_Trend_Delta", "Easy_RFL_Gap",
