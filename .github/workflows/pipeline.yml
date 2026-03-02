@@ -250,6 +250,8 @@ jobs:
         run: |
           mkdir -p docs
           cp -f index.html docs/index.html 2>/dev/null || true
+          cp -f onboard.html docs/onboard.html 2>/dev/null || true
+          cp -f pb_corrections.html docs/pb_corrections.html 2>/dev/null || true
         continue-on-error: true
       
       - name: Deploy to GitHub Pages

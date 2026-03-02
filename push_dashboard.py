@@ -54,6 +54,13 @@ def main():
     print(f"Copying {DASHBOARD_SOURCE} -> {dest_path}")
     shutil.copy2(DASHBOARD_SOURCE, dest_path)
     
+    # Copy onboarding pages if they exist
+    for page in ["onboard.html", "pb_corrections.html"]:
+        if os.path.isfile(page):
+            page_dest = os.path.join(REPO_DIR, page)
+            print(f"Copying {page} -> {page_dest}")
+            shutil.copy2(page, page_dest)
+    
     # Git operations
     os.chdir(REPO_DIR)
     
@@ -67,8 +74,8 @@ def main():
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M")
     commit_msg = f"Update dashboard {timestamp}"
     
-    print(f"Adding {DASHBOARD_DEST}...")
-    subprocess.run(["git", "add", DASHBOARD_DEST], check=True)
+    print(f"Adding files...")
+    subprocess.run(["git", "add", DASHBOARD_DEST, "onboard.html", "pb_corrections.html"], check=True)
     
     print(f"Committing: {commit_msg}")
     subprocess.run(["git", "commit", "-m", commit_msg], check=True)

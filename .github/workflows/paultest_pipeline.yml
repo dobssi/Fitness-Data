@@ -28,7 +28,7 @@ on:
         options:
           - UPDATE
           - FULL
-          - FULL_STRAVA
+          - INITIAL
           - FROM_STEPB
           - DASHBOARD
         default: UPDATE
@@ -82,12 +82,12 @@ jobs:
           mkdir -p ${{ env.ATHLETE_DIR }}/output/dashboard
 
       # ═══════════════════════════════════════════════════════════
-      # STRAVA INGEST — only on FULL_STRAVA mode (first-ever run)
+      # STRAVA INGEST — only on INITIAL mode (first-ever run)
       # Downloads the Strava export zip, extracts FITs, builds fits.zip
       # ═══════════════════════════════════════════════════════════
 
       - name: Download Strava export from Dropbox
-        if: ${{ env.PIPELINE_MODE == 'FULL_STRAVA' }}
+        if: ${{ env.PIPELINE_MODE == 'INITIAL' }}
         run: |
           python ci/dropbox_sync.py download \
             --dropbox-base "${{ env.DB_BASE }}" \
@@ -95,7 +95,7 @@ jobs:
             --items data/strava_export.zip
 
       - name: Ingest Strava export
-        if: ${{ env.PIPELINE_MODE == 'FULL_STRAVA' }}
+        if: ${{ env.PIPELINE_MODE == 'INITIAL' }}
         run: |
           python strava_ingest.py \
             --strava-zip ${{ env.ATHLETE_DIR }}/data/strava_export.zip \
@@ -158,7 +158,7 @@ jobs:
         id: gate
         run: |
           MODE="${{ env.PIPELINE_MODE }}"
-          if [ "$MODE" = "FULL_STRAVA" ] || [ "$MODE" = "FULL" ] || [ "$MODE" = "FROM_STEPB" ] || [ "$MODE" = "DASHBOARD" ]; then
+          if [ "$MODE" = "INITIAL" ] || [ "$MODE" = "FULL" ] || [ "$MODE" = "FROM_STEPB" ] || [ "$MODE" = "DASHBOARD" ]; then
             echo "continue=true" >> $GITHUB_OUTPUT
           elif [ "${{ steps.fetch.outputs.new_runs }}" = "true" ]; then
             echo "continue=true" >> $GITHUB_OUTPUT
@@ -212,8 +212,8 @@ jobs:
             --nr-tss-oldest 2013-01-01
         continue-on-error: true
 
-      - name: Rebuild from FIT files (FULL / FULL_STRAVA)
-        if: ${{ steps.gate.outputs.continue == 'true' && (env.PIPELINE_MODE == 'FULL' || env.PIPELINE_MODE == 'FULL_STRAVA') }}
+      - name: Rebuild from FIT files (FULL / INITIAL)
+        if: ${{ steps.gate.outputs.continue == 'true' && (env.PIPELINE_MODE == 'FULL' || env.PIPELINE_MODE == 'INITIAL') }}
         run: |
           python rebuild_from_fit_zip.py \
             --fit-zip ${{ env.ATHLETE_DIR }}/data/fits.zip \
@@ -243,7 +243,7 @@ jobs:
             --weight 76
 
       - name: Add GAP power
-        if: ${{ steps.gate.outputs.continue == 'true' && (env.PIPELINE_MODE == 'FULL' || env.PIPELINE_MODE == 'FULL_STRAVA' || env.PIPELINE_MODE == 'UPDATE') }}
+        if: ${{ steps.gate.outputs.continue == 'true' && (env.PIPELINE_MODE == 'FULL' || env.PIPELINE_MODE == 'INITIAL' || env.PIPELINE_MODE == 'UPDATE') }}
         run: |
           python add_gap_power.py \
             --master ${{ env.ATHLETE_DIR }}/output/Master_FULL.xlsx \
@@ -270,7 +270,7 @@ jobs:
             --progress-every 50
 
       - name: Classify races
-        if: ${{ steps.gate.outputs.continue == 'true' && (env.PIPELINE_MODE == 'FULL' || env.PIPELINE_MODE == 'FULL_STRAVA') }}
+        if: ${{ steps.gate.outputs.continue == 'true' && (env.PIPELINE_MODE == 'FULL' || env.PIPELINE_MODE == 'INITIAL') }}
         run: |
           python classify_races.py \
             --master ${{ env.ATHLETE_DIR }}/output/Master_FULL_post.xlsx \

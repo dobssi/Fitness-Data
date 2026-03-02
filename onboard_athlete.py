@@ -383,8 +383,41 @@ def detect_power_meter(runs: list[dict]) -> dict:
 # ═════════════════════════════════════════════════════════════════════════════
 
 def make_folder_name(name: str) -> str:
-    """Convert 'Ian Lilley' → 'IanLilley'."""
+    """Convert 'Ian Lilley' → 'IanLilley'. Legacy — see next_athlete_id()."""
     return re.sub(r"[^a-zA-Z0-9]", "", name.title().replace(" ", ""))
+
+
+def next_athlete_id(base_dir: str = ".") -> str:
+    """Scan athletes/ for existing A### folders/IDs and return the next one.
+    
+    Looks at both folder names (e.g. athletes/A005/) and athlete_id values
+    in athlete.yml files to find the highest existing ID.
+    """
+    import glob
+    max_id = 0
+    athletes_dir = Path(base_dir) / "athletes"
+    
+    if athletes_dir.exists():
+        for entry in athletes_dir.iterdir():
+            if not entry.is_dir():
+                continue
+            # Check folder name pattern A###
+            m = re.match(r'^A(\d+)$', entry.name)
+            if m:
+                max_id = max(max_id, int(m.group(1)))
+            # Also check athlete.yml inside for athlete_id
+            yml_path = entry / "athlete.yml"
+            if yml_path.exists():
+                try:
+                    with open(yml_path) as f:
+                        for line in f:
+                            m2 = re.search(r'athlete_id:\s*"?A(\d+)"?', line)
+                            if m2:
+                                max_id = max(max_id, int(m2.group(1)))
+                except Exception:
+                    pass
+    
+    return f"A{max_id + 1:03d}"
 
 
 def make_slug(name: str) -> str:
@@ -432,6 +465,7 @@ def generate_athlete_yml(cfg: dict) -> str:
 
 athlete:
   name: "{cfg['name']}"
+  athlete_id: "{cfg.get('athlete_id', 'A000')}"
   mass_kg: {cfg['mass_kg']}
   date_of_birth: "{cfg['dob']}"
   gender: "{cfg['gender']}"
@@ -522,6 +556,7 @@ on:
         options:
           - UPDATE
           - FULL
+          - INITIAL
           - FROM_STEPB
           - DASHBOARD
         default: UPDATE
@@ -539,6 +574,7 @@ on:
         type: choice
         options:
           - FULL
+          - INITIAL
           - FROM_STEPB
           - DASHBOARD
         default: FROM_STEPB"""
@@ -701,8 +737,49 @@ on:
             --nr-tss-oldest 2020-01-01
         continue-on-error: true
 
+      - name: Download initial data (INITIAL only)
+        if: ${{{{ {gc.strip('${{ }}')} && env.PIPELINE_MODE == 'INITIAL' }}}}
+        run: |
+          # Download whatever the athlete uploaded: strava_export.zip, garmin_export.zip, or fits.zip
+          python ci/dropbox_sync.py download \\
+            --dropbox-base "${{{{ env.DB_BASE }}}}" \\
+            --local-prefix "${{{{ env.ATHLETE_DIR }}}}" \\
+            --items data/strava_export.zip data/garmin_export.zip data/fits.zip
+        continue-on-error: true
+
+      - name: Ingest initial data (INITIAL only)
+        if: ${{{{ {gc.strip('${{ }}')} && env.PIPELINE_MODE == 'INITIAL' }}}}
+        run: |
+          # Detect data source and ingest accordingly
+          if [ -f "${{{{ env.ATHLETE_DIR }}}}/data/strava_export.zip" ]; then
+            echo "Found Strava export — running strava_ingest.py"
+            python strava_ingest.py \\
+              --strava-zip ${{{{ env.ATHLETE_DIR }}}}/data/strava_export.zip \\
+              --out-dir ${{{{ env.ATHLETE_DIR }}}}/data/strava_data \\
+              --persec-cache-dir ${{{{ env.ATHLETE_DIR }}}}/persec_cache \\
+              --tz ${{{{ env.TZ_LOCAL }}}}
+            cp -f ${{{{ env.ATHLETE_DIR }}}}/data/strava_data/fits.zip ${{{{ env.ATHLETE_DIR }}}}/data/fits.zip
+            cp -f ${{{{ env.ATHLETE_DIR }}}}/data/strava_data/activities.csv ${{{{ env.ATHLETE_DIR }}}}/data/activities.csv
+          elif [ -f "${{{{ env.ATHLETE_DIR }}}}/data/garmin_export.zip" ]; then
+            echo "Found Garmin export — extracting FIT files"
+            python -c "
+          import zipfile, os, tempfile
+          with zipfile.ZipFile('${{{{ env.ATHLETE_DIR }}}}/data/garmin_export.zip') as zin:
+              fits = [f for f in zin.namelist() if f.lower().endswith('.fit')]
+              print(f'  Found {{len(fits)}} FIT files in Garmin export')
+              with zipfile.ZipFile('${{{{ env.ATHLETE_DIR }}}}/data/fits.zip', 'w') as zout:
+                  for fit in fits:
+                      data = zin.read(fit)
+                      zout.writestr(os.path.basename(fit), data)
+          "
+          elif [ -f "${{{{ env.ATHLETE_DIR }}}}/data/fits.zip" ]; then
+            echo "Found fits.zip — ready to use"
+          else
+            echo "No initial data found — will rely on intervals.icu sync"
+          fi
+
       - name: Rebuild from FIT files (FULL)
-        if: ${{{{ {gc.strip('${{ }}')} && env.PIPELINE_MODE == 'FULL' }}}}
+        if: ${{{{ {gc.strip('${{ }}')} && (env.PIPELINE_MODE == 'FULL' || env.PIPELINE_MODE == 'INITIAL') }}}}
         run: |
           python rebuild_from_fit_zip.py \\
             --fit-zip ${{{{ env.ATHLETE_DIR }}}}/data/fits.zip \\
@@ -731,7 +808,7 @@ on:
             --weight {mass}
 
       - name: Add GAP power
-        if: ${{{{ {gc.strip('${{ }}')} && (env.PIPELINE_MODE == 'FULL' || env.PIPELINE_MODE == 'UPDATE') }}}}
+        if: ${{{{ {gc.strip('${{ }}')} && (env.PIPELINE_MODE == 'FULL' || env.PIPELINE_MODE == 'INITIAL' || env.PIPELINE_MODE == 'UPDATE') }}}}
         run: |
           python add_gap_power.py \\
             --master ${{{{ env.ATHLETE_DIR }}}}/output/Master_FULL.xlsx \\
@@ -825,9 +902,49 @@ on:
             --cache-dir ${{{{ env.ATHLETE_DIR }}}}/persec_cache
         continue-on-error: true
 
+      # ─── Initial data ingest (INITIAL only) ─────────────────
+      - name: Download initial data (INITIAL only)
+        if: ${{{{ github.event.inputs.mode == 'INITIAL' }}}}
+        run: |
+          python ci/dropbox_sync.py download \\
+            --dropbox-base "${{{{ env.DB_BASE }}}}" \\
+            --local-prefix "${{{{ env.ATHLETE_DIR }}}}" \\
+            --items data/strava_export.zip data/garmin_export.zip data/fits.zip
+        continue-on-error: true
+
+      - name: Ingest initial data (INITIAL only)
+        if: ${{{{ github.event.inputs.mode == 'INITIAL' }}}}
+        run: |
+          if [ -f "${{{{ env.ATHLETE_DIR }}}}/data/strava_export.zip" ]; then
+            echo "Found Strava export — running strava_ingest.py"
+            python strava_ingest.py \\
+              --strava-zip ${{{{ env.ATHLETE_DIR }}}}/data/strava_export.zip \\
+              --out-dir ${{{{ env.ATHLETE_DIR }}}}/data/strava_data \\
+              --persec-cache-dir ${{{{ env.ATHLETE_DIR }}}}/persec_cache \\
+              --tz ${{{{ env.TZ_LOCAL }}}}
+            cp -f ${{{{ env.ATHLETE_DIR }}}}/data/strava_data/fits.zip ${{{{ env.ATHLETE_DIR }}}}/data/fits.zip
+            cp -f ${{{{ env.ATHLETE_DIR }}}}/data/strava_data/activities.csv ${{{{ env.ATHLETE_DIR }}}}/data/activities.csv
+          elif [ -f "${{{{ env.ATHLETE_DIR }}}}/data/garmin_export.zip" ]; then
+            echo "Found Garmin export — extracting FIT files"
+            python -c "
+          import zipfile, os
+          with zipfile.ZipFile('${{{{ env.ATHLETE_DIR }}}}/data/garmin_export.zip') as zin:
+              fits = [f for f in zin.namelist() if f.lower().endswith('.fit')]
+              print(f'  Found {{len(fits)}} FIT files in Garmin export')
+              with zipfile.ZipFile('${{{{ env.ATHLETE_DIR }}}}/data/fits.zip', 'w') as zout:
+                  for fit in fits:
+                      zout.writestr(os.path.basename(fit), zin.read(fit))
+          "
+          elif [ -f "${{{{ env.ATHLETE_DIR }}}}/data/fits.zip" ]; then
+            echo "Found fits.zip — ready to use"
+          else
+            echo "ERROR: No initial data found on Dropbox"
+            exit 1
+          fi
+
       # ─── Step 1: Rebuild from FIT files ─────────────────────
       - name: Rebuild from FIT files
-        if: ${{{{ github.event.inputs.mode == 'FULL' }}}}
+        if: ${{{{ github.event.inputs.mode == 'FULL' || github.event.inputs.mode == 'INITIAL' }}}}
         run: |
           python rebuild_from_fit_zip.py \\
             --fit-zip ${{{{ env.ATHLETE_DIR }}}}/data/fits.zip \\
@@ -841,7 +958,7 @@ on:
 
       # ─── Step 2: Add GAP simulated power ────────────────────
       - name: Add GAP power
-        if: ${{{{ github.event.inputs.mode == 'FULL' }}}}
+        if: ${{{{ github.event.inputs.mode == 'FULL' || github.event.inputs.mode == 'INITIAL' }}}}
         run: |
           python add_gap_power.py \\
             --master ${{{{ env.ATHLETE_DIR }}}}/output/Master_FULL.xlsx \\
@@ -959,7 +1076,7 @@ concurrency:
 jobs:
   pipeline:
     runs-on: ubuntu-latest
-    timeout-minutes: 240
+    timeout-minutes: 600
 {env_block}
 {common_steps}
 {sync_block}
@@ -969,8 +1086,8 @@ jobs:
     return workflow
 
 
-def generate_override_xlsx(path: str, races: list[dict] = None):
-    """Generate activity_overrides.xlsx with detected races pre-populated."""
+def generate_override_xlsx(path: str, races: list[dict] = None, race_times: list[dict] = None):
+    """Generate activity_overrides.xlsx with detected races and PB time overrides."""
     if not HAS_OPENPYXL:
         print(f"  ⚠ openpyxl not installed — creating empty override placeholder")
         # Write a minimal file marker
@@ -995,7 +1112,7 @@ def generate_override_xlsx(path: str, races: list[dict] = None):
         cell.font = Font(bold=True)
         cell.fill = PatternFill(start_color="D9E1F2", end_color="D9E1F2", fill_type="solid")
     
-    # Add detected races
+    # Add detected races (from FIT scanning)
     if races:
         for r in races:
             is_parkrun = r.get("race_type") == "parkrun"
@@ -1011,6 +1128,34 @@ def generate_override_xlsx(path: str, races: list[dict] = None):
                 None,  # official_time_s
                 f"Auto-detected {r['race_type']} ({r['confidence']} confidence) — "
                 f"{r['duration_min']:.1f}min, {r['pace_min_km']:.2f}/km, HR {r.get('avg_hr', '?')}"
+            ])
+    
+    # Add PB / official time overrides (from onboarding form)
+    if race_times:
+        for rt in race_times:
+            date_str = rt.get("date") or ""
+            dist_km = rt.get("distance_km")
+            time_s = rt.get("time_s")
+            if not dist_km or not time_s:
+                continue
+            # Format time for human-readable note
+            h = int(time_s // 3600)
+            m = int((time_s % 3600) // 60)
+            s = int(time_s % 60)
+            time_fmt = f"{h}:{m:02d}:{s:02d}" if h > 0 else f"{m}:{s:02d}"
+            # Use date as file identifier (StepB resolves to actual filename)
+            file_col = date_str if date_str else f"[match {dist_km}km]"
+            ws.append([
+                file_col,
+                1,      # race_flag
+                0,      # parkrun
+                dist_km,
+                None,   # surface
+                None,   # surface_adj
+                None,   # temp_override
+                None,   # power_override_w
+                time_s, # official_time_s
+                f"Onboarding: {time_fmt} for {dist_km}km" + (f" on {date_str}" if date_str else "")
             ])
     
     # Auto-width columns
@@ -1101,9 +1246,11 @@ def main():
     if args.scan_fits:
         cfg["fit_scan_path"] = args.scan_fits
     
-    # Derived names
-    cfg["folder_name"] = make_folder_name(cfg["name"])
-    cfg["slug"] = make_slug(cfg["name"])
+    # Derived names — use athlete ID for folder, slug (first name) for workflow/pages
+    athlete_id = next_athlete_id(args.output_dir)
+    cfg["athlete_id"] = athlete_id
+    cfg["folder_name"] = athlete_id  # e.g. A005
+    cfg["slug"] = make_slug(cfg["name"])  # e.g. ian (for workflow file, pages path, cache keys)
     
     base = Path(args.output_dir)
     athlete_dir = base / "athletes" / cfg["folder_name"]
@@ -1217,10 +1364,13 @@ def main():
     
     # Write override xlsx
     override_path = str(athlete_dir / "activity_overrides.xlsx")
-    generate_override_xlsx(override_path, detected_races)
+    race_times = cfg.get("race_times", [])
+    generate_override_xlsx(override_path, detected_races, race_times)
     print(f"  ✓ {override_path}")
     if detected_races:
         print(f"    → {len(detected_races)} races pre-populated (review & edit before running)")
+    if race_times:
+        print(f"    → {len(race_times)} official time override(s) from onboarding form")
     
     # Write athlete_data.csv
     data_path = str(athlete_dir / "athlete_data.csv")
@@ -1231,44 +1381,67 @@ def main():
     slug = cfg["slug"]
     folder = cfg["folder_name"]
     secret_prefix = slug.upper()
+    source = cfg.get("data_source", "fit_folder")
+    has_intervals = source == "intervals"
+    has_strava = source == "strava_export"
     
     print(f"\n{'─' * 60}")
-    print(f"  SETUP CHECKLIST")
+    print(f"  NEXT STEPS")
     print(f"{'─' * 60}\n")
     
-    print("  1. REVIEW athlete.yml")
-    print(f"     → {athlete_dir}/athlete.yml")
-    print(f"     → Check LTHR ({cfg['lthr']}), max HR ({cfg['max_hr']}), weight ({cfg['mass_kg']}kg)")
+    step = 1
+    
+    # Dropbox upload
+    print(f"  {step}. COPY to Dropbox:")
+    print(f"     /Running and Cycling/DataPipeline/athletes/{folder}/")
+    print(f"       Copy these files from {athlete_dir}/:")
+    print(f"         athlete.yml")
+    print(f"         activity_overrides.xlsx")
+    print(f"         athlete_data.csv")
+    if has_strava:
+        print(f"       Then copy the athlete's Strava export as:")
+        print(f"         data/strava_export.zip")
+    elif has_intervals:
+        print(f"       Athlete data: upload their export (if any) as one of:")
+        print(f"         data/strava_export.zip  OR  data/garmin_export.zip  OR  data/fits.zip")
+        print(f"       (Or skip — INITIAL will try intervals.icu if no file found)")
+    else:
+        print(f"       Then copy the athlete's data export as one of:")
+        print(f"         data/strava_export.zip  OR  data/garmin_export.zip  OR  data/fits.zip")
+    step += 1
+    
+    # GitHub secrets
+    if has_intervals:
+        int_id = cfg.get("intervals_id", "")
+        int_key = cfg.get("intervals_key", "")
+        print(f"\n  {step}. GITHUB SECRETS — add to repository:")
+        print(f"     {secret_prefix}_INTERVALS_API_KEY    = {int_key or '<from athlete email>'}")
+        print(f"     {secret_prefix}_INTERVALS_ATHLETE_ID = {int_id or '<from athlete email>'}")
+        step += 1
+    
+    # Push
+    print(f"\n  {step}. PUSH to GitHub:")
+    print(f"     git add athletes/{folder}/ .github/workflows/{slug}_pipeline.yml")
+    print(f"     git commit -m \"Add {cfg['name']}\"")
+    print(f"     git push")
+    step += 1
+    
+    # Trigger
+    first_mode = "INITIAL"
+    print(f"\n  {step}. TRIGGER first run:")
+    print(f"     GitHub Actions → {cfg['name']} Pipeline → Run workflow → mode: {first_mode}")
+    step += 1
+    
+    print(f"\n  Dashboard will appear at:")
+    print(f"     https://dobssi.github.io/Fitness-Data/{slug}/")
+    
+    if race_times:
+        print(f"\n  ℹ️  {len(race_times)} official time correction(s) loaded into activity_overrides.xlsx")
+        print(f"     These will be applied when StepB runs (matched by date + distance)")
     
     if detected_races:
-        print(f"\n  2. REVIEW activity_overrides.xlsx")
-        print(f"     → {override_path}")
-        print(f"     → {len(detected_races)} auto-detected races — verify and correct")
-        print(f"     → Remove false positives, add any missed races")
-    
-    print(f"\n  3. DROPBOX — create folder structure:")
-    print(f"     /Running and Cycling/DataPipeline/athletes/{folder}/")
-    print(f"       ├── data/fits.zip          ← athlete's FIT files")
-    print(f"       ├── data/activities.csv    ← empty or from Strava export")
-    print(f"       ├── activity_overrides.xlsx")
-    print(f"       ├── athlete_data.csv")
-    print(f"       └── athlete.yml")
-    
-    if cfg.get("data_source") == "intervals":
-        print(f"\n  4. GITHUB SECRETS — add to repository:")
-        print(f"     {secret_prefix}_INTERVALS_API_KEY    = <intervals.icu API key>")
-        print(f"     {secret_prefix}_INTERVALS_ATHLETE_ID = <intervals.icu athlete ID>")
-    
-    print(f"\n  5. FIT FILES — get athlete's data into fits.zip:")
-    print(f"     Option A: Garmin Connect → export all activities → zip the FITs")
-    print(f"     Option B: Strava → Download your data → use the activities/ folder")
-    print(f"     Option C: intervals.icu → bulk export (if synced)")
-    
-    print(f"\n  6. FIRST RUN — trigger FULL pipeline:")
-    print(f"     GitHub Actions → {cfg['name']} Pipeline → Run workflow → mode: FULL")
-    
-    print(f"\n  7. DASHBOARD — will be at:")
-    print(f"     https://dobssi.github.io/Fitness-Data/{slug}/")
+        print(f"\n  ℹ️  {len(detected_races)} auto-detected races in activity_overrides.xlsx")
+        print(f"     Review {override_path} before running")
     
     # Save config for reference
     config_path = str(athlete_dir / "onboard_config.json")
@@ -1284,7 +1457,7 @@ def main():
     print(f"\n  💾 Config saved: {config_path}")
     
     print(f"\n{'═' * 60}")
-    print(f"  Done! Review the files, set up Dropbox, and trigger the pipeline.")
+    print(f"  Done! Copy to Dropbox, push, trigger {first_mode}.")
     print(f"{'═' * 60}\n")
 
 
