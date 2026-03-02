@@ -19,7 +19,7 @@ import zipfile
 
 # Add ci/ to path for dropbox_sync imports
 sys.path.insert(0, os.path.join(os.path.dirname(__file__)))
-from dropbox_sync import get_token, dropbox_list_folder, dropbox_download_file
+from dropbox_sync import get_token, dropbox_list_folder, dropbox_download
 
 
 def main():
@@ -65,7 +65,7 @@ def main():
     remote_zip = remote_data + "/" + export_name
     
     print(f"  Downloading {export_name}...")
-    dropbox_download_file(remote_zip, local_zip, token)
+    dropbox_download(remote_zip, local_zip, token)
     
     size_mb = os.path.getsize(local_zip) / (1024 * 1024)
     print(f"  Downloaded: {size_mb:.0f} MB")
