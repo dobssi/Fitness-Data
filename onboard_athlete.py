@@ -1238,7 +1238,27 @@ def main():
     # ── Gather config ─────────────────────────────────────────
     if args.config:
         with open(args.config) as f:
-            cfg = json.load(f)
+            raw = f.read()
+        
+        # Try parsing as pure JSON first
+        try:
+            cfg = json.loads(raw)
+        except json.JSONDecodeError:
+            # Not pure JSON — try extracting from email body (between markers)
+            start_marker = "--- CONFIG JSON START ---"
+            end_marker = "--- CONFIG JSON END ---"
+            if start_marker in raw and end_marker in raw:
+                json_str = raw.split(start_marker, 1)[1].split(end_marker, 1)[0].strip()
+                try:
+                    cfg = json.loads(json_str)
+                    print(f"  Extracted JSON config from email body")
+                except json.JSONDecodeError as e:
+                    print(f"ERROR: Found config markers but JSON is invalid: {e}")
+                    sys.exit(1)
+            else:
+                print(f"ERROR: {args.config} is not valid JSON and has no config markers.")
+                print(f"  Paste the entire email body into the file, or just the JSON block.")
+                sys.exit(1)
     else:
         cfg = interactive_config()
     

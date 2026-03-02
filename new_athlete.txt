@@ -1,0 +1,139 @@
+RUNNING PROFILE 
+======================================== 
+Name: Paul Test 
+Email: paul.collyer@sigames.com 
+DOB: 1969-05-27 
+Gender: male 
+Weight: 75 kg 
+Timezone: Europe/Stockholm 
+Max HR: 192 
+LTHR: 178 
+intervals.icu ID: i224884 
+intervals.icu API Key: tgbv1rdzgciobj8meem47cml 
+RACE TIMES (official chip times) 
+------------------------------ 
+  1.609km  5:17  (317s) 
+  3.0km  11:21  (681s) 
+  5.0km  17:53  (1073s) 
+  10.0km  37:22  (2242s) 
+  42.195km  3:11:15  (11475s) 
+  21.097km  1:22:28  (4948s) 
+  1.5km  5:00  (300s) 
+UPCOMING RACES 
+------------------------------ 
+  2026-04-25  21.097km  "PremHalv"  Priority: A 
+  2026-03-15  16.2km  "2 sjoar runt"  Priority: B 
+
+======================================== 
+ATHLETE.YML SNIPPET 
+======================================== 
+athlete: 
+  name: "Paul Test" 
+  athlete_id: "A___" 
+  mass_kg: 75 
+  date_of_birth: "1969-05-27" 
+  gender: "male" 
+  timezone: "Europe/Stockholm" 
+  max_hr: 192 
+  lthr: 178 
+data: 
+  source: "intervals" 
+  intervals: 
+    athlete_id: "i224884" 
+    api_key: "tgbv1rdzgciobj8meem47cml" 
+planned_races: 
+  - name: "PremHalv" 
+    date: "2026-04-25" 
+    distance_km: 21.097 
+    priority: A 
+    surface: road 
+  - name: "2 sjoar runt" 
+    date: "2026-03-15" 
+    distance_km: 16.2 
+    priority: B 
+    surface: road 
+
+======================================== 
+ACTIVITY OVERRIDE ROWS (for official_time_s) 
+======================================== 
+file    race_flag       parkrun official_distance_km    surface surface_adj     temp_override   power_override_w        official_time_s notes
+[match 1.609km] 1       0       1.609                                   317     PB: 5:17 for Mile 
+[match 3.0km]   1       0       3.0                                     681     PB: 11:21 for 3K 
+[match 5.0km]   1       0       5.0                                     1073    PB: 17:53 for 5K 
+[match 10.0km]  1       0       10.0                                    2242    PB: 37:22 for 10K 
+[match 42.195km]        1       0       42.195                                  11475   PB: 3:11:15 for Marathon 
+[match 21.097km]        1       0       21.097                                  4948    PB: 1:22:28 for HM 
+[match 1.5km]   1       0       1.5                                     300     PB: 5:00 for 1.5km 
+Submitted: 2026-03-02T19:54:02.702Z 
+======================================== 
+CONFIG JSON — save as new_athlete.json 
+======================================== 
+{ 
+  "name": "Paul Test", 
+  "email": "paul.collyer@sigames.com", 
+  "dob": "1969-05-27", 
+  "gender": "male", 
+  "mass_kg": 75, 
+  "timezone": "Europe/Stockholm", 
+  "max_hr": 192, 
+  "lthr": 178, 
+  "data_source": "intervals", 
+  "intervals_id": "i224884", 
+  "intervals_key": "tgbv1rdzgciobj8meem47cml", 
+  "planned_races": [ 
+    { 
+      "name": "PremHalv", 
+      "date": "2026-04-25", 
+      "distance_km": 21.097, 
+      "priority": "A", 
+      "surface": "road" 
+    }, 
+    { 
+      "name": "2 sjoar runt", 
+      "date": "2026-03-15", 
+      "distance_km": 16.2, 
+      "priority": "B", 
+      "surface": "road" 
+    } 
+  ], 
+  "race_times": [ 
+    { 
+      "date": null, 
+      "distance_km": 1.609, 
+      "time_s": 317 
+    }, 
+    { 
+      "date": null, 
+      "distance_km": 3, 
+      "time_s": 681 
+    }, 
+    { 
+      "date": null, 
+      "distance_km": 5, 
+      "time_s": 1073 
+    }, 
+    { 
+      "date": null, 
+      "distance_km": 10, 
+      "time_s": 2242 
+    }, 
+    { 
+      "date": null, 
+      "distance_km": 42.195, 
+      "time_s": 11475 
+    }, 
+    { 
+      "date": null, 
+      "distance_km": 21.097, 
+      "time_s": 4948 
+    }, 
+    { 
+      "date": null, 
+      "distance_km": 1.5, 
+      "time_s": 300 
+    } 
+  ] 
+} 
+
+
+The contents of this e-mail and any attachments are confidential to the intended recipient and may also be legally privileged. Unless you are the named addressee (or authorised to receive for the addressee) of this email you may not copy, disclose or distribute it to anyone else. If you have received this email in error, please notify us immediately by e-mail on admin@sports-interactive.com and then delete the email and any copies. Sports Interactive and The SEGA Group has made all reasonable efforts to ensure that this e-mail and any attached documents or software are free from software viruses, but it is the recipient's responsibility to confirm this. 
