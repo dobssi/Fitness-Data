@@ -678,7 +678,7 @@ function buildEmailBody(d) {
     b += `Weight: ${d.weight_kg} kg\nTimezone: ${d.timezone}\n`;
     b += `Max HR: ${d.max_hr}\nLTHR: ${d.lthr}\n`;
 
-    if (d.intervals_id) b += `\nintervals.icu: ${d.intervals_id}\n`;
+    if (d.intervals_id) b += `\nintervals.icu ID: ${d.intervals_id}\nintervals.icu API Key: ${d.intervals_key || '(not provided)'}\n`;
 
     if (d.pbs.length > 0) {
         b += `\nRACE TIMES (official chip times)\n${'-'.repeat(30)}\n`;
@@ -705,7 +705,7 @@ function buildEmailBody(d) {
     if (d.lthr !== 'estimate') b += `  lthr: ${d.lthr}\n`;
 
     if (d.intervals_id) {
-        b += `\ndata:\n  source: "intervals"\n  intervals:\n    athlete_id: "${d.intervals_id}"\n`;
+        b += `\ndata:\n  source: "intervals"\n  intervals:\n    athlete_id: "${d.intervals_id}"\n    api_key: "${d.intervals_key || ''}"\n`;
     }
 
     if (d.upcoming.length > 0) {
