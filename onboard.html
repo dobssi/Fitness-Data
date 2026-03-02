@@ -744,9 +744,9 @@ function buildEmailBody(d) {
         }))
     };
 
-    b += `\n${'='.repeat(40)}\nCONFIG JSON — save as new_athlete.json\n${'='.repeat(40)}\n`;
+    b += `\n--- CONFIG JSON START ---\n`;
     b += JSON.stringify(config, null, 2);
-    b += '\n';
+    b += `\n--- CONFIG JSON END ---\n`;
 
     return b;
 }
