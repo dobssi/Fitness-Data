@@ -50,6 +50,8 @@ PIPELINE_FILES = [
     "scan_races.py",
     "classify_races.py",
     "onboard_athlete.py",
+    "pb_corrections.html",
+    "onboard.html",
     "athlete_template.yml",
     # CI
     "ci/dropbox_sync.py",

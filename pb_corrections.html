@@ -1,0 +1,538 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Race Time Corrections</title>
+    <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg: #0f1117;
+            --card: #1a1d27;
+            --border: #2e3340;
+            --text: #e4e7ef;
+            --text-muted: #8b8fa3;
+            --accent: #818cf8;
+            --accent-hover: #6366f1;
+            --success: #4ade80;
+            --warning: #fbbf24;
+            --danger: #f87171;
+            --font: 'DM Sans', -apple-system, sans-serif;
+            --mono: 'JetBrains Mono', monospace;
+        }
+
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            font-family: var(--font);
+            background: var(--bg);
+            color: var(--text);
+            line-height: 1.6;
+            min-height: 100vh;
+        }
+
+        .container {
+            max-width: 720px;
+            margin: 0 auto;
+            padding: 2rem 1.5rem;
+        }
+
+        h1 {
+            font-size: 1.5rem;
+            font-weight: 700;
+            margin-bottom: 0.5rem;
+        }
+
+        .subtitle {
+            color: var(--text-muted);
+            font-size: 0.9rem;
+            margin-bottom: 2rem;
+            line-height: 1.5;
+        }
+
+        .info-box {
+            background: rgba(129, 140, 248, 0.08);
+            border: 1px solid rgba(129, 140, 248, 0.2);
+            border-radius: 8px;
+            padding: 1rem 1.25rem;
+            margin-bottom: 2rem;
+            font-size: 0.85rem;
+            color: var(--text-muted);
+            line-height: 1.6;
+        }
+        .info-box strong { color: var(--text); }
+
+        /* Section cards */
+        .section {
+            background: var(--card);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 1.5rem;
+            margin-bottom: 1.5rem;
+        }
+        .section h2 {
+            font-size: 1.05rem;
+            font-weight: 600;
+            margin-bottom: 1rem;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+        .section h2 .icon { font-size: 1.1rem; }
+
+        /* Form elements */
+        label {
+            display: block;
+            font-size: 0.8rem;
+            font-weight: 500;
+            color: var(--text-muted);
+            margin-bottom: 0.35rem;
+            text-transform: uppercase;
+            letter-spacing: 0.04em;
+        }
+
+        input, select {
+            width: 100%;
+            background: var(--bg);
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            padding: 0.6rem 0.75rem;
+            color: var(--text);
+            font-family: var(--font);
+            font-size: 0.9rem;
+            transition: border-color 0.15s;
+        }
+        input:focus, select:focus {
+            outline: none;
+            border-color: var(--accent);
+        }
+        input::placeholder { color: #555; }
+
+        /* Correction rows */
+        .correction-row {
+            display: grid;
+            grid-template-columns: 120px 1fr 1fr auto;
+            gap: 0.75rem;
+            align-items: end;
+            margin-bottom: 0.75rem;
+            padding-bottom: 0.75rem;
+            border-bottom: 1px solid rgba(255,255,255,0.04);
+        }
+        .correction-row:last-of-type { border-bottom: none; }
+
+        @media (max-width: 600px) {
+            .correction-row {
+                grid-template-columns: 1fr 1fr;
+                gap: 0.5rem;
+            }
+            .correction-row .field-date { grid-column: 1 / -1; }
+        }
+
+        .field-group { display: flex; flex-direction: column; }
+
+        /* Time input grid */
+        .time-inputs {
+            display: flex;
+            gap: 0.25rem;
+            align-items: center;
+        }
+        .time-inputs input {
+            width: 52px;
+            text-align: center;
+            font-family: var(--mono);
+            font-size: 0.85rem;
+            padding: 0.6rem 0.3rem;
+        }
+        .time-inputs .sep {
+            color: var(--text-muted);
+            font-family: var(--mono);
+            font-size: 0.9rem;
+        }
+
+        /* Buttons */
+        .btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.4rem;
+            padding: 0.55rem 1rem;
+            border-radius: 6px;
+            font-family: var(--font);
+            font-size: 0.85rem;
+            font-weight: 500;
+            cursor: pointer;
+            border: none;
+            transition: all 0.15s;
+        }
+        .btn-primary {
+            background: var(--accent);
+            color: #fff;
+        }
+        .btn-primary:hover { background: var(--accent-hover); }
+        .btn-secondary {
+            background: transparent;
+            color: var(--text-muted);
+            border: 1px solid var(--border);
+        }
+        .btn-secondary:hover { color: var(--text); border-color: #555; }
+        .btn-danger {
+            background: transparent;
+            color: var(--danger);
+            border: 1px solid transparent;
+            padding: 0.4rem;
+            min-width: 32px;
+            justify-content: center;
+        }
+        .btn-danger:hover { background: rgba(248, 113, 113, 0.1); }
+
+        .btn-row {
+            display: flex;
+            gap: 0.75rem;
+            margin-top: 1rem;
+        }
+
+        /* Distance presets */
+        .presets {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.4rem;
+            margin-bottom: 1rem;
+        }
+        .preset-btn {
+            padding: 0.35rem 0.7rem;
+            border-radius: 20px;
+            font-size: 0.78rem;
+            font-weight: 500;
+            background: rgba(129, 140, 248, 0.1);
+            color: var(--accent);
+            border: 1px solid rgba(129, 140, 248, 0.2);
+            cursor: pointer;
+            transition: all 0.15s;
+        }
+        .preset-btn:hover { background: rgba(129, 140, 248, 0.2); }
+
+        /* Output section */
+        .output-area {
+            background: var(--bg);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 1rem;
+            font-family: var(--mono);
+            font-size: 0.78rem;
+            line-height: 1.7;
+            white-space: pre-wrap;
+            word-break: break-all;
+            max-height: 300px;
+            overflow-y: auto;
+            display: none;
+        }
+        .output-area.visible { display: block; }
+
+        .copy-feedback {
+            font-size: 0.8rem;
+            color: var(--success);
+            opacity: 0;
+            transition: opacity 0.2s;
+            margin-left: 0.5rem;
+        }
+        .copy-feedback.show { opacity: 1; }
+
+        /* Validation */
+        .validation-msg {
+            font-size: 0.78rem;
+            color: var(--warning);
+            margin-top: 0.5rem;
+            display: none;
+        }
+        .validation-msg.visible { display: block; }
+
+        /* AG estimate display */
+        .ag-estimate {
+            font-size: 0.78rem;
+            color: var(--success);
+            margin-top: 0.25rem;
+            font-family: var(--mono);
+        }
+
+        .divider {
+            border: none;
+            border-top: 1px solid var(--border);
+            margin: 1.5rem 0;
+        }
+
+        /* mailto section */
+        .mailto-info {
+            font-size: 0.82rem;
+            color: var(--text-muted);
+            margin-top: 1rem;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>⏱️ Race Time Corrections</h1>
+        <p class="subtitle">
+            Enter your official race times below. These override GPS-derived times 
+            in the pipeline, fixing age grade calculations and race predictions.
+        </p>
+
+        <div class="info-box">
+            <strong>When to use this:</strong> If your dashboard shows an age grade that looks too high 
+            (e.g. 94% for a club runner) or a race time that doesn't match your chip time, 
+            GPS errors or auto-pause glitches are likely the cause. Enter your real chip time here.
+        </div>
+
+        <!-- Athlete name -->
+        <div class="section">
+            <h2><span class="icon">👤</span> Your Details</h2>
+            <div class="field-group" style="max-width: 280px;">
+                <label for="athlete-name">Name</label>
+                <input type="text" id="athlete-name" placeholder="e.g. Ian Lilley">
+            </div>
+        </div>
+
+        <!-- Corrections -->
+        <div class="section">
+            <h2><span class="icon">📝</span> Race Time Corrections</h2>
+            <p style="font-size: 0.82rem; color: var(--text-muted); margin-bottom: 1rem;">
+                Click a distance preset or type a custom one. Enter your official chip time.
+                Date is optional but helps match to the right race if you've done the distance multiple times.
+            </p>
+
+            <div class="presets">
+                <button class="preset-btn" onclick="addRow('1.609', 'Mile')">Mile</button>
+                <button class="preset-btn" onclick="addRow('3.0', '3K')">3K</button>
+                <button class="preset-btn" onclick="addRow('5.0', '5K')">5K</button>
+                <button class="preset-btn" onclick="addRow('10.0', '10K')">10K</button>
+                <button class="preset-btn" onclick="addRow('15.0', '15K')">15K</button>
+                <button class="preset-btn" onclick="addRow('16.093', '10M')">10 Mile</button>
+                <button class="preset-btn" onclick="addRow('21.097', 'HM')">Half Marathon</button>
+                <button class="preset-btn" onclick="addRow('42.195', 'Marathon')">Marathon</button>
+                <button class="preset-btn" onclick="addRow('', 'Custom')">+ Custom</button>
+            </div>
+
+            <div id="corrections-list"></div>
+
+            <div class="validation-msg" id="val-msg"></div>
+        </div>
+
+        <!-- Generate output -->
+        <div class="section">
+            <h2><span class="icon">📋</span> Output</h2>
+            <p style="font-size: 0.82rem; color: var(--text-muted); margin-bottom: 1rem;">
+                Generate override rows to paste into your <code style="font-family: var(--mono); background: var(--bg); padding: 0.15rem 0.35rem; border-radius: 3px;">activity_overrides.xlsx</code>, 
+                or send directly to your admin.
+            </p>
+
+            <div class="btn-row">
+                <button class="btn btn-primary" onclick="generateOutput()">Generate Overrides</button>
+                <button class="btn btn-secondary" onclick="copyOutput()">
+                    Copy to Clipboard
+                    <span class="copy-feedback" id="copy-feedback">✓</span>
+                </button>
+                <button class="btn btn-secondary" onclick="sendEmail()">📧 Email to Admin</button>
+            </div>
+
+            <div class="output-area" id="output"></div>
+            <div class="mailto-info" id="mailto-info"></div>
+        </div>
+    </div>
+
+    <script>
+    let rowCounter = 0;
+
+    function addRow(distKm, label) {
+        const list = document.getElementById('corrections-list');
+        const id = ++rowCounter;
+
+        const row = document.createElement('div');
+        row.className = 'correction-row';
+        row.id = `row-${id}`;
+        row.innerHTML = `
+            <div class="field-group field-date">
+                <label>Date (optional)</label>
+                <input type="date" id="date-${id}">
+            </div>
+            <div class="field-group">
+                <label>Distance</label>
+                <div style="display:flex; gap:0.4rem; align-items:center;">
+                    <input type="text" id="dist-${id}" value="${distKm}" 
+                           placeholder="km" style="width:70px; font-family:var(--mono); text-align:center;">
+                    <span style="font-size:0.78rem; color:var(--text-muted);">${label || 'km'}</span>
+                </div>
+            </div>
+            <div class="field-group">
+                <label>Chip time</label>
+                <div class="time-inputs">
+                    <input type="text" id="hh-${id}" placeholder="H" maxlength="2"
+                           oninput="autoTab(this, 'mm-${id}')" onchange="updateEstimate(${id})">
+                    <span class="sep">:</span>
+                    <input type="text" id="mm-${id}" placeholder="MM" maxlength="2"
+                           oninput="autoTab(this, 'ss-${id}')" onchange="updateEstimate(${id})">
+                    <span class="sep">:</span>
+                    <input type="text" id="ss-${id}" placeholder="SS" maxlength="2"
+                           onchange="updateEstimate(${id})">
+                </div>
+                <div class="ag-estimate" id="est-${id}"></div>
+            </div>
+            <button class="btn btn-danger" onclick="removeRow(${id})" title="Remove">✕</button>
+        `;
+        list.appendChild(row);
+
+        // Focus on the hours field
+        document.getElementById(`hh-${id}`).focus();
+    }
+
+    function removeRow(id) {
+        const row = document.getElementById(`row-${id}`);
+        if (row) row.remove();
+    }
+
+    function autoTab(current, nextId) {
+        if (current.value.length >= 2) {
+            document.getElementById(nextId)?.focus();
+        }
+    }
+
+    function parseTime(id) {
+        const hh = parseInt(document.getElementById(`hh-${id}`).value) || 0;
+        const mm = parseInt(document.getElementById(`mm-${id}`).value) || 0;
+        const ss = parseInt(document.getElementById(`ss-${id}`).value) || 0;
+        return hh * 3600 + mm * 60 + ss;
+    }
+
+    function formatTime(totalSec) {
+        const h = Math.floor(totalSec / 3600);
+        const m = Math.floor((totalSec % 3600) / 60);
+        const s = totalSec % 60;
+        if (h > 0) return `${h}:${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`;
+        return `${m}:${String(s).padStart(2,'0')}`;
+    }
+
+    function updateEstimate(id) {
+        const totalSec = parseTime(id);
+        const distKm = parseFloat(document.getElementById(`dist-${id}`).value);
+        const est = document.getElementById(`est-${id}`);
+
+        if (!totalSec || !distKm || distKm <= 0) {
+            est.textContent = '';
+            return;
+        }
+
+        const paceMinKm = (totalSec / 60) / distKm;
+        const paceMin = Math.floor(paceMinKm);
+        const paceSec = Math.round((paceMinKm - paceMin) * 60);
+        est.textContent = `→ ${paceMin}:${String(paceSec).padStart(2,'0')}/km`;
+    }
+
+    function getCorrections() {
+        const corrections = [];
+        const rows = document.querySelectorAll('.correction-row');
+
+        for (const row of rows) {
+            const id = row.id.replace('row-', '');
+            const date = document.getElementById(`date-${id}`).value || '';
+            const distKm = parseFloat(document.getElementById(`dist-${id}`).value);
+            const totalSec = parseTime(id);
+
+            if (!totalSec || !distKm) continue;
+
+            corrections.push({ date, distKm, totalSec, id });
+        }
+        return corrections;
+    }
+
+    function generateOutput() {
+        const corrections = getCorrections();
+        const valMsg = document.getElementById('val-msg');
+        const output = document.getElementById('output');
+
+        if (corrections.length === 0) {
+            valMsg.textContent = 'Add at least one correction with a distance and time.';
+            valMsg.classList.add('visible');
+            output.classList.remove('visible');
+            return;
+        }
+        valMsg.classList.remove('visible');
+
+        // Generate TSV rows for pasting into activity_overrides.xlsx
+        // Format: file | race_flag | parkrun | official_distance_km | ... | official_time_s | notes
+        let tsv = 'file\trace_flag\tparkrun\tofficial_distance_km\tsurface\tsurface_adj\ttemp_override\tpower_override_w\tofficial_time_s\tnotes\n';
+
+        const name = document.getElementById('athlete-name').value.trim() || 'Athlete';
+
+        for (const c of corrections) {
+            // file column: date-based for matching, or placeholder
+            const fileCol = c.date ? c.date : `[match by distance: ${c.distKm}km]`;
+            const note = `PB correction: ${formatTime(c.totalSec)} for ${c.distKm}km` +
+                         (c.date ? ` on ${c.date}` : '') +
+                         ` — submitted by ${name}`;
+
+            tsv += `${fileCol}\t1\t0\t${c.distKm}\t\t\t\t\t${c.totalSec}\t${note}\n`;
+        }
+
+        // Also generate human-readable summary
+        let summary = `── Race Time Corrections for ${name} ──\n\n`;
+        for (const c of corrections) {
+            const pace = (c.totalSec / 60) / c.distKm;
+            const pMin = Math.floor(pace);
+            const pSec = Math.round((pace - pMin) * 60);
+            summary += `  ${c.distKm} km  ${formatTime(c.totalSec)}  (${pMin}:${String(pSec).padStart(2,'0')}/km)`;
+            if (c.date) summary += `  on ${c.date}`;
+            summary += '\n';
+        }
+        summary += `\n── Paste below into activity_overrides.xlsx (tab-separated) ──\n\n`;
+        summary += tsv;
+
+        output.textContent = summary;
+        output.classList.add('visible');
+    }
+
+    function copyOutput() {
+        const output = document.getElementById('output');
+        if (!output.classList.contains('visible')) {
+            generateOutput();
+        }
+
+        navigator.clipboard.writeText(output.textContent).then(() => {
+            const fb = document.getElementById('copy-feedback');
+            fb.classList.add('show');
+            setTimeout(() => fb.classList.remove('show'), 1500);
+        });
+    }
+
+    function sendEmail() {
+        const corrections = getCorrections();
+        if (corrections.length === 0) {
+            generateOutput(); // will show validation
+            return;
+        }
+
+        const name = document.getElementById('athlete-name').value.trim() || 'Athlete';
+
+        let body = `Race Time Corrections from ${name}\n\n`;
+        for (const c of corrections) {
+            body += `Distance: ${c.distKm} km\n`;
+            body += `Time: ${formatTime(c.totalSec)} (${c.totalSec}s)\n`;
+            if (c.date) body += `Date: ${c.date}\n`;
+            body += '\n';
+        }
+
+        body += '\n---\n';
+        body += 'Override rows for activity_overrides.xlsx:\n\n';
+        for (const c of corrections) {
+            const fileCol = c.date || `[match ${c.distKm}km]`;
+            body += `${fileCol} | race_flag=1 | official_distance_km=${c.distKm} | official_time_s=${c.totalSec}\n`;
+        }
+
+        const subject = encodeURIComponent(`Race time corrections — ${name}`);
+        const bodyEnc = encodeURIComponent(body);
+        const email = '__YOUR_EMAIL__';
+
+        window.location.href = `mailto:${email}?subject=${subject}&body=${bodyEnc}`;
+    }
+
+    // Start with one empty row
+    addRow('5.0', '5K');
+    </script>
+</body>
+</html>

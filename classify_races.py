@@ -223,6 +223,7 @@ def enrich_and_classify(master_path: str, overrides_path: str,
         ov['surface_adj'] = None
         ov['temp_override'] = None
         ov['power_override_w'] = None
+        ov['official_time_s'] = None
         ov['notes'] = ''
     else:
         print(f"\nLoading overrides: {overrides_path}")
@@ -343,7 +344,7 @@ def enrich_and_classify(master_path: str, overrides_path: str,
     
     # Column order: core fields first, then enrichment
     core_cols = ['file', 'race_flag', 'parkrun', 'official_distance_km',
-                 'surface', 'surface_adj', 'temp_override', 'power_override_w']
+                 'surface', 'surface_adj', 'temp_override', 'power_override_w', 'official_time_s']
     enrich_cols = ['date', 'activity_name', 'actual_dist_km', 'avg_hr',
                    'hr_pct_lthr', 'verdict', 'reason', 'notes']
     

@@ -983,8 +983,8 @@ def generate_override_xlsx(path: str, races: list[dict] = None):
     ws.title = "overrides"
     
     headers = [
-        "file", "race", "parkrun", "distance_km", "surface", "surface_adj",
-        "temp_c", "power_override_w", "notes"
+        "file", "race_flag", "parkrun", "official_distance_km", "surface", "surface_adj",
+        "temp_override", "power_override_w", "official_time_s", "notes"
     ]
     ws.append(headers)
     
@@ -1006,8 +1006,9 @@ def generate_override_xlsx(path: str, races: list[dict] = None):
                 r["distance_km"],
                 None,  # surface
                 None,  # surface_adj
-                None,  # temp_c
+                None,  # temp_override
                 None,  # power_override_w
+                None,  # official_time_s
                 f"Auto-detected {r['race_type']} ({r['confidence']} confidence) — "
                 f"{r['duration_min']:.1f}min, {r['pace_min_km']:.2f}/km, HR {r.get('avg_hr', '?')}"
             ])

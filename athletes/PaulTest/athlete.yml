@@ -39,10 +39,10 @@ power:
     re_constant: 0.92
 
 data:
-  source: "strava_export"
+  source: "intervals"          # intervals.icu for ongoing sync (Strava export for initial FULL)
   intervals:
-    athlete_id: ""
-    api_key: ""
+    athlete_id: ""             # Set via PAULTEST_INTERVALS_ATHLETE_ID secret
+    api_key: ""                # Set via PAULTEST_INTERVALS_API_KEY secret
   fit_folder:
     path: "./fits"
   strava_export:

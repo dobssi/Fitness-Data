@@ -1886,7 +1886,7 @@ def detect_changed_rows(df_input: pd.DataFrame, df_prev: pd.DataFrame,
             file_name = str(row.get('file', '')).lower()
             if file_name:
                 # Hash key override fields
-                hash_input = f"{row.get('race_flag','')}{row.get('parkrun','')}{row.get('official_distance_km','')}{row.get('surface','')}{row.get('surface_adj','')}{row.get('temp_override','')}{row.get('power_override_w','')}"
+                hash_input = f"{row.get('race_flag','')}{row.get('parkrun','')}{row.get('official_distance_km','')}{row.get('surface','')}{row.get('surface_adj','')}{row.get('temp_override','')}{row.get('power_override_w','')}{row.get('official_time_s','')}"
                 override_hashes[file_name] = hash(hash_input)
     
     # Build lookup of previous override state from prev output
@@ -3199,6 +3199,8 @@ def load_override_file(override_path: str, master_df: pd.DataFrame = None) -> pd
         df['notes'] = ''
     if 'power_override_w' not in df.columns:
         df['power_override_w'] = np.nan
+    if 'official_time_s' not in df.columns:
+        df['official_time_s'] = np.nan
     
     # Convert types
     df['temp_override'] = pd.to_numeric(df['temp_override'], errors='coerce')
@@ -3206,6 +3208,7 @@ def load_override_file(override_path: str, master_df: pd.DataFrame = None) -> pd
     df['race_flag'] = pd.to_numeric(df['race_flag'], errors='coerce').fillna(0).astype(int)
     df['official_distance_km'] = pd.to_numeric(df['official_distance_km'], errors='coerce')
     df['power_override_w'] = pd.to_numeric(df['power_override_w'], errors='coerce')
+    df['official_time_s'] = pd.to_numeric(df['official_time_s'], errors='coerce')
     
     # Resolve date-based overrides to filenames using master data
     df = _resolve_date_overrides(df, master_df)
@@ -3215,7 +3218,8 @@ def load_override_file(override_path: str, master_df: pd.DataFrame = None) -> pd
     dist_count = df['official_distance_km'].notna().sum()
     sadj_count = df['surface_adj'].notna().sum()
     pwr_count = df['power_override_w'].notna().sum()
-    print(f"  - {race_count} races, {dist_count} with official distance, {sadj_count} with surface_adj, {pwr_count} with power_override")
+    time_count = df['official_time_s'].notna().sum()
+    print(f"  - {race_count} races, {dist_count} with official distance, {sadj_count} with surface_adj, {pwr_count} with power_override, {time_count} with official_time")
     
     # Normalize file names to lowercase for case-insensitive matching
     df['file'] = df['file'].astype(str).str.lower()
@@ -3632,6 +3636,25 @@ def main() -> int:
             if pd.notna(override.get('power_override_w')):
                 dfm.at[i, 'power_override_w'] = float(override['power_override_w'])
             
+            # v52: Official time override — corrects GPS/timing errors
+            # When an athlete provides their known chip time for a race, this overrides
+            # both moving_time_s and elapsed_time_s (which may be wrong due to GPS errors,
+            # auto-pause issues, or timing chip placement). Pace is recalculated from
+            # the best available distance (official_distance_km > distance_km).
+            if pd.notna(override.get('official_time_s')):
+                official_time = float(override['official_time_s'])
+                orig_moving = pd.to_numeric(row.get('moving_time_s', np.nan), errors='coerce')
+                dfm.at[i, 'moving_time_s'] = official_time
+                dfm.at[i, 'elapsed_time_s'] = official_time
+                # Recalculate pace from best distance
+                best_dist = pd.to_numeric(dfm.at[i, 'official_distance_km'], errors='coerce')
+                if pd.isna(best_dist) or best_dist <= 0:
+                    best_dist = pd.to_numeric(row.get('distance_km', np.nan), errors='coerce')
+                if pd.notna(best_dist) and best_dist > 0:
+                    dfm.at[i, 'avg_pace_min_per_km'] = official_time / 60.0 / best_dist
+                orig_str = f"{orig_moving:.0f}s" if pd.notna(orig_moving) else "?"
+                print(f"  Time override: {fit_file}: {orig_str} -> {official_time:.0f}s ({official_time/60:.1f}min)")
+            
             # Distance correction for pre-Stryd activities (from override file)
             # Check calibration_era_id (if present) or power_source to determine if pre-Stryd
             era_id = str(row.get('calibration_era_id', '')).lower()
@@ -3659,9 +3682,11 @@ def main() -> int:
                     dfm.at[i, 'distance_km'] = official_dist
                     
                     # Recalculate pace: use elapsed_time for races (chip time),
-                    # moving_time for non-races
+                    # moving_time for non-races. If official_time_s was set, use that.
                     is_race = dfm.at[i, 'race_flag'] == 1
-                    if is_race:
+                    if pd.notna(override.get('official_time_s')):
+                        time_for_pace = float(override['official_time_s'])
+                    elif is_race:
                         time_for_pace = pd.to_numeric(row.get('elapsed_time_s', np.nan), errors='coerce')
                     else:
                         time_for_pace = pd.to_numeric(row.get('moving_time_s', np.nan), errors='coerce')
@@ -5147,6 +5172,26 @@ def main() -> int:
                 age_grade_count += 1
         
         print(f"  Calculated {age_grade_count} age grades")
+        
+        # v52: AG sanity check — flag any AG > 85% as potential GPS/timing error
+        # Most club runners peak around 70-80%. AG above 85% usually indicates
+        # GPS undershoot (tight track bends), auto-pause timing errors, or
+        # incorrect moving_time_s. These need manual review + official_time_s override.
+        AG_SANITY_THRESHOLD = 85.0
+        suspicious_ag = dfm[dfm['age_grade_pct'] > AG_SANITY_THRESHOLD].copy()
+        if len(suspicious_ag) > 0:
+            print(f"\n  ⚠️  AG SANITY CHECK: {len(suspicious_ag)} race(s) with AG > {AG_SANITY_THRESHOLD}% — review for GPS/timing errors:")
+            for idx, srow in suspicious_ag.iterrows():
+                dist_km = srow.get('official_distance_km', srow.get('distance_km', 0))
+                moving_s = srow.get('moving_time_s', 0)
+                ag_pct = srow.get('age_grade_pct', 0)
+                name = str(srow.get('activity_name', srow.get('file', '?')))[:50]
+                date_str = pd.Timestamp(srow.get('date')).strftime('%Y-%m-%d') if pd.notna(srow.get('date')) else '?'
+                # Format time
+                mins = int(moving_s // 60) if pd.notna(moving_s) else 0
+                secs = int(moving_s % 60) if pd.notna(moving_s) else 0
+                print(f"    {date_str}  AG {ag_pct:.1f}%  {dist_km:.1f}km  {mins}:{secs:02d}  {name}")
+            print(f"  → Use pb_corrections.html to submit official chip times for these races\n")
     else:
         print("  Age grade calculations skipped (module not available)")
     

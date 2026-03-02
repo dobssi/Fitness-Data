@@ -3,625 +3,269 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Running Fitness Dashboard — Get Started</title>
+    <title>My Running Profile</title>
     <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
     <style>
         :root {
             --bg: #0f1117;
             --card: #1a1d27;
-            --card-border: #2e3340;
+            --card-hover: #1e2230;
+            --border: #2e3340;
             --text: #e4e7ef;
-            --text-dim: #8b90a0;
+            --text-muted: #8b8fa3;
             --accent: #818cf8;
-            --accent-hover: #a5b4fc;
-            --green: #4ade80;
-            --amber: #fbbf24;
-            --red: #f87171;
-            --input-bg: #141720;
-            --input-border: #363b4a;
-            --input-focus: #818cf8;
+            --accent-hover: #6366f1;
+            --accent-bg: rgba(129, 140, 248, 0.08);
+            --accent-border: rgba(129, 140, 248, 0.2);
+            --success: #4ade80;
+            --success-bg: rgba(74, 222, 128, 0.08);
+            --success-border: rgba(74, 222, 128, 0.2);
+            --warning: #fbbf24;
+            --danger: #f87171;
+            --font: 'DM Sans', -apple-system, sans-serif;
+            --mono: 'JetBrains Mono', monospace;
         }
-
         * { margin: 0; padding: 0; box-sizing: border-box; }
-
         body {
-            font-family: 'DM Sans', sans-serif;
+            font-family: var(--font);
             background: var(--bg);
             color: var(--text);
             line-height: 1.6;
             min-height: 100vh;
         }
-
-        .container {
-            max-width: 640px;
-            margin: 0 auto;
-            padding: 40px 20px 80px;
-        }
+        .container { max-width: 720px; margin: 0 auto; padding: 2rem 1.5rem 4rem; }
 
         /* Header */
-        .hero {
-            text-align: center;
-            margin-bottom: 48px;
+        .header { margin-bottom: 2rem; }
+        .header h1 { font-size: 1.5rem; font-weight: 700; margin-bottom: 0.25rem; }
+        .header .tagline { color: var(--text-muted); font-size: 0.88rem; }
+        .returning-banner {
+            background: var(--success-bg);
+            border: 1px solid var(--success-border);
+            border-radius: 8px;
+            padding: 0.75rem 1rem;
+            margin-top: 1rem;
+            font-size: 0.82rem;
+            color: var(--success);
+            display: none;
         }
-        .hero-icon {
-            font-size: 48px;
-            margin-bottom: 16px;
-        }
-        .hero h1 {
-            font-size: 1.75rem;
-            font-weight: 700;
-            margin-bottom: 8px;
-            letter-spacing: -0.02em;
-        }
-        .hero p {
-            color: var(--text-dim);
-            font-size: 0.95rem;
-            max-width: 480px;
-            margin: 0 auto;
-        }
-
-        /* Steps indicator */
-        .steps {
-            display: flex;
-            justify-content: center;
-            gap: 8px;
-            margin-bottom: 40px;
-        }
-        .step-dot {
-            width: 10px; height: 10px;
-            border-radius: 50%;
-            background: var(--card-border);
-            transition: background 0.3s, transform 0.3s;
-        }
-        .step-dot.active {
-            background: var(--accent);
-            transform: scale(1.2);
-        }
-        .step-dot.done {
-            background: var(--green);
-        }
+        .returning-banner.show { display: flex; align-items: center; gap: 0.5rem; }
 
         /* Sections */
         .section {
             background: var(--card);
-            border: 1px solid var(--card-border);
+            border: 1px solid var(--border);
             border-radius: 12px;
-            padding: 28px 24px;
-            margin-bottom: 20px;
+            padding: 1.5rem;
+            margin-bottom: 1.25rem;
         }
-        .section-header {
-            display: flex;
-            align-items: center;
-            gap: 10px;
-            margin-bottom: 20px;
-        }
-        .section-num {
-            width: 28px; height: 28px;
-            border-radius: 50%;
-            background: var(--accent);
-            color: #fff;
-            font-size: 0.8rem;
-            font-weight: 700;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            flex-shrink: 0;
-        }
-        .section-title {
-            font-size: 1.05rem;
+        .section h2 {
+            font-size: 1rem;
             font-weight: 600;
+            margin-bottom: 1rem;
+            display: flex; align-items: center; gap: 0.5rem;
         }
-        .section-subtitle {
-            color: var(--text-dim);
+        .section-desc {
             font-size: 0.82rem;
-            margin-top: -12px;
-            margin-bottom: 16px;
-            padding-left: 38px;
+            color: var(--text-muted);
+            margin-bottom: 1rem;
+            line-height: 1.5;
         }
 
         /* Form elements */
-        .field {
-            margin-bottom: 16px;
-        }
-        .field:last-child {
-            margin-bottom: 0;
-        }
-        label {
-            display: block;
-            font-size: 0.82rem;
-            font-weight: 500;
-            color: var(--text-dim);
-            margin-bottom: 6px;
-        }
-        input[type="text"],
-        input[type="email"],
-        input[type="number"],
-        input[type="date"],
-        select,
-        textarea {
-            width: 100%;
-            padding: 10px 14px;
-            background: var(--input-bg);
-            border: 1px solid var(--input-border);
-            border-radius: 8px;
-            color: var(--text);
-            font-family: 'DM Sans', sans-serif;
-            font-size: 0.9rem;
-            transition: border-color 0.2s;
-            outline: none;
-        }
-        input:focus, select:focus, textarea:focus {
-            border-color: var(--input-focus);
-        }
-        textarea {
-            resize: vertical;
-            min-height: 80px;
-        }
-        select {
-            cursor: pointer;
-            appearance: none;
-            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath d='M2 4l4 4 4-4' stroke='%238b90a0' stroke-width='1.5' fill='none'/%3E%3C/svg%3E");
-            background-repeat: no-repeat;
-            background-position: right 12px center;
-            padding-right: 32px;
-        }
-        select option {
-            background: var(--card);
-            color: var(--text);
-        }
-
-        .row {
+        .form-grid {
             display: grid;
             grid-template-columns: 1fr 1fr;
-            gap: 12px;
+            gap: 0.75rem;
         }
-        .row-3 {
-            display: grid;
-            grid-template-columns: 1fr 1fr 1fr;
-            gap: 12px;
+        @media (max-width: 500px) { .form-grid { grid-template-columns: 1fr; } }
+        .form-grid .full-width { grid-column: 1 / -1; }
+
+        .field { display: flex; flex-direction: column; }
+        .field label {
+            font-size: 0.75rem; font-weight: 500; color: var(--text-muted);
+            margin-bottom: 0.3rem; text-transform: uppercase; letter-spacing: 0.04em;
+        }
+        input, select, textarea {
+            background: var(--bg); border: 1px solid var(--border); border-radius: 6px;
+            padding: 0.55rem 0.7rem; color: var(--text); font-family: var(--font);
+            font-size: 0.88rem; transition: border-color 0.15s;
+        }
+        input:focus, select:focus, textarea:focus { outline: none; border-color: var(--accent); }
+        input::placeholder, textarea::placeholder { color: #444; }
+
+        /* Checkbox row */
+        .check-row {
+            display: flex; align-items: center; gap: 0.5rem;
+            font-size: 0.82rem; color: var(--text-muted); margin-top: 0.25rem;
+        }
+        .check-row input[type="checkbox"] { width: auto; accent-color: var(--accent); }
+
+        /* Collapsible */
+        .collapsible-toggle {
+            display: flex; align-items: center; gap: 0.5rem;
+            cursor: pointer; font-size: 0.82rem; color: var(--accent);
+            margin-top: 0.75rem; user-select: none;
+        }
+        .collapsible-toggle .arrow { transition: transform 0.2s; font-size: 0.7rem; }
+        .collapsible-toggle.open .arrow { transform: rotate(90deg); }
+        .collapsible-content { display: none; margin-top: 0.75rem; }
+        .collapsible-content.open { display: block; }
+        .help-text {
+            font-size: 0.78rem; color: var(--text-muted); line-height: 1.6;
+            background: var(--bg); border-radius: 6px; padding: 0.75rem 1rem;
+        }
+        .help-text code { font-family: var(--mono); background: rgba(255,255,255,0.05); padding: 0.1rem 0.3rem; border-radius: 3px; }
+
+        /* Dynamic rows (races, PBs) */
+        .row-list { margin-top: 0.5rem; }
+        .dyn-row {
+            display: grid; gap: 0.5rem; align-items: end;
+            margin-bottom: 0.5rem; padding-bottom: 0.5rem;
+            border-bottom: 1px solid rgba(255,255,255,0.03);
+        }
+        .dyn-row:last-child { border-bottom: none; }
+        .race-row { grid-template-columns: 120px 90px 1fr 70px auto; }
+        .pb-row { grid-template-columns: 110px 90px 1fr auto; }
+        .upcoming-row { grid-template-columns: 120px 90px 1fr 70px auto; }
+        @media (max-width: 600px) {
+            .race-row, .pb-row, .upcoming-row { grid-template-columns: 1fr 1fr; }
+            .dyn-row .field:last-child { grid-column: 1 / -1; }
+        }
+        .dyn-row input, .dyn-row select { font-size: 0.82rem; padding: 0.45rem 0.5rem; }
+
+        /* Time inputs */
+        .time-inputs { display: flex; gap: 0.15rem; align-items: center; }
+        .time-inputs input {
+            width: 44px; text-align: center; font-family: var(--mono);
+            font-size: 0.82rem; padding: 0.45rem 0.2rem;
+        }
+        .time-inputs .sep { color: var(--text-muted); font-family: var(--mono); font-size: 0.85rem; }
+
+        /* Distance presets */
+        .presets { display: flex; flex-wrap: wrap; gap: 0.3rem; margin-bottom: 0.75rem; }
+        .preset-btn {
+            padding: 0.3rem 0.6rem; border-radius: 16px; font-size: 0.75rem;
+            font-weight: 500; background: var(--accent-bg); color: var(--accent);
+            border: 1px solid var(--accent-border); cursor: pointer; transition: all 0.15s;
+        }
+        .preset-btn:hover { background: rgba(129,140,248,0.18); }
+
+        /* Buttons */
+        .btn {
+            display: inline-flex; align-items: center; gap: 0.35rem;
+            padding: 0.5rem 0.9rem; border-radius: 6px; font-family: var(--font);
+            font-size: 0.82rem; font-weight: 500; cursor: pointer; border: none; transition: all 0.15s;
+        }
+        .btn-primary { background: var(--accent); color: #fff; }
+        .btn-primary:hover { background: var(--accent-hover); }
+        .btn-ghost { background: transparent; color: var(--text-muted); border: 1px solid var(--border); }
+        .btn-ghost:hover { color: var(--text); border-color: #555; }
+        .btn-danger-sm {
+            background: transparent; color: var(--danger); border: none;
+            padding: 0.35rem; min-width: 28px; justify-content: center; cursor: pointer;
+            font-size: 0.9rem; border-radius: 4px;
+        }
+        .btn-danger-sm:hover { background: rgba(248,113,113,0.1); }
+        .btn-add {
+            background: transparent; color: var(--accent); border: 1px dashed var(--accent-border);
+            padding: 0.4rem 0.8rem; border-radius: 6px; font-size: 0.78rem; cursor: pointer;
+            font-family: var(--font); margin-top: 0.5rem; transition: all 0.15s;
+        }
+        .btn-add:hover { background: var(--accent-bg); }
+
+        .actions { display: flex; flex-wrap: wrap; gap: 0.75rem; margin-top: 0.5rem; }
+
+        /* Intervals.icu panel */
+        .intervals-panel {
+            background: var(--accent-bg); border: 1px solid var(--accent-border);
+            border-radius: 8px; padding: 1rem; margin-top: 1rem;
+        }
+        .intervals-panel.connected {
+            background: var(--success-bg); border-color: var(--success-border);
+        }
+        .intervals-status {
+            font-size: 0.82rem; font-weight: 500; margin-bottom: 0.75rem;
+            display: flex; align-items: center; gap: 0.4rem;
         }
 
-        .hint {
-            font-size: 0.75rem;
-            color: var(--text-dim);
-            margin-top: 4px;
+        /* Change indicator */
+        .changed { position: relative; }
+        .changed::after {
+            content: ''; position: absolute; top: 4px; right: 4px;
+            width: 6px; height: 6px; border-radius: 50%; background: var(--accent);
         }
 
-        .checkbox-row {
-            display: flex;
-            align-items: center;
-            gap: 8px;
-            margin-top: 4px;
-        }
-        .checkbox-row input[type="checkbox"] {
-            width: 16px; height: 16px;
-            accent-color: var(--accent);
-            cursor: pointer;
-        }
-        .checkbox-row label {
-            margin: 0;
-            font-size: 0.85rem;
-            color: var(--text);
-            cursor: pointer;
-        }
+        /* Submit section */
+        .submit-section { text-align: center; padding: 1.5rem; }
+        .submit-desc { font-size: 0.82rem; color: var(--text-muted); margin-bottom: 1rem; }
 
-        /* Upload area */
-        .upload-box {
-            border: 2px dashed var(--card-border);
-            border-radius: 10px;
-            padding: 32px 20px;
-            text-align: center;
-            transition: border-color 0.2s, background 0.2s;
-            cursor: pointer;
-        }
-
-        /* Source tabs */
-        .source-tabs {
-            display: flex;
-            gap: 8px;
-            margin-bottom: 16px;
-        }
-        .source-tab {
-            flex: 1;
-            padding: 10px 16px;
-            background: var(--input-bg);
-            border: 1px solid var(--input-border);
-            border-radius: 8px;
-            color: var(--text-dim);
-            font-family: 'DM Sans', sans-serif;
-            font-size: 0.85rem;
-            font-weight: 500;
-            cursor: pointer;
-            transition: all 0.2s;
-            text-align: center;
-        }
-        .source-tab:hover {
-            border-color: var(--accent);
-            color: var(--text);
-        }
-        .source-tab.active {
-            border-color: var(--accent);
-            background: rgba(129, 140, 248, 0.08);
-            color: var(--accent);
-        }
-
-        /* intervals.icu panel */
-        .intervals-info {
-            font-size: 0.85rem;
-            color: var(--text-dim);
-            line-height: 1.6;
-        }
-        .intervals-info a {
-            color: var(--accent);
-        }
-        .intervals-note {
-            margin-top: 16px;
-            padding: 12px 16px;
-            background: rgba(74, 222, 128, 0.06);
-            border: 1px solid rgba(74, 222, 128, 0.15);
-            border-radius: 8px;
-            font-size: 0.82rem;
-            line-height: 1.8;
-        }
-
-        /* Small upload box (for activities.csv) */
-        .upload-box-small {
-            display: inline-flex;
-            align-items: center;
-            gap: 8px;
-            padding: 8px 16px;
-            border: 1px dashed var(--card-border);
-            border-radius: 8px;
-            cursor: pointer;
-            transition: border-color 0.2s;
-            font-size: 0.82rem;
-            color: var(--text-dim);
-        }
-        .upload-box-small:hover {
-            border-color: var(--accent);
-            color: var(--text);
-        }
-        .upload-box-small.has-file {
-            border-color: var(--green);
-            border-style: solid;
-            color: var(--green);
-        }
-        .upload-icon-small { font-size: 1rem; }
-        .upload-text-small { font-size: 0.82rem; }
-        .upload-box:hover {
-            border-color: var(--accent);
-            background: rgba(129, 140, 248, 0.04);
-        }
-        .upload-box.has-file {
-            border-color: var(--green);
-            border-style: solid;
-            background: rgba(74, 222, 128, 0.04);
-        }
-        .upload-icon {
-            font-size: 32px;
-            margin-bottom: 8px;
-        }
-        .upload-text {
-            font-size: 0.9rem;
-            margin-bottom: 4px;
-        }
-        .upload-hint {
-            font-size: 0.78rem;
-            color: var(--text-dim);
-        }
-        .upload-filename {
-            font-family: 'JetBrains Mono', monospace;
-            font-size: 0.82rem;
-            color: var(--green);
-            margin-top: 8px;
-        }
-        #fileInput {
-            display: none;
-        }
-
-        /* Export instructions toggle */
-        .export-help {
-            margin-top: 16px;
-        }
-        .export-toggle {
-            font-size: 0.82rem;
-            color: var(--accent);
-            cursor: pointer;
-            display: inline-flex;
-            align-items: center;
-            gap: 4px;
-            border: none;
-            background: none;
-            font-family: inherit;
-        }
-        .export-toggle:hover {
-            color: var(--accent-hover);
-        }
-        .export-toggle .arrow {
-            transition: transform 0.2s;
-            font-size: 0.7rem;
-        }
-        .export-toggle.open .arrow {
-            transform: rotate(90deg);
-        }
-        .export-instructions {
-            display: none;
-            margin-top: 12px;
-            padding: 16px;
-            background: var(--input-bg);
-            border-radius: 8px;
-            font-size: 0.82rem;
-            line-height: 1.7;
-        }
-        .export-instructions.show {
-            display: block;
-        }
-        .export-instructions h4 {
-            font-size: 0.85rem;
-            color: var(--accent);
-            margin-bottom: 6px;
-            margin-top: 12px;
-        }
-        .export-instructions h4:first-child {
-            margin-top: 0;
-        }
-        .export-instructions a {
-            color: var(--accent);
-        }
-        .export-instructions code {
-            font-family: 'JetBrains Mono', monospace;
-            font-size: 0.78rem;
-            background: var(--card);
-            padding: 1px 5px;
-            border-radius: 3px;
-        }
-
-        /* Race entries */
-        .race-list {
-            display: flex;
-            flex-direction: column;
-            gap: 10px;
-        }
-        .race-entry {
-            display: grid;
-            grid-template-columns: 1fr 100px 90px 32px;
-            gap: 8px;
-            align-items: end;
-        }
-        .race-entry input, .race-entry select {
-            padding: 8px 10px;
-            font-size: 0.82rem;
-        }
-        .remove-btn {
-            width: 32px; height: 38px;
-            background: none;
-            border: 1px solid var(--card-border);
-            border-radius: 6px;
-            color: var(--text-dim);
-            cursor: pointer;
-            font-size: 1rem;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            transition: color 0.2s, border-color 0.2s;
-        }
-        .remove-btn:hover {
-            color: var(--red);
-            border-color: var(--red);
-        }
-        .add-btn {
-            display: inline-flex;
-            align-items: center;
-            gap: 4px;
-            margin-top: 8px;
-            padding: 6px 12px;
-            background: none;
-            border: 1px dashed var(--card-border);
-            border-radius: 6px;
-            color: var(--text-dim);
-            font-family: inherit;
-            font-size: 0.8rem;
-            cursor: pointer;
-            transition: color 0.2s, border-color 0.2s;
-        }
-        .add-btn:hover {
-            color: var(--accent);
-            border-color: var(--accent);
-        }
-
-        /* Upcoming race entries */
-        .upcoming-entry {
-            display: grid;
-            grid-template-columns: 1fr 90px 80px 70px 32px;
-            gap: 8px;
-            align-items: end;
-        }
-        .upcoming-entry input, .upcoming-entry select {
-            padding: 8px 10px;
-            font-size: 0.82rem;
-        }
-
-        /* Submit */
-        .submit-section {
-            text-align: center;
-            margin-top: 32px;
-        }
-        .submit-btn {
-            display: inline-flex;
-            align-items: center;
-            gap: 8px;
-            padding: 14px 40px;
-            background: var(--accent);
-            color: #fff;
-            border: none;
-            border-radius: 10px;
-            font-family: 'DM Sans', sans-serif;
-            font-size: 1rem;
-            font-weight: 600;
-            cursor: pointer;
-            transition: background 0.2s, transform 0.1s;
-        }
-        .submit-btn:hover {
-            background: var(--accent-hover);
-        }
-        .submit-btn:active {
-            transform: scale(0.98);
-        }
-        .submit-btn:disabled {
-            opacity: 0.5;
-            cursor: not-allowed;
-        }
-        .submit-note {
-            font-size: 0.78rem;
-            color: var(--text-dim);
-            margin-top: 12px;
-        }
-
-        /* Success state */
+        /* Success */
         .success-msg {
-            display: none;
-            text-align: center;
-            padding: 40px 20px;
+            background: var(--success-bg); border: 1px solid var(--success-border);
+            border-radius: 12px; padding: 2rem; text-align: center; display: none;
         }
-        .success-msg.show {
-            display: block;
-        }
-        .success-icon {
-            font-size: 56px;
-            margin-bottom: 16px;
-        }
-        .success-msg h2 {
-            font-size: 1.4rem;
-            margin-bottom: 8px;
-        }
-        .success-msg p {
-            color: var(--text-dim);
-            font-size: 0.9rem;
-        }
+        .success-msg.show { display: block; }
+        .success-msg h2 { color: var(--success); margin-bottom: 0.5rem; }
 
-        /* What you get section */
-        .features {
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 12px;
-            margin-top: 8px;
+        /* Footer */
+        .footer {
+            text-align: center; padding: 2rem 0; font-size: 0.75rem; color: #555;
         }
-        .feature {
-            padding: 14px;
-            background: var(--input-bg);
-            border-radius: 8px;
-            font-size: 0.82rem;
-        }
-        .feature-icon {
-            font-size: 1.2rem;
-            margin-bottom: 4px;
-        }
-        .feature-name {
-            font-weight: 600;
-            margin-bottom: 2px;
-        }
-        .feature-desc {
-            color: var(--text-dim);
-            font-size: 0.75rem;
-        }
+        .reset-link { color: var(--danger); cursor: pointer; text-decoration: underline; }
 
-        /* Privacy note */
-        .privacy {
-            text-align: center;
-            padding: 20px;
-            font-size: 0.78rem;
-            color: var(--text-dim);
-        }
-        .privacy a {
-            color: var(--accent);
-            text-decoration: none;
-        }
-
-        /* Responsive */
-        @media (max-width: 480px) {
-            .container { padding: 24px 16px 60px; }
-            .hero h1 { font-size: 1.4rem; }
-            .section { padding: 20px 16px; }
-            .row, .row-3 { grid-template-columns: 1fr; }
-            .race-entry {
-                grid-template-columns: 1fr 1fr 32px;
-            }
-            .race-entry input:first-child {
-                grid-column: 1 / -1;
-            }
-            .upcoming-entry {
-                grid-template-columns: 1fr 1fr 32px;
-            }
-            .upcoming-entry input:first-child {
-                grid-column: 1 / -1;
-            }
-            .upcoming-entry select:first-of-type {
-                grid-column: 1 / -1;
-            }
-            .features { grid-template-columns: 1fr; }
-        }
+        /* Pace display */
+        .pace-hint { font-size: 0.72rem; color: var(--accent); font-family: var(--mono); margin-top: 0.15rem; }
     </style>
 </head>
 <body>
-    <div class="container" id="mainForm">
-        <!-- Hero -->
-        <div class="hero">
-            <div class="hero-icon">🏃</div>
-            <h1>Running Fitness Dashboard</h1>
-            <p>Get a personal dashboard showing your fitness trend, training load, race predictions, and more — built from your GPS watch data.</p>
+<div class="container">
+    <div class="header">
+        <h1>🏃 My Running Profile</h1>
+        <p class="tagline">Set up your profile or update your details. Changes are saved automatically.</p>
+        <div class="returning-banner" id="returningBanner">
+            ✅ <span>Welcome back, <strong id="returningName"></strong>. Your previous entries are loaded — just update what's changed.</span>
         </div>
+    </div>
 
-        <!-- Step dots -->
-        <div class="steps">
-            <div class="step-dot active" id="dot1"></div>
-            <div class="step-dot" id="dot2"></div>
-            <div class="step-dot" id="dot3"></div>
-            <div class="step-dot" id="dot4"></div>
-        </div>
-
-        <!-- Section 1: About you -->
+    <div id="mainContent">
+        <!-- 1. ABOUT YOU -->
         <div class="section">
-            <div class="section-header">
-                <div class="section-num">1</div>
-                <div class="section-title">About you</div>
-            </div>
-            <div class="field">
-                <label for="name">Name</label>
-                <input type="text" id="name" placeholder="First Last" required>
-            </div>
-            <div class="field">
-                <label for="email">Email</label>
-                <input type="email" id="email" placeholder="you@example.com" required>
-                <div class="hint">We'll send your dashboard link here</div>
-            </div>
-            <div class="row">
+            <h2>👤 About You</h2>
+            <div class="form-grid">
                 <div class="field">
-                    <label for="dob">Date of birth</label>
-                    <input type="date" id="dob" required>
+                    <label for="f-name">Name *</label>
+                    <input type="text" id="f-name" placeholder="e.g. Ian Lilley" data-key="name">
                 </div>
                 <div class="field">
-                    <label for="gender">Gender</label>
-                    <select id="gender">
+                    <label for="f-email">Email *</label>
+                    <input type="email" id="f-email" placeholder="you@email.com" data-key="email">
+                </div>
+                <div class="field">
+                    <label for="f-dob">Date of birth *</label>
+                    <input type="date" id="f-dob" data-key="dob">
+                </div>
+                <div class="field">
+                    <label for="f-gender">Gender</label>
+                    <select id="f-gender" data-key="gender">
                         <option value="male">Male</option>
                         <option value="female">Female</option>
                     </select>
                 </div>
-            </div>
-            <div class="row">
                 <div class="field">
-                    <label for="weight">Weight (kg)</label>
-                    <input type="number" id="weight" placeholder="75" step="0.1" min="30" max="200" required>
+                    <label for="f-weight">Weight (kg) *</label>
+                    <input type="number" id="f-weight" placeholder="75" step="0.5" data-key="weight_kg">
                 </div>
                 <div class="field">
-                    <label for="timezone">Timezone</label>
-                    <select id="timezone">
+                    <label for="f-tz">Timezone</label>
+                    <select id="f-tz" data-key="timezone">
                         <option value="Europe/London">UK (London)</option>
                         <option value="Europe/Stockholm">Sweden (Stockholm)</option>
                         <option value="Europe/Paris">Central Europe (Paris)</option>
-                        <option value="Europe/Berlin">Germany (Berlin)</option>
-                        <option value="US/Eastern">US Eastern</option>
-                        <option value="US/Central">US Central</option>
-                        <option value="US/Pacific">US Pacific</option>
+                        <option value="Europe/Berlin">Central Europe (Berlin)</option>
+                        <option value="America/New_York">US Eastern</option>
+                        <option value="America/Chicago">US Central</option>
+                        <option value="America/Los_Angeles">US Pacific</option>
                         <option value="Australia/Sydney">Australia (Sydney)</option>
                         <option value="Asia/Tokyo">Japan (Tokyo)</option>
                     </select>
@@ -629,540 +273,471 @@
             </div>
         </div>
 
-        <!-- Section 2: Heart rate -->
+        <!-- 2. HEART RATE -->
         <div class="section">
-            <div class="section-header">
-                <div class="section-num">2</div>
-                <div class="section-title">Heart rate</div>
-            </div>
-            <p class="section-subtitle">If you don't know these, we'll estimate them from your data — just tick the box.</p>
-            <div class="row">
+            <h2>❤️ Heart Rate</h2>
+            <p class="section-desc">If you know your max HR and lactate threshold HR, enter them. Otherwise we'll estimate from your data.</p>
+            <div class="form-grid">
                 <div class="field">
-                    <label for="maxhr">Max HR</label>
-                    <input type="number" id="maxhr" placeholder="190" min="120" max="220">
-                    <div class="checkbox-row">
-                        <input type="checkbox" id="maxhr_unknown">
-                        <label for="maxhr_unknown">Estimate from my data</label>
-                    </div>
+                    <label for="f-maxhr">Max HR</label>
+                    <input type="number" id="f-maxhr" placeholder="e.g. 192" data-key="max_hr">
+                    <label class="check-row"><input type="checkbox" id="f-maxhr-est" data-key="max_hr_estimate"> Estimate from my data</label>
                 </div>
                 <div class="field">
-                    <label for="lthr">Lactate threshold HR</label>
-                    <input type="number" id="lthr" placeholder="170" min="100" max="210">
-                    <div class="checkbox-row">
-                        <input type="checkbox" id="lthr_unknown">
-                        <label for="lthr_unknown">Estimate from my data</label>
-                    </div>
+                    <label for="f-lthr">Lactate Threshold HR</label>
+                    <input type="number" id="f-lthr" placeholder="e.g. 178" data-key="lthr">
+                    <label class="check-row"><input type="checkbox" id="f-lthr-est" data-key="lthr_estimate"> Estimate from my data</label>
                 </div>
             </div>
-            <div class="hint">LTHR is roughly your average HR during a hard 10K race, or what your Garmin reports as lactate threshold.</div>
+            <div class="collapsible-toggle" onclick="toggleCollapsible(this)">
+                <span class="arrow">▶</span> What's LTHR?
+            </div>
+            <div class="collapsible-content">
+                <div class="help-text">
+                    Lactate Threshold Heart Rate is roughly your average HR during a hard 30-minute effort or a 10K race.
+                    Your Garmin watch may report this — check <code>Performance Stats → Lactate Threshold</code>.
+                    If unsure, tick "Estimate" and we'll calculate it from your training data.
+                </div>
+            </div>
         </div>
 
-        <!-- Section 3: Your data -->
+        <!-- 3. YOUR DATA -->
         <div class="section">
-            <div class="section-header">
-                <div class="section-num">3</div>
-                <div class="section-title">Your running data</div>
-            </div>
-            <p class="section-subtitle">Choose how you'd like to connect your data. The more history, the better — ideally 6+ months.</p>
+            <h2>📂 Your Running Data</h2>
+            <p class="section-desc">Upload your activity files and/or connect intervals.icu for automatic syncing.</p>
 
-            <!-- Data source selector -->
-            <div class="field">
-                <label>How would you like to provide your data?</label>
-                <div class="source-tabs">
-                    <button class="source-tab active" onclick="switchSource('upload')" id="tab_upload">📁 Upload a zip</button>
-                    <button class="source-tab" onclick="switchSource('intervals')" id="tab_intervals">🔗 intervals.icu</button>
-                </div>
+            <div class="field" style="margin-bottom: 1rem;">
+                <label>Upload FIT/GPX files (Garmin or Strava export)</label>
+                <input type="file" id="f-file" accept=".zip,.fit,.gpx,.tcx" style="font-size: 0.82rem;">
             </div>
 
-            <!-- Upload panel -->
-            <div class="source-panel" id="panel_upload">
-                <div class="upload-box" id="uploadBox" onclick="document.getElementById('fileInput').click()">
-                    <div class="upload-icon">📁</div>
-                    <div class="upload-text">Click to select your export zip</div>
-                    <div class="upload-hint">.zip file from Garmin Connect or Strava export</div>
-                    <div class="upload-filename" id="fileName"></div>
-                </div>
-                <input type="file" id="fileInput" accept=".zip,.gz" onchange="handleFile(this)">
-
-                <div class="export-help">
-                    <button class="export-toggle" onclick="toggleExport(this)">
-                        <span class="arrow">▶</span> How do I export my data?
-                    </button>
-                    <div class="export-instructions" id="exportInstructions">
-                        <h4>🟢 Garmin Connect (recommended)</h4>
-                        Go to <a href="https://www.garmin.com/account" target="_blank">garmin.com/account</a> → Data Management → Export Your Data → Request Data Export. You'll get an email with a download link (usually within a few hours). Upload the zip here.
-
-                        <h4>🟠 Strava</h4>
-                        Go to <a href="https://www.strava.com/athlete/delete_your_account" target="_blank">strava.com/athlete/delete_your_account</a> — don't worry, you're not deleting anything! Click <strong>"Request Your Archive"</strong> at the top. You'll get an email when it's ready (can take a few hours). Upload the zip here.
-
-                        <h4>💡 Tip</h4>
-                        If your zip is very large (>500MB), you can upload it directly via <a href="__DROPBOX_REQUEST_LINK__" target="_blank">this Dropbox link</a> instead, then just submit the form without a file.
-                    </div>
-                </div>
-
-                <!-- Strava activities.csv -->
-                <div style="margin-top: 16px; padding-top: 16px; border-top: 1px solid var(--card-border);">
-                    <label style="color: var(--text); font-weight: 500; font-size: 0.85rem;">Strava activities.csv <span style="color: var(--text-dim); font-weight: 400;">(optional)</span></label>
-                    <div class="hint" style="margin-bottom: 8px;">If you exported from Strava, your zip contains an <code>activities.csv</code> file. Uploading it separately helps us detect which runs were races.</div>
-                    <div class="upload-box-small" id="activitiesBox" onclick="document.getElementById('activitiesInput').click()">
-                        <span class="upload-icon-small">📄</span>
-                        <span class="upload-text-small" id="activitiesText">Select activities.csv</span>
-                    </div>
-                    <input type="file" id="activitiesInput" accept=".csv" onchange="handleActivities(this)" style="display:none">
+            <div class="collapsible-toggle" onclick="toggleCollapsible(this)">
+                <span class="arrow">▶</span> How to export from Garmin or Strava
+            </div>
+            <div class="collapsible-content">
+                <div class="help-text">
+                    <strong>Garmin Connect:</strong> Log in at connect.garmin.com → ⚙️ → Account Settings →
+                    Download Your Data → Export Your Data. You'll get an email with a zip file.<br><br>
+                    <strong>Strava:</strong> Log in at strava.com → Settings → My Account →
+                    Download or Delete Your Account → Request Your Archive. Takes a few hours.<br><br>
+                    <strong>Large files (>500MB)?</strong> Upload via <a href="__DROPBOX_REQUEST_LINK__" target="_blank" style="color: var(--accent);">this Dropbox link</a> instead.
                 </div>
             </div>
 
-            <!-- intervals.icu panel -->
-            <div class="source-panel" id="panel_intervals" style="display: none;">
-                <div class="intervals-info">
-                    <p><a href="https://intervals.icu" target="_blank" style="color: var(--accent);">intervals.icu</a> is a free training platform that syncs with Garmin and Strava. Connecting it gives us automatic daily sync of new runs, weight history, and activity metadata — no manual exports needed.</p>
+            <!-- intervals.icu -->
+            <div class="intervals-panel" id="intervalsPanel">
+                <div class="intervals-status">
+                    <span id="intervalsIcon">🔗</span>
+                    <span id="intervalsLabel">Connect intervals.icu</span>
+                    <span style="font-weight: 400; color: var(--text-muted); margin-left: 0.25rem;">(optional — enables daily auto-sync)</span>
                 </div>
-                <div class="row" style="margin-top: 16px;">
+                <div class="form-grid">
                     <div class="field">
-                        <label for="intervals_id">Athlete ID</label>
-                        <input type="text" id="intervals_id" placeholder="i123456">
-                        <div class="hint">Settings → Profile → bottom of page</div>
+                        <label for="f-int-id">Athlete ID</label>
+                        <input type="text" id="f-int-id" placeholder="e.g. i224884" data-key="intervals_id">
                     </div>
                     <div class="field">
-                        <label for="intervals_key">API Key</label>
-                        <input type="text" id="intervals_key" placeholder="abc123...">
-                        <div class="hint">Settings → Profile → API Key → Show</div>
+                        <label for="f-int-key">API Key</label>
+                        <input type="text" id="f-int-key" placeholder="From Settings → Developer" data-key="intervals_key">
                     </div>
                 </div>
-                <div class="intervals-note">
-                    <span style="color: var(--green);">✓</span> Weight history synced automatically<br>
-                    <span style="color: var(--green);">✓</span> New runs picked up daily<br>
-                    <span style="color: var(--green);">✓</span> No manual exports needed
+                <div class="collapsible-toggle" onclick="toggleCollapsible(this)" style="margin-top: 0.5rem;">
+                    <span class="arrow">▶</span> Where do I find these?
                 </div>
-
-                <div style="margin-top: 16px; padding-top: 16px; border-top: 1px solid var(--card-border);">
-                    <div class="hint">💡 Don't have an intervals.icu account? It's free — <a href="https://intervals.icu" target="_blank" style="color: var(--accent);">sign up here</a>, connect your Garmin or Strava, and it will import your full history. Then come back and enter your ID and API key above.</div>
+                <div class="collapsible-content">
+                    <div class="help-text">
+                        <strong>intervals.icu</strong> is a free training analysis platform that syncs with Garmin/Strava.<br><br>
+                        1. Create a free account at <a href="https://intervals.icu" target="_blank" style="color: var(--accent);">intervals.icu</a> and connect your Garmin/Strava<br>
+                        2. Go to <strong>Settings → Developer</strong><br>
+                        3. Your <strong>Athlete ID</strong> is shown at the top (e.g. <code>i224884</code>)<br>
+                        4. Click <strong>Generate API Key</strong> and copy it<br><br>
+                        ✅ Enables daily auto-sync of new runs<br>
+                        ✅ Weight history from your watch<br>
+                        ✅ No more manual file exports
+                    </div>
                 </div>
-            </div>
-
-            <!-- Weight note (shown for upload mode) -->
-            <div class="weight-note" id="weightNote" style="margin-top: 16px;">
-                <div class="hint">⚖️ <strong>Weight history:</strong> If you use intervals.icu (even with zip upload), we can pull your weight automatically. Otherwise we'll use the constant weight you entered above. You can also send a CSV with <code>date,weight_kg</code> columns if you have one.</div>
-            </div>
-
-            <!-- Overrides note -->
-            <div style="margin-top: 12px;">
-                <div class="hint">📝 <strong>After setup:</strong> Once your dashboard is live, you'll be able to flag corrections — marking which runs were races, tagging trail/XC surfaces, and fixing any data oddities.</div>
             </div>
         </div>
 
-        <!-- Section 4: Race history & upcoming (optional) -->
+        <!-- 4. RACE PBs / KNOWN TIMES -->
         <div class="section">
-            <div class="section-header">
-                <div class="section-num">4</div>
-                <div class="section-title">Races</div>
-            </div>
-            <p class="section-subtitle">Optional but helpful — race results calibrate predictions faster. Add any you remember.</p>
+            <h2>⏱️ Race Times</h2>
+            <p class="section-desc">
+                Enter your <strong>official chip times</strong> from races. This improves age grading accuracy
+                and helps calibrate race predictions. GPS can be off by 1-3% — your chip time is the truth.
+            </p>
 
-            <label style="margin-bottom: 8px; color: var(--text); font-weight: 600; font-size: 0.85rem;">Recent race results</label>
-            <div class="race-list" id="raceList">
-                <div class="race-entry">
-                    <div>
-                        <label>Date</label>
-                        <input type="date" name="race_date">
-                    </div>
-                    <div>
-                        <label>Distance</label>
-                        <select name="race_dist">
-                            <option value="">—</option>
-                            <option value="5">5K</option>
-                            <option value="10">10K</option>
-                            <option value="21.097">Half Marathon</option>
-                            <option value="42.195">Marathon</option>
-                            <option value="custom">Other</option>
-                        </select>
-                    </div>
-                    <div>
-                        <label>Time</label>
-                        <input type="text" name="race_time" placeholder="25:30">
-                    </div>
-                    <button class="remove-btn" onclick="removeEntry(this, 'race')" title="Remove">×</button>
-                </div>
+            <div class="presets">
+                <button class="preset-btn" onclick="addPbRow('1.609','Mile')">Mile</button>
+                <button class="preset-btn" onclick="addPbRow('3.0','3K')">3K</button>
+                <button class="preset-btn" onclick="addPbRow('5.0','5K')">5K</button>
+                <button class="preset-btn" onclick="addPbRow('10.0','10K')">10K</button>
+                <button class="preset-btn" onclick="addPbRow('21.097','HM')">Half Marathon</button>
+                <button class="preset-btn" onclick="addPbRow('42.195','Marathon')">Marathon</button>
+                <button class="preset-btn" onclick="addPbRow('','Custom')">+ Custom</button>
             </div>
-            <button class="add-btn" onclick="addRace()">+ Add race</button>
 
-            <div style="margin-top: 24px;">
-                <label style="margin-bottom: 8px; color: var(--text); font-weight: 600; font-size: 0.85rem;">Upcoming races</label>
-                <div class="race-list" id="upcomingList">
-                    <div class="upcoming-entry">
-                        <div>
-                            <label>Date</label>
-                            <input type="date" name="up_date">
-                        </div>
-                        <div>
-                            <label>Distance</label>
-                            <select name="up_dist">
-                                <option value="">—</option>
-                                <option value="5">5K</option>
-                                <option value="10">10K</option>
-                                <option value="21.097">Half Marathon</option>
-                                <option value="42.195">Marathon</option>
-                                <option value="custom">Other</option>
-                            </select>
-                        </div>
-                        <div>
-                            <label>Name</label>
-                            <input type="text" name="up_name" placeholder="Parkrun">
-                        </div>
-                        <div>
-                            <label>Priority</label>
-                            <select name="up_priority">
-                                <option value="C">Fun</option>
-                                <option value="B">Target</option>
-                                <option value="A">Goal</option>
-                            </select>
-                        </div>
-                        <button class="remove-btn" onclick="removeEntry(this, 'upcoming')" title="Remove">×</button>
-                    </div>
-                </div>
-                <button class="add-btn" onclick="addUpcoming()">+ Add race</button>
-            </div>
+            <div id="pb-list" class="row-list"></div>
         </div>
 
-        <!-- What you'll get -->
+        <!-- 5. UPCOMING RACES -->
         <div class="section">
-            <div class="section-header">
-                <span style="font-size: 1.2rem;">✨</span>
-                <div class="section-title">What you'll get</div>
-            </div>
-            <div class="features">
-                <div class="feature">
-                    <div class="feature-icon">📈</div>
-                    <div class="feature-name">Fitness trend</div>
-                    <div class="feature-desc">See how your running fitness changes over weeks and months</div>
-                </div>
-                <div class="feature">
-                    <div class="feature-icon">⚡</div>
-                    <div class="feature-name">Training load</div>
-                    <div class="feature-desc">Fitness, fatigue, and freshness balance</div>
-                </div>
-                <div class="feature">
-                    <div class="feature-icon">🏁</div>
-                    <div class="feature-name">Race predictions</div>
-                    <div class="feature-desc">5K to marathon times based on current fitness</div>
-                </div>
-                <div class="feature">
-                    <div class="feature-icon">🎯</div>
-                    <div class="feature-name">Race readiness</div>
-                    <div class="feature-desc">Taper plans and target paces for upcoming races</div>
-                </div>
-                <div class="feature">
-                    <div class="feature-icon">💓</div>
-                    <div class="feature-name">Training zones</div>
-                    <div class="feature-desc">HR and pace zones that adapt to your fitness</div>
-                </div>
-                <div class="feature">
-                    <div class="feature-icon">🏅</div>
-                    <div class="feature-name">Age grading</div>
-                    <div class="feature-desc">Performance scores adjusted for age and gender</div>
-                </div>
-            </div>
+            <h2>🎯 Upcoming Races</h2>
+            <p class="section-desc">Planned races appear on your dashboard with target paces and taper guidance.</p>
+            <div id="upcoming-list" class="row-list"></div>
+            <button class="btn-add" onclick="addUpcomingRow()">+ Add Race</button>
         </div>
 
-        <!-- Submit -->
-        <div class="submit-section">
-            <button class="submit-btn" id="submitBtn" onclick="submitForm()">
-                🚀 Submit
-            </button>
-            <div class="submit-note">Your data is processed privately. Dashboard typically ready within 24 hours.</div>
-        </div>
-
-        <div class="privacy">
-            🔒 Your data stays private — not shared with third parties.<br>
-            Dashboard is a personal link only you can access.
+        <!-- SUBMIT -->
+        <div class="section submit-section">
+            <p class="submit-desc" id="submitDesc">
+                This will email your profile to your coach. Only changed or new information is highlighted.
+            </p>
+            <div class="actions" style="justify-content: center;">
+                <button class="btn btn-primary" onclick="submitProfile()" style="padding: 0.65rem 2rem; font-size: 0.9rem;">
+                    📧 Send to Coach
+                </button>
+            </div>
         </div>
     </div>
 
-    <!-- Success message (hidden by default) -->
-    <div class="container success-msg" id="successMsg">
-        <div class="success-icon">🎉</div>
-        <h2>You're all set!</h2>
-        <p>I've received your details and data. I'll process everything and send your personal dashboard link to <strong id="successEmail"></strong> — usually within 24 hours.</p>
-        <p style="margin-top: 16px; color: var(--text-dim); font-size: 0.82rem;">If your zip was too large to upload here, remember to upload it via the <a href="__DROPBOX_REQUEST_LINK__" style="color: var(--accent);">Dropbox link</a>.</p>
+    <div class="success-msg" id="successMsg">
+        <h2>✅ Profile Sent!</h2>
+        <p style="color: var(--text-muted); font-size: 0.88rem; margin-bottom: 1rem;">
+            Your profile has been emailed. You can return to this page any time to update your details.
+        </p>
+        <button class="btn btn-ghost" onclick="showForm()">← Back to Profile</button>
     </div>
 
-    <script>
-    // --- File handling ---
-    function handleFile(input) {
-        const box = document.getElementById('uploadBox');
-        const nameEl = document.getElementById('fileName');
-        if (input.files.length > 0) {
-            const f = input.files[0];
-            const sizeMB = (f.size / 1024 / 1024).toFixed(1);
-            nameEl.textContent = `${f.name} (${sizeMB} MB)`;
-            box.classList.add('has-file');
-            box.querySelector('.upload-icon').textContent = '✅';
-            box.querySelector('.upload-text').textContent = 'File selected';
-            updateDots();
-        }
-    }
+    <div class="footer">
+        Your data is saved in this browser only.
+        <span class="reset-link" onclick="resetAll()">Clear all saved data</span>
+    </div>
+</div>
 
-    function handleActivities(input) {
-        const box = document.getElementById('activitiesBox');
-        const textEl = document.getElementById('activitiesText');
-        if (input.files.length > 0) {
-            textEl.textContent = input.files[0].name;
-            box.classList.add('has-file');
-            box.querySelector('.upload-icon-small').textContent = '✅';
-        }
-    }
+<script>
+const STORAGE_KEY = 'runner_profile_v1';
+let pbCounter = 0;
+let upcomingCounter = 0;
 
-    // --- Data source switching ---
-    let currentSource = 'upload';
-    function switchSource(source) {
-        currentSource = source;
-        document.getElementById('panel_upload').style.display = source === 'upload' ? 'block' : 'none';
-        document.getElementById('panel_intervals').style.display = source === 'intervals' ? 'block' : 'none';
-        document.getElementById('tab_upload').classList.toggle('active', source === 'upload');
-        document.getElementById('tab_intervals').classList.toggle('active', source === 'intervals');
-        document.getElementById('weightNote').style.display = source === 'upload' ? 'block' : 'none';
-        updateDots();
-    }
+// ─── LocalStorage ────────────────────────────────────────────
+function loadProfile() {
+    try { return JSON.parse(localStorage.getItem(STORAGE_KEY)) || {}; } catch { return {}; }
+}
+function saveProfile(data) {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+}
+function autoSave() {
+    const data = gatherFormData();
+    saveProfile(data);
+}
 
-    // --- Export help toggle ---
-    function toggleExport(btn) {
-        btn.classList.toggle('open');
-        document.getElementById('exportInstructions').classList.toggle('show');
-    }
+// ─── Form data ───────────────────────────────────────────────
+function gatherFormData() {
+    return {
+        name: v('f-name'), email: v('f-email'), dob: v('f-dob'),
+        gender: v('f-gender'), weight_kg: v('f-weight'), timezone: v('f-tz'),
+        max_hr: el('f-maxhr-est').checked ? 'estimate' : v('f-maxhr'),
+        lthr: el('f-lthr-est').checked ? 'estimate' : v('f-lthr'),
+        max_hr_estimate: el('f-maxhr-est').checked,
+        lthr_estimate: el('f-lthr-est').checked,
+        intervals_id: v('f-int-id'), intervals_key: v('f-int-key'),
+        pbs: gatherPbs(), upcoming: gatherUpcoming(),
+        last_saved: new Date().toISOString()
+    };
+}
 
-    // --- Race entries ---
-    function addRace() {
-        const list = document.getElementById('raceList');
-        const entry = document.createElement('div');
-        entry.className = 'race-entry';
-        entry.innerHTML = `
-            <div><input type="date" name="race_date"></div>
-            <div><select name="race_dist">
-                <option value="">—</option><option value="5">5K</option><option value="10">10K</option>
-                <option value="21.097">Half Marathon</option><option value="42.195">Marathon</option>
-                <option value="custom">Other</option>
-            </select></div>
-            <div><input type="text" name="race_time" placeholder="25:30"></div>
-            <button class="remove-btn" onclick="removeEntry(this, 'race')" title="Remove">×</button>`;
-        list.appendChild(entry);
-    }
-
-    function addUpcoming() {
-        const list = document.getElementById('upcomingList');
-        const entry = document.createElement('div');
-        entry.className = 'upcoming-entry';
-        entry.innerHTML = `
-            <div><input type="date" name="up_date"></div>
-            <div><select name="up_dist">
-                <option value="">—</option><option value="5">5K</option><option value="10">10K</option>
-                <option value="21.097">Half Marathon</option><option value="42.195">Marathon</option>
-                <option value="custom">Other</option>
-            </select></div>
-            <div><input type="text" name="up_name" placeholder="Parkrun"></div>
-            <div><select name="up_priority">
-                <option value="C">Fun</option><option value="B">Target</option><option value="A">Goal</option>
-            </select></div>
-            <button class="remove-btn" onclick="removeEntry(this, 'upcoming')" title="Remove">×</button>`;
-        list.appendChild(entry);
-    }
-
-    function removeEntry(btn, type) {
-        const list = type === 'race' ? document.getElementById('raceList') : document.getElementById('upcomingList');
-        if (list.children.length > 1) {
-            btn.parentElement.remove();
-        }
-    }
-
-    // --- Step dots ---
-    function updateDots() {
-        const name = document.getElementById('name').value.trim();
-        const email = document.getElementById('email').value.trim();
-        const weight = document.getElementById('weight').value;
-        const hasFile = document.getElementById('fileInput').files.length > 0;
-        const hasIntervals = document.getElementById('intervals_id').value.trim() && document.getElementById('intervals_key').value.trim();
-        const hasData = currentSource === 'intervals' ? hasIntervals : hasFile;
-        const hrDone = document.getElementById('maxhr_unknown').checked || document.getElementById('maxhr').value;
-
-        document.getElementById('dot1').className = 'step-dot ' + ((name && email && weight) ? 'done' : 'active');
-        document.getElementById('dot2').className = 'step-dot ' + (hrDone ? 'done' : ((name && email) ? 'active' : ''));
-        document.getElementById('dot3').className = 'step-dot ' + (hasData ? 'done' : (hrDone ? 'active' : ''));
-        document.getElementById('dot4').className = 'step-dot ' + ((name && email && weight) ? 'active' : '');
-    }
-
-    // Attach listeners for dot updates
-    ['name', 'email', 'weight', 'maxhr', 'lthr', 'intervals_id', 'intervals_key'].forEach(id => {
-        document.getElementById(id).addEventListener('input', updateDots);
+function gatherPbs() {
+    const pbs = [];
+    document.querySelectorAll('.pb-row').forEach(row => {
+        const id = row.dataset.id;
+        const date = v(`pb-date-${id}`);
+        const dist = v(`pb-dist-${id}`);
+        const hh = parseInt(v(`pb-hh-${id}`)) || 0;
+        const mm = parseInt(v(`pb-mm-${id}`)) || 0;
+        const ss = parseInt(v(`pb-ss-${id}`)) || 0;
+        const totalSec = hh * 3600 + mm * 60 + ss;
+        if (dist && totalSec > 0) pbs.push({ date, dist_km: dist, time_s: totalSec, label: row.dataset.label || '' });
     });
-    ['maxhr_unknown', 'lthr_unknown'].forEach(id => {
-        document.getElementById(id).addEventListener('change', function() {
-            const input = document.getElementById(id.replace('_unknown', ''));
-            input.disabled = this.checked;
-            if (this.checked) input.value = '';
-            updateDots();
-        });
+    return pbs;
+}
+
+function gatherUpcoming() {
+    const races = [];
+    document.querySelectorAll('.upcoming-row').forEach(row => {
+        const id = row.dataset.id;
+        const date = v(`up-date-${id}`);
+        const dist = v(`up-dist-${id}`);
+        const name = v(`up-name-${id}`);
+        const priority = v(`up-pri-${id}`);
+        if (date && dist) races.push({ date, dist_km: dist, name, priority });
+    });
+    return races;
+}
+
+// ─── Populate form from saved data ──────────────────────────
+function populateForm(data) {
+    if (!data || !data.name) return false;
+
+    setV('f-name', data.name); setV('f-email', data.email); setV('f-dob', data.dob);
+    setV('f-gender', data.gender); setV('f-weight', data.weight_kg); setV('f-tz', data.timezone);
+
+    if (data.max_hr_estimate) { el('f-maxhr-est').checked = true; el('f-maxhr').value = ''; }
+    else setV('f-maxhr', data.max_hr);
+    if (data.lthr_estimate) { el('f-lthr-est').checked = true; el('f-lthr').value = ''; }
+    else setV('f-lthr', data.lthr);
+
+    setV('f-int-id', data.intervals_id); setV('f-int-key', data.intervals_key);
+    updateIntervalsStatus();
+
+    if (data.pbs) data.pbs.forEach(pb => {
+        addPbRow(pb.dist_km, pb.label || distLabel(pb.dist_km));
+        const id = pbCounter;
+        setV(`pb-date-${id}`, pb.date);
+        setV(`pb-dist-${id}`, pb.dist_km);
+        const hh = Math.floor(pb.time_s / 3600);
+        const mm = Math.floor((pb.time_s % 3600) / 60);
+        const ss = pb.time_s % 60;
+        setV(`pb-hh-${id}`, hh > 0 ? hh : '');
+        setV(`pb-mm-${id}`, String(mm).padStart(hh > 0 ? 2 : 1, '0'));
+        setV(`pb-ss-${id}`, String(ss).padStart(2, '0'));
+        updatePace(id);
     });
 
-    // --- Collect form data ---
-    function collectData() {
-        const races = [];
-        document.querySelectorAll('.race-entry').forEach(el => {
-            const d = el.querySelector('[name=race_date]').value;
-            const dist = el.querySelector('[name=race_dist]').value;
-            const t = el.querySelector('[name=race_time]').value;
-            if (d && dist && t) races.push({ date: d, distance_km: dist, time: t });
+    if (data.upcoming) data.upcoming.forEach(r => {
+        addUpcomingRow();
+        const id = upcomingCounter;
+        setV(`up-date-${id}`, r.date); setV(`up-dist-${id}`, r.dist_km);
+        setV(`up-name-${id}`, r.name); setV(`up-pri-${id}`, r.priority);
+    });
+
+    return true;
+}
+
+function distLabel(km) {
+    const labels = { '1.609': 'Mile', '3.0': '3K', '5.0': '5K', '10.0': '10K',
+        '15.0': '15K', '16.093': '10M', '21.097': 'HM', '42.195': 'Marathon' };
+    return labels[String(km)] || `${km}km`;
+}
+
+// ─── Dynamic rows: PBs ──────────────────────────────────────
+function addPbRow(distKm, label) {
+    const id = ++pbCounter;
+    const list = el('pb-list');
+    const row = document.createElement('div');
+    row.className = 'dyn-row pb-row';
+    row.dataset.id = id;
+    row.dataset.label = label || '';
+    row.innerHTML = `
+        <div class="field">
+            <label>Date</label>
+            <input type="date" id="pb-date-${id}" onchange="autoSave()">
+        </div>
+        <div class="field">
+            <label>Distance</label>
+            <div style="display:flex;gap:0.3rem;align-items:center;">
+                <input type="text" id="pb-dist-${id}" value="${distKm}" placeholder="km"
+                    style="width:60px;text-align:center;font-family:var(--mono);" onchange="autoSave()">
+                <span style="font-size:0.72rem;color:var(--text-muted);white-space:nowrap;">${label||'km'}</span>
+            </div>
+        </div>
+        <div class="field">
+            <label>Chip time</label>
+            <div class="time-inputs">
+                <input type="text" id="pb-hh-${id}" placeholder="H" maxlength="2"
+                    oninput="autoTab(this,'pb-mm-${id}')" onchange="updatePace(${id});autoSave()">
+                <span class="sep">:</span>
+                <input type="text" id="pb-mm-${id}" placeholder="MM" maxlength="2"
+                    oninput="autoTab(this,'pb-ss-${id}')" onchange="updatePace(${id});autoSave()">
+                <span class="sep">:</span>
+                <input type="text" id="pb-ss-${id}" placeholder="SS" maxlength="2"
+                    onchange="updatePace(${id});autoSave()">
+            </div>
+            <div class="pace-hint" id="pb-pace-${id}"></div>
+        </div>
+        <button class="btn-danger-sm" onclick="this.parentElement.remove();autoSave()">✕</button>
+    `;
+    list.appendChild(row);
+    el(`pb-hh-${id}`).focus();
+}
+
+function updatePace(id) {
+    const hh = parseInt(v(`pb-hh-${id}`)) || 0;
+    const mm = parseInt(v(`pb-mm-${id}`)) || 0;
+    const ss = parseInt(v(`pb-ss-${id}`)) || 0;
+    const totalSec = hh * 3600 + mm * 60 + ss;
+    const dist = parseFloat(v(`pb-dist-${id}`));
+    const hint = el(`pb-pace-${id}`);
+    if (!totalSec || !dist || dist <= 0) { hint.textContent = ''; return; }
+    const pace = totalSec / 60 / dist;
+    hint.textContent = `→ ${Math.floor(pace)}:${String(Math.round((pace % 1) * 60)).padStart(2, '0')}/km`;
+}
+
+// ─── Dynamic rows: Upcoming ─────────────────────────────────
+function addUpcomingRow() {
+    const id = ++upcomingCounter;
+    const list = el('upcoming-list');
+    const row = document.createElement('div');
+    row.className = 'dyn-row upcoming-row';
+    row.dataset.id = id;
+    row.innerHTML = `
+        <div class="field"><label>Date</label><input type="date" id="up-date-${id}" onchange="autoSave()"></div>
+        <div class="field"><label>Distance (km)</label><input type="text" id="up-dist-${id}" placeholder="5.0"
+            style="font-family:var(--mono);text-align:center" onchange="autoSave()"></div>
+        <div class="field"><label>Race name</label><input type="text" id="up-name-${id}" placeholder="e.g. Parkrun" onchange="autoSave()"></div>
+        <div class="field"><label>Priority</label>
+            <select id="up-pri-${id}" onchange="autoSave()"><option value="A">A</option><option value="B">B</option><option value="C" selected>C</option></select>
+        </div>
+        <button class="btn-danger-sm" onclick="this.parentElement.remove();autoSave()">✕</button>
+    `;
+    list.appendChild(row);
+}
+
+// ─── Submit ──────────────────────────────────────────────────
+function submitProfile() {
+    const data = gatherFormData();
+    if (!data.name || !data.email || !data.weight_kg || !data.dob) {
+        alert('Please fill in Name, Email, Date of Birth, and Weight.');
+        return;
+    }
+    saveProfile(data);
+
+    const prev = loadProfile();
+    let body = buildEmailBody(data);
+
+    const subject = encodeURIComponent(`Running Profile — ${data.name}`);
+    const bodyEnc = encodeURIComponent(body);
+    window.location.href = `mailto:__YOUR_EMAIL__?subject=${subject}&body=${bodyEnc}`;
+
+    setTimeout(() => {
+        el('mainContent').style.display = 'none';
+        el('successMsg').classList.add('show');
+        window.scrollTo(0, 0);
+    }, 400);
+}
+
+function buildEmailBody(d) {
+    let b = `RUNNING PROFILE\n${'='.repeat(40)}\n\n`;
+    b += `Name: ${d.name}\nEmail: ${d.email}\nDOB: ${d.dob}\nGender: ${d.gender}\n`;
+    b += `Weight: ${d.weight_kg} kg\nTimezone: ${d.timezone}\n`;
+    b += `Max HR: ${d.max_hr}\nLTHR: ${d.lthr}\n`;
+
+    if (d.intervals_id) b += `\nintervals.icu: ${d.intervals_id}\n`;
+
+    if (d.pbs.length > 0) {
+        b += `\nRACE TIMES (official chip times)\n${'-'.repeat(30)}\n`;
+        d.pbs.forEach(p => {
+            b += `  ${p.dist_km}km  ${fmtTime(p.time_s)}  (${p.time_s}s)`;
+            if (p.date) b += `  on ${p.date}`;
+            b += '\n';
         });
+    }
 
-        const upcoming = [];
-        document.querySelectorAll('.upcoming-entry').forEach(el => {
-            const d = el.querySelector('[name=up_date]').value;
-            const dist = el.querySelector('[name=up_dist]').value;
-            const n = el.querySelector('[name=up_name]').value;
-            const p = el.querySelector('[name=up_priority]').value;
-            if (d && dist) upcoming.push({ date: d, distance_km: dist, name: n || 'Race', priority: p });
+    if (d.upcoming.length > 0) {
+        b += `\nUPCOMING RACES\n${'-'.repeat(30)}\n`;
+        d.upcoming.forEach(r => {
+            b += `  ${r.date}  ${r.dist_km}km  "${r.name}"  Priority: ${r.priority}\n`;
         });
-
-        return {
-            name: document.getElementById('name').value.trim(),
-            email: document.getElementById('email').value.trim(),
-            dob: document.getElementById('dob').value,
-            gender: document.getElementById('gender').value,
-            weight_kg: parseFloat(document.getElementById('weight').value) || null,
-            timezone: document.getElementById('timezone').value,
-            max_hr: document.getElementById('maxhr_unknown').checked ? 'estimate' : (parseInt(document.getElementById('maxhr').value) || 'estimate'),
-            lthr: document.getElementById('lthr_unknown').checked ? 'estimate' : (parseInt(document.getElementById('lthr').value) || 'estimate'),
-            data_source: currentSource,
-            intervals_id: document.getElementById('intervals_id').value.trim(),
-            intervals_key: document.getElementById('intervals_key').value.trim(),
-            race_results: races,
-            upcoming_races: upcoming,
-            has_file: document.getElementById('fileInput').files.length > 0,
-            file_name: document.getElementById('fileInput').files[0]?.name || null,
-            has_activities_csv: document.getElementById('activitiesInput').files.length > 0,
-            activities_file: document.getElementById('activitiesInput').files[0]?.name || null,
-            submitted_at: new Date().toISOString(),
-        };
     }
 
-    // --- Submit ---
-    function submitForm() {
-        const data = collectData();
+    // YAML snippet
+    b += `\n\n${'='.repeat(40)}\nATHLETE.YML SNIPPET\n${'='.repeat(40)}\n\n`;
+    b += `athlete:\n  name: "${d.name}"\n  athlete_id: "A___"\n`;
+    b += `  mass_kg: ${d.weight_kg}\n  date_of_birth: "${d.dob}"\n  gender: "${d.gender}"\n`;
+    b += `  timezone: "${d.timezone}"\n`;
+    if (d.max_hr !== 'estimate') b += `  max_hr: ${d.max_hr}\n`;
+    if (d.lthr !== 'estimate') b += `  lthr: ${d.lthr}\n`;
 
-        // Basic validation
-        if (!data.name) { alert('Please enter your name.'); return; }
-        if (!data.email) { alert('Please enter your email.'); return; }
-        if (!data.weight_kg) { alert('Please enter your weight.'); return; }
-        if (!data.dob) { alert('Please enter your date of birth.'); return; }
-        if (data.data_source === 'intervals' && (!data.intervals_id || !data.intervals_key)) {
-            alert('Please enter your intervals.icu athlete ID and API key.'); return;
-        }
-
-        const btn = document.getElementById('submitBtn');
-        btn.disabled = true;
-        btn.innerHTML = '⏳ Submitting...';
-
-        // Build mailto body as a formatted summary
-        const body = formatEmailBody(data);
-        const subject = `New athlete signup: ${data.name}`;
-
-        // For now: open mailto link with form data
-        // Replace __YOUR_EMAIL__ with your actual email
-        // In production, replace this with a Formspree/serverless endpoint
-        const mailtoLink = `mailto:__YOUR_EMAIL__?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
-
-        // Also store in localStorage as backup
-        try {
-            const existing = JSON.parse(localStorage.getItem('signups') || '[]');
-            existing.push(data);
-            localStorage.setItem('signups', JSON.stringify(existing));
-        } catch(e) {}
-
-        // If there's a file, warn about large uploads
-        if (data.has_file && document.getElementById('fileInput').files[0]?.size > 100 * 1024 * 1024) {
-            alert('Your file is quite large. After submitting the form, please also upload via the Dropbox link in the export instructions.');
-        }
-
-        // Open the mailto
-        window.location.href = mailtoLink;
-
-        // Show success
-        setTimeout(() => {
-            document.getElementById('mainForm').style.display = 'none';
-            document.getElementById('successEmail').textContent = data.email;
-            document.getElementById('successMsg').classList.add('show');
-            window.scrollTo(0, 0);
-        }, 500);
+    if (d.intervals_id) {
+        b += `\ndata:\n  source: "intervals"\n  intervals:\n    athlete_id: "${d.intervals_id}"\n`;
     }
 
-    function formatEmailBody(data) {
-        let body = `ATHLETE SIGNUP\n${'='.repeat(40)}\n\n`;
-        body += `Name: ${data.name}\n`;
-        body += `Email: ${data.email}\n`;
-        body += `DOB: ${data.dob}\n`;
-        body += `Gender: ${data.gender}\n`;
-        body += `Weight: ${data.weight_kg} kg\n`;
-        body += `Timezone: ${data.timezone}\n`;
-        body += `Max HR: ${data.max_hr}\n`;
-        body += `LTHR: ${data.lthr}\n`;
-        body += `\nData source: ${data.data_source}\n`;
-        if (data.data_source === 'intervals') {
-            body += `intervals.icu athlete ID: ${data.intervals_id}\n`;
-            body += `intervals.icu API key: ${data.intervals_key}\n`;
-        } else {
-            body += `File uploaded: ${data.has_file ? data.file_name : 'No (use Dropbox link)'}\n`;
-            if (data.has_activities_csv) body += `Strava activities.csv: ${data.activities_file}\n`;
-        }
-
-        if (data.race_results.length > 0) {
-            body += `\nRACE RESULTS\n${'-'.repeat(20)}\n`;
-            data.race_results.forEach(r => {
-                body += `  ${r.date}  ${r.distance_km}km  ${r.time}\n`;
-            });
-        }
-
-        if (data.upcoming_races.length > 0) {
-            body += `\nUPCOMING RACES\n${'-'.repeat(20)}\n`;
-            data.upcoming_races.forEach(r => {
-                body += `  ${r.date}  ${r.distance_km}km  "${r.name}"  Priority: ${r.priority}\n`;
-            });
-        }
-
-        body += `\n\nSubmitted: ${data.submitted_at}\n`;
-
-        // Also include as YAML snippet for easy copy-paste
-        body += `\n\n${'='.repeat(40)}\nATHLETE.YML SNIPPET\n${'='.repeat(40)}\n\n`;
-        body += `athlete:\n`;
-        body += `  name: "${data.name}"\n`;
-        body += `  athlete_id: "A___"  # assign next ID\n`;
-        body += `  mass_kg: ${data.weight_kg}\n`;
-        body += `  date_of_birth: "${data.dob}"\n`;
-        body += `  gender: "${data.gender}"\n`;
-        body += `  timezone: "${data.timezone}"\n`;
-        if (data.max_hr !== 'estimate') body += `  max_hr: ${data.max_hr}\n`;
-        if (data.lthr !== 'estimate') body += `  lthr: ${data.lthr}\n`;
-
-        if (data.upcoming_races.length > 0) {
-            body += `\nplanned_races:\n`;
-            data.upcoming_races.forEach(r => {
-                body += `  - name: "${r.name}"\n`;
-                body += `    date: "${r.date}"\n`;
-                body += `    distance_km: ${r.distance_km}\n`;
-                body += `    priority: ${r.priority}\n`;
-                body += `    surface: road\n`;
-            });
-        }
-
-        body += `\ndata:\n`;
-        if (data.data_source === 'intervals') {
-            body += `  source: "intervals"\n`;
-            body += `  intervals:\n`;
-            body += `    athlete_id: "${data.intervals_id}"\n`;
-            body += `    # API key: ${data.intervals_key}  # -> GitHub secret\n`;
-        } else {
-            body += `  source: "fit_folder"\n`;
-        }
-
-        return body;
+    if (d.upcoming.length > 0) {
+        b += `\nplanned_races:\n`;
+        d.upcoming.forEach(r => {
+            b += `  - name: "${r.name}"\n    date: "${r.date}"\n    distance_km: ${r.dist_km}\n    priority: ${r.priority}\n    surface: road\n`;
+        });
     }
-    </script>
+
+    // Override rows for PBs
+    if (d.pbs.length > 0) {
+        b += `\n\n${'='.repeat(40)}\nACTIVITY OVERRIDE ROWS (for official_time_s)\n${'='.repeat(40)}\n\n`;
+        b += `file\trace_flag\tparkrun\tofficial_distance_km\tsurface\tsurface_adj\ttemp_override\tpower_override_w\tofficial_time_s\tnotes\n`;
+        d.pbs.forEach(p => {
+            const fileCol = p.date || `[match ${p.dist_km}km]`;
+            b += `${fileCol}\t1\t0\t${p.dist_km}\t\t\t\t\t${p.time_s}\tPB: ${fmtTime(p.time_s)} for ${distLabel(p.dist_km)}\n`;
+        });
+    }
+
+    b += `\nSubmitted: ${new Date().toISOString()}\n`;
+    return b;
+}
+
+// ─── Helpers ─────────────────────────────────────────────────
+function el(id) { return document.getElementById(id); }
+function v(id) { const e = el(id); return e ? e.value.trim() : ''; }
+function setV(id, val) { const e = el(id); if (e && val) e.value = val; }
+
+function fmtTime(sec) {
+    const h = Math.floor(sec / 3600);
+    const m = Math.floor((sec % 3600) / 60);
+    const s = sec % 60;
+    if (h > 0) return `${h}:${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`;
+    return `${m}:${String(s).padStart(2,'0')}`;
+}
+
+function autoTab(current, nextId) {
+    if (current.value.length >= 2) el(nextId)?.focus();
+}
+
+function toggleCollapsible(toggle) {
+    toggle.classList.toggle('open');
+    toggle.nextElementSibling.classList.toggle('open');
+}
+
+function updateIntervalsStatus() {
+    const id = v('f-int-id');
+    const key = v('f-int-key');
+    const panel = el('intervalsPanel');
+    const icon = el('intervalsIcon');
+    const label = el('intervalsLabel');
+    if (id && key) {
+        panel.classList.add('connected');
+        icon.textContent = '✅';
+        label.textContent = 'intervals.icu connected';
+    } else {
+        panel.classList.remove('connected');
+        icon.textContent = '🔗';
+        label.textContent = 'Connect intervals.icu';
+    }
+}
+
+function showForm() {
+    el('mainContent').style.display = 'block';
+    el('successMsg').classList.remove('show');
+}
+
+function resetAll() {
+    if (confirm('This will clear all saved data from this browser. Are you sure?')) {
+        localStorage.removeItem(STORAGE_KEY);
+        location.reload();
+    }
+}
+
+// ─── Auto-save on input ──────────────────────────────────────
+document.querySelectorAll('input, select, textarea').forEach(el => {
+    el.addEventListener('change', autoSave);
+});
+el('f-int-id').addEventListener('change', updateIntervalsStatus);
+el('f-int-key').addEventListener('change', updateIntervalsStatus);
+
+// ─── Init ────────────────────────────────────────────────────
+const saved = loadProfile();
+if (saved && saved.name) {
+    populateForm(saved);
+    el('returningName').textContent = saved.name;
+    el('returningBanner').classList.add('show');
+}
+</script>
 </body>
 </html>
