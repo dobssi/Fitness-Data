@@ -404,6 +404,7 @@ RF_CONSTANTS = {
     # TSS calculation
     'tss_hr_baseline': 90,
     'tss_divisor': 150000,
+    'z5_cap_s': 1200,  # v52: Max Z5 seconds counted for TSS boost (20 min)
     
     # CTL/ATL
     'ctl_time_constant': CTL_TIME_CONSTANT,  # days (from config.py)
@@ -4870,10 +4871,15 @@ def main() -> int:
             is_race = bool(row.get('race_flag', 0))
             tss = calc_tss(moving_time_s, avg_hr, rfl, terrain_adj, distance_m, is_race)
             if np.isfinite(tss):
-                # v52: Z5 intensity boost — TSS *= (1 + z5_frac)
+                # v52: Z5 intensity boost — TSS *= (1 + z5_effective)
+                # Cap Z5 contribution at 20 minutes to prevent long hard races
+                # (e.g. HM at Z5) from exceeding marathon-level TSS.
                 z5_frac = row.get('z5_frac', 0.0)
-                if pd.notna(z5_frac) and z5_frac > 0:
-                    tss *= (1.0 + z5_frac)
+                if pd.notna(z5_frac) and z5_frac > 0 and np.isfinite(moving_time_s) and moving_time_s > 0:
+                    z5_seconds = z5_frac * moving_time_s
+                    z5_capped = min(z5_seconds, RF_CONSTANTS['z5_cap_s'])
+                    z5_effective = z5_capped / moving_time_s
+                    tss *= (1.0 + z5_effective)
                     _z5_boost_count += 1
                 dfm.at[i, 'TSS'] = float(tss)
     if _z5_boost_count > 0:
