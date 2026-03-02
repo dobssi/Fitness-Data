@@ -1735,6 +1735,7 @@ def get_zone_data(df):
     
     # ── Race week planner data ──
     # Recent runs with TSS for forward projection (last 14 days)
+    # v52: Aggregate multiple runs on same day (warmup + race + cooldown)
     import math as _rw_math
     _TC_CTL, _TC_ATL = 42, 7
     _rw_recent_tss = []
@@ -1744,13 +1745,21 @@ def get_zone_data(df):
     _name_col = 'activity_name' if 'activity_name' in df.columns else 'Activity_Name'
     _race_col = 'race_flag' if 'race_flag' in df.columns else 'Race'
     if _tss_col:
+        _day_agg = {}  # date_str -> {name, tss, race}
         for _, _row in df[df['date'] > _14d_ago].iterrows():
-            _rw_recent_tss.append({
-                'date': _row['date'].strftime('%Y-%m-%d'),
-                'name': str(_row.get(_name_col, ''))[:40] if pd.notna(_row.get(_name_col)) else '',
-                'tss': round(float(_row[_tss_col])) if pd.notna(_row.get(_tss_col)) else 0,
-                'race': bool(_row.get(_race_col, 0) == 1),
-            })
+            _dstr = _row['date'].strftime('%Y-%m-%d')
+            _rname = str(_row.get(_name_col, ''))[:40] if pd.notna(_row.get(_name_col)) else ''
+            _rtss = round(float(_row[_tss_col])) if pd.notna(_row.get(_tss_col)) else 0
+            _rrace = bool(_row.get(_race_col, 0) == 1)
+            if _dstr in _day_agg:
+                _day_agg[_dstr]['tss'] += _rtss
+                _day_agg[_dstr]['race'] = _day_agg[_dstr]['race'] or _rrace
+                # Use race activity name if available, otherwise keep first
+                if _rrace and _rname:
+                    _day_agg[_dstr]['name'] = _rname
+            else:
+                _day_agg[_dstr] = {'date': _dstr, 'name': _rname, 'tss': _rtss, 'race': _rrace}
+        _rw_recent_tss = list(_day_agg.values())
     
     # Current CTL/ATL for taper solver starting point
     # Use YESTERDAY's end-of-day CTL/ATL from Daily sheet, not today's.

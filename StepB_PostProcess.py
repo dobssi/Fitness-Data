@@ -405,6 +405,10 @@ RF_CONSTANTS = {
     'tss_hr_baseline': 90,
     'tss_divisor': 150000,
     'z5_cap_s': 1200,  # v52: Max Z5 seconds counted for TSS boost (20 min)
+    # v52: HR range normalisation — scale TSS so athletes with lower max HR
+    # produce equivalent TSS for the same relative effort.
+    # Reference athlete: Paul (max HR 192). Scale = (192-90) / (athlete_max-90).
+    'tss_hr_scale': (192.0 - 90.0) / max(ATHLETE_MAX_HR - 90.0, 1.0),
     
     # CTL/ATL
     'ctl_time_constant': CTL_TIME_CONSTANT,  # days (from config.py)
@@ -1063,6 +1067,7 @@ def calc_tss(moving_time_s: float, avg_hr: float, rfl: float, terrain_adj: float
     
     hr_base = RF_CONSTANTS['tss_hr_baseline']
     divisor = RF_CONSTANTS['tss_divisor']
+    hr_scale = RF_CONSTANTS['tss_hr_scale']  # v52: normalise HR range across athletes
     
     if avg_hr is None or not np.isfinite(avg_hr):
         avg_hr = hr_base + 30  # Default assumption
@@ -1075,7 +1080,10 @@ def calc_tss(moving_time_s: float, avg_hr: float, rfl: float, terrain_adj: float
     
     if rfl is not None and np.isfinite(rfl) and rfl > 0:
         # Full formula with RFL
-        tss = (moving_time_s * (avg_hr - hr_base) ** 2 / (divisor * rfl) * terrain_adj + 
+        # v52: Scale (avg_hr - baseline) by hr_scale to normalise across athletes
+        # Paul (max 192) = scale 1.0; lower max HR athletes get proportionally higher TSS
+        scaled_hr_diff = (avg_hr - hr_base) * hr_scale
+        tss = (moving_time_s * scaled_hr_diff ** 2 / (divisor * rfl) * terrain_adj + 
                distance_m / 200) / 1.5
     else:
         # Simplified formula without RFL
