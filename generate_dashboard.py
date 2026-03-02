@@ -1958,9 +1958,11 @@ def _solve_taper(ctl0, atl0, days_to_race, ctl_ref, dist_cat, priority,
         c, a = ctl0, atl0
         results = []
         
-        # Lookback: show D-6 through yesterday as historical context
-        # Only include days with actual recorded runs
-        lookback_days = min(6, days_to_race)
+        # Lookback: show completed days in the 6 days before race day
+        # v52: Window is [race-6, race-1]. Only look back before today for days in that window.
+        # e.g. race Sun 8 Mar, today Mon 2 Mar (dtr=6): lookback=0, all forward
+        # e.g. race Sun 8 Mar, today Thu 5 Mar (dtr=3): lookback=3, show Mon-Wed done
+        lookback_days = max(0, 6 - days_to_race)
         lookback_rows = []
         for lb in range(lookback_days, 0, -1):
             lb_date = today_date + _taper_td(days=-lb)
