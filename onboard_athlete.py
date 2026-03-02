@@ -737,46 +737,13 @@ on:
             --nr-tss-oldest 2020-01-01
         continue-on-error: true
 
-      - name: Download initial data (INITIAL only)
+      - name: Initial data ingest (INITIAL only)
         if: ${{{{ {gc.strip('${{ }}')} && env.PIPELINE_MODE == 'INITIAL' }}}}
         run: |
-          # Download whatever the athlete uploaded: strava_export.zip, garmin_export.zip, or fits.zip
-          python ci/dropbox_sync.py download \\
+          python ci/initial_data_ingest.py \\
+            --athlete-dir ${{{{ env.ATHLETE_DIR }}}} \\
             --dropbox-base "${{{{ env.DB_BASE }}}}" \\
-            --local-prefix "${{{{ env.ATHLETE_DIR }}}}" \\
-            --items data/strava_export.zip data/garmin_export.zip data/fits.zip
-        continue-on-error: true
-
-      - name: Ingest initial data (INITIAL only)
-        if: ${{{{ {gc.strip('${{ }}')} && env.PIPELINE_MODE == 'INITIAL' }}}}
-        run: |
-          # Detect data source and ingest accordingly
-          if [ -f "${{{{ env.ATHLETE_DIR }}}}/data/strava_export.zip" ]; then
-            echo "Found Strava export — running strava_ingest.py"
-            python strava_ingest.py \\
-              --strava-zip ${{{{ env.ATHLETE_DIR }}}}/data/strava_export.zip \\
-              --out-dir ${{{{ env.ATHLETE_DIR }}}}/data/strava_data \\
-              --persec-cache-dir ${{{{ env.ATHLETE_DIR }}}}/persec_cache \\
-              --tz ${{{{ env.TZ_LOCAL }}}}
-            cp -f ${{{{ env.ATHLETE_DIR }}}}/data/strava_data/fits.zip ${{{{ env.ATHLETE_DIR }}}}/data/fits.zip
-            cp -f ${{{{ env.ATHLETE_DIR }}}}/data/strava_data/activities.csv ${{{{ env.ATHLETE_DIR }}}}/data/activities.csv
-          elif [ -f "${{{{ env.ATHLETE_DIR }}}}/data/garmin_export.zip" ]; then
-            echo "Found Garmin export — extracting FIT files"
-            python -c "
-          import zipfile, os, tempfile
-          with zipfile.ZipFile('${{{{ env.ATHLETE_DIR }}}}/data/garmin_export.zip') as zin:
-              fits = [f for f in zin.namelist() if f.lower().endswith('.fit')]
-              print(f'  Found {{len(fits)}} FIT files in Garmin export')
-              with zipfile.ZipFile('${{{{ env.ATHLETE_DIR }}}}/data/fits.zip', 'w') as zout:
-                  for fit in fits:
-                      data = zin.read(fit)
-                      zout.writestr(os.path.basename(fit), data)
-          "
-          elif [ -f "${{{{ env.ATHLETE_DIR }}}}/data/fits.zip" ]; then
-            echo "Found fits.zip — ready to use"
-          else
-            echo "No initial data found — will rely on intervals.icu sync"
-          fi
+            --tz ${{{{ env.TZ_LOCAL }}}}
 
       - name: Rebuild from FIT files (FULL)
         if: ${{{{ {gc.strip('${{ }}')} && (env.PIPELINE_MODE == 'FULL' || env.PIPELINE_MODE == 'INITIAL') }}}}
@@ -903,44 +870,13 @@ on:
         continue-on-error: true
 
       # ─── Initial data ingest (INITIAL only) ─────────────────
-      - name: Download initial data (INITIAL only)
+      - name: Initial data ingest (INITIAL only)
         if: ${{{{ github.event.inputs.mode == 'INITIAL' }}}}
         run: |
-          python ci/dropbox_sync.py download \\
+          python ci/initial_data_ingest.py \\
+            --athlete-dir ${{{{ env.ATHLETE_DIR }}}} \\
             --dropbox-base "${{{{ env.DB_BASE }}}}" \\
-            --local-prefix "${{{{ env.ATHLETE_DIR }}}}" \\
-            --items data/strava_export.zip data/garmin_export.zip data/fits.zip
-        continue-on-error: true
-
-      - name: Ingest initial data (INITIAL only)
-        if: ${{{{ github.event.inputs.mode == 'INITIAL' }}}}
-        run: |
-          if [ -f "${{{{ env.ATHLETE_DIR }}}}/data/strava_export.zip" ]; then
-            echo "Found Strava export — running strava_ingest.py"
-            python strava_ingest.py \\
-              --strava-zip ${{{{ env.ATHLETE_DIR }}}}/data/strava_export.zip \\
-              --out-dir ${{{{ env.ATHLETE_DIR }}}}/data/strava_data \\
-              --persec-cache-dir ${{{{ env.ATHLETE_DIR }}}}/persec_cache \\
-              --tz ${{{{ env.TZ_LOCAL }}}}
-            cp -f ${{{{ env.ATHLETE_DIR }}}}/data/strava_data/fits.zip ${{{{ env.ATHLETE_DIR }}}}/data/fits.zip
-            cp -f ${{{{ env.ATHLETE_DIR }}}}/data/strava_data/activities.csv ${{{{ env.ATHLETE_DIR }}}}/data/activities.csv
-          elif [ -f "${{{{ env.ATHLETE_DIR }}}}/data/garmin_export.zip" ]; then
-            echo "Found Garmin export — extracting FIT files"
-            python -c "
-          import zipfile, os
-          with zipfile.ZipFile('${{{{ env.ATHLETE_DIR }}}}/data/garmin_export.zip') as zin:
-              fits = [f for f in zin.namelist() if f.lower().endswith('.fit')]
-              print(f'  Found {{len(fits)}} FIT files in Garmin export')
-              with zipfile.ZipFile('${{{{ env.ATHLETE_DIR }}}}/data/fits.zip', 'w') as zout:
-                  for fit in fits:
-                      zout.writestr(os.path.basename(fit), zin.read(fit))
-          "
-          elif [ -f "${{{{ env.ATHLETE_DIR }}}}/data/fits.zip" ]; then
-            echo "Found fits.zip — ready to use"
-          else
-            echo "ERROR: No initial data found on Dropbox"
-            exit 1
-          fi
+            --tz ${{{{ env.TZ_LOCAL }}}}
 
       # ─── Step 1: Rebuild from FIT files ─────────────────────
       - name: Rebuild from FIT files

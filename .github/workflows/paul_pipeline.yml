@@ -1,4 +1,4 @@
-# .github/workflows/paul_pipeline.yml
+# .github/workflows/paul_test_pipeline.yml
 # Pipeline for Paul Test — GAP mode, intervals.icu sync
 #
 # Triggers:
@@ -7,8 +7,8 @@
 #
 # Secrets required:
 #   DROPBOX_TOKEN / DROPBOX_REFRESH_TOKEN / DROPBOX_APP_KEY / DROPBOX_APP_SECRET
-#   PAUL_INTERVALS_API_KEY    — Paul Test's intervals.icu API key
-#   PAUL_INTERVALS_ATHLETE_ID — Paul Test's intervals.icu athlete ID
+#   PAUL_TEST_INTERVALS_API_KEY    — Paul Test's intervals.icu API key
+#   PAUL_TEST_INTERVALS_ATHLETE_ID — Paul Test's intervals.icu athlete ID
 
 name: Paul Test Pipeline
 
@@ -33,7 +33,7 @@ on:
         default: true
 
 concurrency:
-  group: paul-pipeline
+  group: paul_test-pipeline
   cancel-in-progress: false
 
 jobs:
@@ -46,8 +46,8 @@ jobs:
       DROPBOX_REFRESH_TOKEN: ${{ secrets.DROPBOX_REFRESH_TOKEN }}
       DROPBOX_APP_KEY: ${{ secrets.DROPBOX_APP_KEY }}
       DROPBOX_APP_SECRET: ${{ secrets.DROPBOX_APP_SECRET }}
-      INTERVALS_API_KEY: ${{ secrets.PAUL_INTERVALS_API_KEY }}
-      INTERVALS_ATHLETE_ID: ${{ secrets.PAUL_INTERVALS_ATHLETE_ID }}
+      INTERVALS_API_KEY: ${{ secrets.PAUL_TEST_INTERVALS_API_KEY }}
+      INTERVALS_ATHLETE_ID: ${{ secrets.PAUL_TEST_INTERVALS_ATHLETE_ID }}
       ATHLETE_DIR: athletes/A005
       ATHLETE_CONFIG_PATH: athletes/A005/athlete.yml
       DB_BASE: /Running and Cycling/DataPipeline/athletes/A005
@@ -85,9 +85,9 @@ jobs:
           path: |
             ${{ env.ATHLETE_DIR }}/fit_sync_state.json
             ${{ env.ATHLETE_DIR }}/pending_activities.csv
-          key: paul-sync-state-${{ github.run_number }}
+          key: paul_test-sync-state-${{ github.run_number }}
           restore-keys: |
-            paul-sync-state-
+            paul_test-sync-state-
 
       - name: Download fits.zip for dedup
         if: ${{ github.event.inputs.sync != 'false' && env.PIPELINE_MODE != 'DASHBOARD' && env.PIPELINE_MODE != 'FROM_STEPB' }}
@@ -137,7 +137,7 @@ jobs:
           path: |
             ${{ env.ATHLETE_DIR }}/fit_sync_state.json
             ${{ env.ATHLETE_DIR }}/pending_activities.csv
-          key: paul-sync-state-${{ github.run_number }}
+          key: paul_test-sync-state-${{ github.run_number }}
 
       # ═══════════════════════════════════════════════════════════
       # FULL PIPELINE — only if new data or manual dispatch
@@ -148,9 +148,9 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: ${{ env.ATHLETE_DIR }}/persec_cache
-          key: paul-persec-${{ github.run_number }}
+          key: paul_test-persec-${{ github.run_number }}
           restore-keys: |
-            paul-persec-
+            paul_test-persec-
 
       - name: Download data from Dropbox
         if: ${{ steps.gate.outputs.continue == 'true' }}
@@ -175,46 +175,13 @@ jobs:
             --nr-tss-oldest 2020-01-01
         continue-on-error: true
 
-      - name: Download initial data (INITIAL only)
+      - name: Initial data ingest (INITIAL only)
         if: ${{ steps.gate.outputs.continue == 'true' && env.PIPELINE_MODE == 'INITIAL' }}
         run: |
-          # Download whatever the athlete uploaded: strava_export.zip, garmin_export.zip, or fits.zip
-          python ci/dropbox_sync.py download \
+          python ci/initial_data_ingest.py \
+            --athlete-dir ${{ env.ATHLETE_DIR }} \
             --dropbox-base "${{ env.DB_BASE }}" \
-            --local-prefix "${{ env.ATHLETE_DIR }}" \
-            --items data/strava_export.zip data/garmin_export.zip data/fits.zip
-        continue-on-error: true
-
-      - name: Ingest initial data (INITIAL only)
-        if: ${{ steps.gate.outputs.continue == 'true' && env.PIPELINE_MODE == 'INITIAL' }}
-        run: |
-          # Detect data source and ingest accordingly
-          if [ -f "${{ env.ATHLETE_DIR }}/data/strava_export.zip" ]; then
-            echo "Found Strava export — running strava_ingest.py"
-            python strava_ingest.py \
-              --strava-zip ${{ env.ATHLETE_DIR }}/data/strava_export.zip \
-              --out-dir ${{ env.ATHLETE_DIR }}/data/strava_data \
-              --persec-cache-dir ${{ env.ATHLETE_DIR }}/persec_cache \
-              --tz ${{ env.TZ_LOCAL }}
-            cp -f ${{ env.ATHLETE_DIR }}/data/strava_data/fits.zip ${{ env.ATHLETE_DIR }}/data/fits.zip
-            cp -f ${{ env.ATHLETE_DIR }}/data/strava_data/activities.csv ${{ env.ATHLETE_DIR }}/data/activities.csv
-          elif [ -f "${{ env.ATHLETE_DIR }}/data/garmin_export.zip" ]; then
-            echo "Found Garmin export — extracting FIT files"
-            python -c "
-          import zipfile, os, tempfile
-          with zipfile.ZipFile('${{ env.ATHLETE_DIR }}/data/garmin_export.zip') as zin:
-              fits = [f for f in zin.namelist() if f.lower().endswith('.fit')]
-              print(f'  Found {len(fits)} FIT files in Garmin export')
-              with zipfile.ZipFile('${{ env.ATHLETE_DIR }}/data/fits.zip', 'w') as zout:
-                  for fit in fits:
-                      data = zin.read(fit)
-                      zout.writestr(os.path.basename(fit), data)
-          "
-          elif [ -f "${{ env.ATHLETE_DIR }}/data/fits.zip" ]; then
-            echo "Found fits.zip — ready to use"
-          else
-            echo "No initial data found — will rely on intervals.icu sync"
-          fi
+            --tz ${{ env.TZ_LOCAL }}
 
       - name: Rebuild from FIT files (FULL)
         if: ${{ steps.gate.outputs.continue == 'true' && (env.PIPELINE_MODE == 'FULL' || env.PIPELINE_MODE == 'INITIAL') }}
@@ -286,7 +253,7 @@ jobs:
         if: ${{ steps.gate.outputs.continue == 'true' }}
         with:
           path: ${{ env.ATHLETE_DIR }}/persec_cache
-          key: paul-persec-${{ github.run_number }}
+          key: paul_test-persec-${{ github.run_number }}
 
       - name: Upload fits.zip to Dropbox (only if new FITs added)
         if: ${{ steps.gate.outputs.continue == 'true' && steps.fetch.outputs.new_runs == 'true' }}
@@ -318,8 +285,8 @@ jobs:
       - name: Prepare dashboard for Pages
         if: ${{ steps.gate.outputs.continue == 'true' }}
         run: |
-          mkdir -p docs/paul
-          cp -f ${{ env.ATHLETE_DIR }}/output/dashboard/index.html docs/paul/index.html 2>/dev/null || true
+          mkdir -p docs/paul_test
+          cp -f ${{ env.ATHLETE_DIR }}/output/dashboard/index.html docs/paul_test/index.html 2>/dev/null || true
         continue-on-error: true
 
       - name: Deploy to GitHub Pages
