@@ -1,0 +1,70 @@
+{
+  "name": "Paul Test",
+  "email": "paul.collyer@sigames.com",
+  "dob": "1969-05-27",
+  "gender": "male",
+  "mass_kg": 75,
+  "timezone": "Europe/Stockholm",
+  "max_hr": 192,
+  "lthr": 178,
+  "data_source": "intervals",
+  "intervals_id": "i224884",
+  "intervals_key": "tgbv1rdzgciobj8meem47cml",
+  "planned_races": [
+    {
+      "name": "PremHalv",
+      "date": "2026-04-25",
+      "distance_km": 21.097,
+      "priority": "A",
+      "surface": "road"
+    },
+    {
+      "name": "2 sjoar runt",
+      "date": "2026-03-15",
+      "distance_km": 16.2,
+      "priority": "B",
+      "surface": "road"
+    }
+  ],
+  "race_times": [
+    {
+      "date": null,
+      "distance_km": 1.609,
+      "time_s": 317
+    },
+    {
+      "date": null,
+      "distance_km": 3,
+      "time_s": 681
+    },
+    {
+      "date": null,
+      "distance_km": 5,
+      "time_s": 1073
+    },
+    {
+      "date": null,
+      "distance_km": 10,
+      "time_s": 2242
+    },
+    {
+      "date": null,
+      "distance_km": 42.195,
+      "time_s": 11475
+    },
+    {
+      "date": null,
+      "distance_km": 21.097,
+      "time_s": 4948
+    },
+    {
+      "date": null,
+      "distance_km": 1.5,
+      "time_s": 300
+    }
+  ],
+  "athlete_id": "A005",
+  "folder_name": "A005",
+  "slug": "paul",
+  "power_mode": "gap"
+}

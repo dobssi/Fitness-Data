@@ -64,10 +64,8 @@ file    race_flag       parkrun official_distance_km    surface surface_adj     
 [match 42.195km]        1       0       42.195                                  11475   PB: 3:11:15 for Marathon 
 [match 21.097km]        1       0       21.097                                  4948    PB: 1:22:28 for HM 
 [match 1.5km]   1       0       1.5                                     300     PB: 5:00 for 1.5km 
-Submitted: 2026-03-02T19:54:02.702Z 
-======================================== 
-CONFIG JSON — save as new_athlete.json 
-======================================== 
+Submitted: 2026-03-02T20:02:31.083Z 
+--- CONFIG JSON START --- 
 { 
   "name": "Paul Test", 
   "email": "paul.collyer@sigames.com", 
@@ -134,6 +132,4 @@ CONFIG JSON — save as new_athlete.json
     } 
   ] 
 } 
-
-
-The contents of this e-mail and any attachments are confidential to the intended recipient and may also be legally privileged. Unless you are the named addressee (or authorised to receive for the addressee) of this email you may not copy, disclose or distribute it to anyone else. If you have received this email in error, please notify us immediately by e-mail on admin@sports-interactive.com and then delete the email and any copies. Sports Interactive and The SEGA Group has made all reasonable efforts to ensure that this e-mail and any attached documents or software are free from software viruses, but it is the recipient's responsibility to confirm this. 
+--- CONFIG JSON END --- 

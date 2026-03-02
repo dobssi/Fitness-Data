@@ -421,9 +421,9 @@ def next_athlete_id(base_dir: str = ".") -> str:
 
 
 def make_slug(name: str) -> str:
-    """Convert 'Ian Lilley' → 'ian' (for workflow files, pages paths, cache keys)."""
+    """Convert 'Ian Lilley' → 'ian_lilley' (for workflow files, pages paths, cache keys)."""
     parts = name.strip().lower().split()
-    return parts[0] if parts else "athlete"
+    return "_".join(parts) if parts else "athlete"
 
 
 def generate_athlete_yml(cfg: dict) -> str:
@@ -1237,26 +1237,55 @@ def main():
     
     # ── Gather config ─────────────────────────────────────────
     if args.config:
-        with open(args.config) as f:
+        with open(args.config, encoding="utf-8") as f:
             raw = f.read()
+        
+        # Strip trailing spaces from each line (email clients add them)
+        raw = "\n".join(line.rstrip() for line in raw.splitlines())
         
         # Try parsing as pure JSON first
         try:
             cfg = json.loads(raw)
         except json.JSONDecodeError:
-            # Not pure JSON — try extracting from email body (between markers)
-            start_marker = "--- CONFIG JSON START ---"
-            end_marker = "--- CONFIG JSON END ---"
-            if start_marker in raw and end_marker in raw:
-                json_str = raw.split(start_marker, 1)[1].split(end_marker, 1)[0].strip()
-                try:
-                    cfg = json.loads(json_str)
-                    print(f"  Extracted JSON config from email body")
-                except json.JSONDecodeError as e:
-                    print(f"ERROR: Found config markers but JSON is invalid: {e}")
-                    sys.exit(1)
-            else:
-                print(f"ERROR: {args.config} is not valid JSON and has no config markers.")
+            # Not pure JSON — try extracting from email body
+            # Support multiple marker styles
+            marker_pairs = [
+                ("--- CONFIG JSON START ---", "--- CONFIG JSON END ---"),
+                ("CONFIG JSON", "{"),  # Old-style: header line, then JSON starts at {
+            ]
+            
+            cfg = None
+            for start_m, end_m in marker_pairs:
+                if start_m in raw:
+                    if end_m == "{":
+                        # Old style: find the header, then extract from first { to last }
+                        after_header = raw.split(start_m, 1)[1]
+                        # Skip past the === line if present
+                        brace_pos = after_header.find("{")
+                        if brace_pos >= 0:
+                            json_candidate = after_header[brace_pos:]
+                            # Find matching closing brace by trying progressively
+                            depth = 0
+                            end_pos = 0
+                            for i, ch in enumerate(json_candidate):
+                                if ch == "{": depth += 1
+                                elif ch == "}": depth -= 1
+                                if depth == 0:
+                                    end_pos = i + 1
+                                    break
+                            json_str = json_candidate[:end_pos]
+                    else:
+                        json_str = raw.split(start_m, 1)[1].split(end_m, 1)[0].strip()
+                    
+                    try:
+                        cfg = json.loads(json_str)
+                        print(f"  Extracted JSON config from email body")
+                        break
+                    except json.JSONDecodeError:
+                        continue
+            
+            if cfg is None:
+                print(f"ERROR: {args.config} is not valid JSON and no config block found.")
                 print(f"  Paste the entire email body into the file, or just the JSON block.")
                 sys.exit(1)
     else:
