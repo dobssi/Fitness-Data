@@ -304,11 +304,20 @@
         <!-- 3. YOUR DATA -->
         <div class="section">
             <h2>📂 Your Running Data</h2>
-            <p class="section-desc">Upload your activity files and/or connect intervals.icu for automatic syncing.</p>
+            <p class="section-desc">
+                We need your activity history as a zip file from Garmin or Strava. 
+                These are usually too large to email, so upload via the Dropbox link below.
+            </p>
 
-            <div class="field" style="margin-bottom: 1rem;">
-                <label>Upload FIT/GPX files (Garmin or Strava export)</label>
-                <input type="file" id="f-file" accept=".zip,.fit,.gpx,.tcx" style="font-size: 0.82rem;">
+            <div style="background: var(--accent-bg); border: 1px solid var(--accent-border); border-radius: 8px; padding: 1rem 1.25rem; margin-bottom: 1rem;">
+                <div style="font-size: 0.88rem; font-weight: 600; margin-bottom: 0.5rem;">📤 Upload your data</div>
+                <p style="font-size: 0.82rem; color: var(--text-muted); margin-bottom: 0.75rem;">
+                    <strong style="color: var(--text);">Rename your zip file</strong> to include your name before uploading, 
+                    e.g. <code style="font-family: var(--mono); background: rgba(255,255,255,0.05); padding: 0.1rem 0.3rem; border-radius: 3px;">Mo_Farah_Strava_Export.zip</code>
+                </p>
+                <a href="__DROPBOX_REQUEST_LINK__" target="_blank" class="btn btn-primary" style="text-decoration: none;">
+                    Upload to Dropbox →
+                </a>
             </div>
 
             <div class="collapsible-toggle" onclick="toggleCollapsible(this)">
@@ -319,8 +328,7 @@
                     <strong>Garmin Connect:</strong> Log in at connect.garmin.com → ⚙️ → Account Settings →
                     Download Your Data → Export Your Data. You'll get an email with a zip file.<br><br>
                     <strong>Strava:</strong> Log in at strava.com → Settings → My Account →
-                    Download or Delete Your Account → Request Your Archive. Takes a few hours.<br><br>
-                    <strong>Large files (>500MB)?</strong> Upload via <a href="__DROPBOX_REQUEST_LINK__" target="_blank" style="color: var(--accent);">this Dropbox link</a> instead.
+                    Download or Delete Your Account → Request Your Archive. Takes a few hours.
                 </div>
             </div>
 
@@ -402,11 +410,17 @@
     </div>
 
     <div class="success-msg" id="successMsg">
-        <h2>✅ Profile Sent!</h2>
-        <p style="color: var(--text-muted); font-size: 0.88rem; margin-bottom: 1rem;">
-            Your profile has been emailed. You can return to this page any time to update your details.
+        <h2>✅ Profile Submitted!</h2>
+        <p style="color: var(--text-muted); font-size: 0.88rem; margin-bottom: 0.5rem;">
+            Your profile details have been emailed.
         </p>
-        <button class="btn btn-ghost" onclick="showForm()">← Back to Profile</button>
+        <p style="color: var(--warning); font-size: 0.85rem; margin-bottom: 1rem;">
+            📤 Don't forget to upload your Garmin/Strava data zip via the Dropbox link if you haven't already.
+        </p>
+        <div class="actions" style="justify-content: center;">
+            <a href="__DROPBOX_REQUEST_LINK__" target="_blank" class="btn btn-primary" style="text-decoration: none;">Upload Data →</a>
+            <button class="btn btn-ghost" onclick="showForm()">← Back to Profile</button>
+        </div>
     </div>
 
     <div class="footer">
@@ -649,7 +663,7 @@ function submitProfile() {
 
     const subject = encodeURIComponent(`Running Profile — ${data.name}`);
     const bodyEnc = encodeURIComponent(body);
-    window.location.href = `mailto:__YOUR_EMAIL__?subject=${subject}&body=${bodyEnc}`;
+    window.location.href = `mailto:paul.collyer@gmail.com?subject=${subject}&body=${bodyEnc}`;
 
     setTimeout(() => {
         el('mainContent').style.display = 'none';
