@@ -982,16 +982,15 @@ def _calc_normalised_ag(raw_ag, moving_s, temp_adj, terrain_adj, surface_adj,
     e_adj = elevation_adj if pd.notna(elevation_adj) and np.isfinite(elevation_adj) and elevation_adj > 0 else 1.0
     
     # Distance-scaling bias correction
-    # Logarithmic in distance, anchored at 5K=0%, marathon=+4%
-    # Formula: dist_adj = 1 + 0.04 × ln(dist/5.0) / ln(42.195/5.0)
-    # This gives: 5K=1.000, 10K=+1.3%, HM=+2.7%, Marathon=+4.0%
+    # v52: 2.0 × ln(dist/5.0) — penalises sub-5K (WMA tables inflate short distances)
+    # and boosts longer distances. Anchored at 5K=0%.
+    # Mile=-2.3%, 3K=-1.0%, 5K=0%, 10K=+1.4%, HM=+2.9%, Marathon=+4.3%
+    _dist_slope = 0.02        # 2.0% per ln(km) unit
     _dist_ref = 5.0           # Reference distance (no correction)
-    _dist_max_boost = 0.04    # +4% correction at marathon distance
-    _dist_log_range = math.log(42.195 / _dist_ref)  # ln(42.195/5.0) ≈ 2.134
     
     dist_adj = 1.0
-    if dist_km is not None and pd.notna(dist_km) and dist_km > _dist_ref:
-        dist_adj = 1.0 + _dist_max_boost * math.log(dist_km / _dist_ref) / _dist_log_range
+    if dist_km is not None and pd.notna(dist_km) and dist_km > 0:
+        dist_adj = 1.0 + _dist_slope * math.log(dist_km / _dist_ref)
     
     condition_adj = race_temp_adj * t_adj * s_adj * e_adj
     return round(raw_ag * condition_adj * dist_adj, 2)
