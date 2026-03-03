@@ -228,9 +228,9 @@ def classify_run(name: str, avg_hr: float, lthr: float, max_hr: float,
         else:
             return ('training', 'medium', f'Named race but HR {hr_pct*100:.0f}%LTHR below race threshold')
     
-    # 2. Race keyword + no anti-keyword — use relaxed HR threshold
+    # 2. Race keyword + no anti-keyword — use FULL HR threshold (no discount)
     if has_race_kw and not has_anti_kw:
-        if hr_pct >= named_hr:
+        if hr_pct >= min_hr:
             return ('race', 'high', f'Race keyword + HR {hr_pct*100:.0f}%LTHR')
         else:
             return ('training', 'medium', f'Race keyword but HR {hr_pct*100:.0f}%LTHR below race threshold')
