@@ -99,6 +99,12 @@ jobs:
             --items data/fits.zip
         continue-on-error: true
 
+      - name: Reset sync state (manual dispatch only)
+        if: ${{ github.event_name == 'workflow_dispatch' }}
+        run: |
+          rm -f ${{ env.ATHLETE_DIR }}/fit_sync_state.json
+          echo "Sync state deleted — fetch will do full scan"
+
       - name: Check for new activities
         id: fetch
         if: ${{ github.event.inputs.sync != 'false' && env.PIPELINE_MODE != 'DASHBOARD' && env.PIPELINE_MODE != 'FROM_STEPB' }}
