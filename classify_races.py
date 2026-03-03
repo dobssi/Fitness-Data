@@ -96,17 +96,18 @@ RACE_DISTANCES = [
 ]
 
 # ─── HR thresholds by distance ────────────────────────────────────────────
-# Default race HR thresholds as %LTHR. Loaded from athlete.yml if present,
-# otherwise these defaults apply. Athletes should tune to their own data.
+# Default race HR thresholds as %LTHR. Loaded from athlete.yml if present.
+# HR alone cannot classify races for all athletes (some train at race HR).
+# Keywords do the heavy lifting; HR is the tiebreaker for unnamed runs.
 # Named races (keyword/override match) get threshold - 5%.
 DEFAULT_RACE_HR_THRESHOLDS = {
-    "3K":   1.01,   # Near max — first lap drag on short races
-    "5K":   1.00,   # First km drags avg down from 180+ effort
-    "10K":  1.00,   # Sustained near LTHR
-    "10M":  0.98,   # Interpolated
-    "HM":   0.97,   # ~172 bpm for LTHR 178
-    "30K":  0.94,   # Interpolated
-    "Marathon": 0.93,  # ~165 bpm for LTHR 178
+    "3K":   1.01,
+    "5K":   1.00,
+    "10K":  1.00,
+    "10M":  0.98,
+    "HM":   0.97,
+    "30K":  0.94,
+    "Marathon": 0.93,
 }
 
 
