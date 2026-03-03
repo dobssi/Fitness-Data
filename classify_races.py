@@ -2,38 +2,28 @@
 """
 classify_races.py — Smart race/training classifier for activity_overrides.xlsx
 
-Uses the Master file's activity names, HR data, and RF trends to distinguish
-real races from fast training runs. Enriches the overrides file with date,
-activity name, HR stats, and a confidence-based race classification.
+Detects races from Master file using HR intensity as the primary signal,
+with distance-specific HR thresholds (marathons are run at lower HR than 5Ks).
+
+Strategy:
+  1. Find all runs at standard race distances (3K–Marathon) with HR data
+  2. Classify using HR-for-distance model (sustained 90%+ LTHR at marathon = race)
+  3. Boost/demote using activity name keywords (expanded for international events)
+  4. Detect parkruns (name, or Saturday ~9am + ~5km)
+  5. Detect surface from name keywords (indoor, track)
 
 Usage:
-    python classify_races.py \
-        --master athletes/SteveDavies/output/Master_FULL_post.xlsx \
-        --overrides athletes/SteveDavies/activity_overrides.xlsx \
-        --lthr 157 --max-hr 173
-
-    # Or auto-detect from athlete.yml:
-    python classify_races.py \
-        --master athletes/SteveDavies/output/Master_FULL_post.xlsx \
-        --overrides athletes/SteveDavies/activity_overrides.xlsx \
-        --athlete-yml athletes/SteveDavies/athlete.yml
-
-    # Generate fresh overrides from Master (skip onboard_athlete scan):
-    python classify_races.py \
-        --master athletes/SteveDavies/output/Master_FULL_post.xlsx \
-        --overrides athletes/SteveDavies/activity_overrides.xlsx \
-        --athlete-yml athletes/SteveDavies/athlete.yml \
+    python classify_races.py \\
+        --master athletes/A005/output/Master_FULL.xlsx \\
+        --overrides athletes/A005/activity_overrides.xlsx \\
+        --athlete-yml athletes/A005/athlete.yml \\
         --from-master
-
-Output:
-    Overwrites activity_overrides.xlsx with enriched columns and smart verdicts.
-    High-confidence races get race_flag=1, high-confidence training get race_flag=0.
-    Uncertain rows get race_flag=1 with a "REVIEW" note for the athlete.
 """
 
 import argparse
 import re
 import sys
+from datetime import datetime
 from pathlib import Path
 
 import numpy as np
@@ -43,23 +33,58 @@ from openpyxl.styles import Font, PatternFill
 
 # ─── Race detection patterns ──────────────────────────────────────────────
 
+# Keywords that strongly indicate a race (expanded for international events)
 RACE_KEYWORDS = re.compile(
     r'parkrun|park run|marathon|half marathon|\brace\b|championship|league|'
-    r'serpentine 5k|LFOTM|cross country|\bXC\b|assembly|relays?|'
-    r'\b10k\b|\b5k\b|\bhm\b|mob match|interclub|'
-    r'vitality|bupa|great run|great north|big half',
+    r'serpentine|LFOTM|cross country|\bXC\b|assembly|relays?\b|'
+    r'mob match|interclub|'
+    r'vitality|bupa|great run|great north|big half|'
+    # Swedish / European race names
+    r'loppet|varvet|rusket|midnattsloppet|vinthund|premiärhalvan|'
+    # Common race series / organisers
+    r"RunThrough|Brooks 5k|CityRun|STHLM 10|Winter 10k|Stockholm's Bästa|"
+    r'Harry Hawkes|BMC\b|\bTT\b|'
+    # PB/SB mentions (strong race signal)
+    r'\bPB[!\s]|\bSB[!\s]',
     re.I
 )
 
+# Keywords that indicate training (not a race)
 ANTI_KEYWORDS = re.compile(
     r'tempo|recovery|recover|steady|easy|\bwarm.?up\b|cool.?down|treadmill|'
     r'\bjog\b|fartlek|interval|threshold|long run|out and back|club run|'
-    r'zwift|progression|hills?|repeat|session|drill|commute|travel|'
-    r'shakeout|pre.?match|lunch run|morning run',
+    r'zwift|progression|hills?\b|repeat|session|drill|commute|travel|'
+    r'shakeout|pre.?match|lunch run|morning run|\bWU\b|\bCD\b|'
+    r'sandwich|streak|relaxed|gentle|slow|brisk|progressive|buggy|'
+    r'FK Studenterna|FKS\b|\bprep\b|preamble|calibrat',
     re.I
 )
 
-# Standard race distances for auto-detection from Master
+# Specific race name matches (abbreviations, event names)
+RACE_NAME_OVERRIDES = re.compile(
+    r'\bVLM\b|London Marathon|Copenhagen Marathon|Stockholm Marathon|'
+    r'Hackney Half|Battersea Park|Djurgårdsvarvet|Höstrusket|Hässelbyloppet|'
+    r'Lidingöloppet|Midnattsloppet|2 sjöar',
+    re.I
+)
+
+# Race keywords excluding parkrun — used to check if "parkrun" was the only match
+# at non-5K distances (sandwich runs, longer runs containing a parkrun)
+NON_PARKRUN_RACE_KW = re.compile(
+    r'marathon|half marathon|\brace\b|championship|league|'
+    r'serpentine|LFOTM|cross country|\bXC\b|assembly|relays?\b|'
+    r'mob match|interclub|vitality|bupa|great run|great north|big half|'
+    r'loppet|varvet|rusket|midnattsloppet|vinthund|premiärhalvan|'
+    r"RunThrough|Brooks 5k|CityRun|STHLM 10|Winter 10k|Stockholm's Bästa|"
+    r'Harry Hawkes|BMC\b|\bTT\b|\bPB[!\s]|\bSB[!\s]',
+    re.I
+)
+
+# Surface detection from activity name
+INDOOR_KEYWORDS = re.compile(r'\bindoor\b|\btreadmill\b|\bgym\b', re.I)
+TRACK_KEYWORDS = re.compile(r'\btrack\b|\b[345]000m\b|\b1500m\b|\bmile\b.*\btrack\b', re.I)
+
+# Standard race distances: (min_km, max_km, official_km, label)
 RACE_DISTANCES = [
     (2.8, 3.2, 3.0, "3K"),
     (4.8, 5.5, 5.0, "5K"),
@@ -70,9 +95,28 @@ RACE_DISTANCES = [
     (41.0, 43.5, 42.195, "Marathon"),
 ]
 
+# ─── HR thresholds by distance ────────────────────────────────────────────
+# Calibrated from 3118 curated runs (Paul A001 ground truth).
+# Counter-intuitive but physiologically correct: SHORTER distances need
+# HIGHER thresholds because tempo/interval sessions routinely push HR to
+# 90-93% LTHR at 5K/10K distance. Nobody sustains 90%+ for a 3-hour
+# training run at marathon distance.
+#
+# These thresholds are for HR-only classification (no name keywords).
+# With name keywords, the classifier can be more aggressive.
+RACE_HR_THRESHOLDS = {
+    "3K":       {"min_hr_pct": 0.95},   # Very high — only races push here for 3K
+    "5K":       {"min_hr_pct": 0.925},   # F1=0.948, catches 96% of races
+    "10K":      {"min_hr_pct": 0.955},   # F1=0.892, catches 97% — strict because many tempos
+    "10M":      {"min_hr_pct": 0.93},    # Few samples; interpolated between 10K and HM
+    "HM":       {"min_hr_pct": 0.90},    # F1=0.974, catches 100% — training rarely this high
+    "30K":      {"min_hr_pct": 0.895},   # F1=0.889, catches 100%
+    "Marathon":  {"min_hr_pct": 0.85},    # Very permissive — nobody trains at mara HR for 3h+
+}
+
 
 def load_athlete_config(yml_path: str) -> dict:
-    """Load LTHR and max_hr from athlete.yml."""
+    """Load LTHR, max_hr, and timezone from athlete.yml."""
     try:
         import yaml
         with open(yml_path) as f:
@@ -80,104 +124,156 @@ def load_athlete_config(yml_path: str) -> dict:
         return {
             "lthr": cfg["athlete"]["lthr"],
             "max_hr": cfg["athlete"]["max_hr"],
+            "timezone": cfg["athlete"].get("timezone", "UTC"),
         }
     except Exception as e:
         print(f"Warning: Could not read {yml_path}: {e}")
         return {}
 
 
-def classify_run(name: str, avg_hr: float, lthr: float, max_hr: float,
-                 distance_km: float, pace_min_km: float,
-                 pace_p10: float, pace_median: float) -> tuple[str, str, str]:
-    """Classify a single run as race/training/uncertain.
+def detect_surface(name: str) -> str:
+    """Detect surface type from activity name. Returns None if undetected."""
+    if not name:
+        return None
+    if INDOOR_KEYWORDS.search(name):
+        return "indoor"
+    if TRACK_KEYWORDS.search(name):
+        return "track"
+    return None
+
+
+def is_parkrun(name: str, date_val, dist_km: float, start_hour: float = None) -> bool:
+    """Detect parkrun from name, day-of-week, time, and distance.
     
-    Returns (verdict, confidence, reason) where:
-        verdict:    'race', 'training', 'uncertain'
-        confidence: 'high', 'medium', 'low'
-        reason:     human-readable explanation
+    Parkrun sandwiches (longer run containing a parkrun) are NOT flagged
+    as parkrun races — the distance check filters them out.
+    """
+    if name and re.search(r'parkrun|park run', name, re.I):
+        if dist_km and float(dist_km) > 5.1:
+            return False  # Sandwich or longer run
+        return True
+    
+    # Saturday + ~5km + morning
+    if date_val and dist_km:
+        try:
+            if isinstance(date_val, str):
+                dt = datetime.strptime(str(date_val)[:10], '%Y-%m-%d')
+            elif hasattr(date_val, 'weekday'):
+                dt = date_val
+            else:
+                return False
+            if dt.weekday() == 5 and 4.8 <= float(dist_km) <= 5.5:
+                if start_hour is not None and not (8.0 <= start_hour <= 10.5):
+                    return False
+                return True
+        except (ValueError, TypeError):
+            pass
+    
+    return False
+
+
+def classify_run(name: str, avg_hr: float, lthr: float, max_hr: float,
+                 distance_km: float, duration_min: float,
+                 race_type: str) -> tuple:
+    """Classify a single candidate as race/training/uncertain.
+    
+    Primary signal: HR intensity vs distance-specific threshold.
+    Secondary signal: activity name keywords.
     """
     hr_pct = avg_hr / lthr if lthr > 0 and avg_hr > 0 else 0
-    hr_pct_max = avg_hr / max_hr if max_hr > 0 and avg_hr > 0 else 0
     
     has_race_kw = bool(RACE_KEYWORDS.search(name))
+    has_race_name = bool(RACE_NAME_OVERRIDES.search(name))
     has_anti_kw = bool(ANTI_KEYWORDS.search(name))
     
-    # Is this a standard race distance?
-    is_race_dist = False
-    for dmin, dmax, _, label in RACE_DISTANCES:
-        if dmin <= distance_km <= dmax:
-            is_race_dist = True
-            break
+    # "parkrun" in a non-5K run is a sandwich/longer run — don't treat as race keyword
+    if has_race_kw and race_type != "5K":
+        if not NON_PARKRUN_RACE_KW.search(name):
+            has_race_kw = False  # Only "parkrun" matched — not a race at this distance
+    
+    hr_thresh = RACE_HR_THRESHOLDS.get(race_type, {"min_hr_pct": 0.925})
+    min_hr = hr_thresh["min_hr_pct"]
+    # Named races get a lower HR bar (name is strong evidence)
+    named_hr = min_hr - 0.05  # e.g. 5K: 87.5% with name vs 92.5% without
     
     # ── Decision tree ──
     
-    # 1. Anti-keyword WITHOUT race keyword → training
-    if has_anti_kw and not has_race_kw:
-        return ('training', 'high', f'Training keyword in name, HR {hr_pct*100:.0f}%LTHR')
+    # 1. Specific race name override (VLM, Stockholm Marathon etc)
+    if has_race_name and not has_anti_kw:
+        if hr_pct >= named_hr:
+            return ('race', 'high', f'Named race + HR {hr_pct*100:.0f}%LTHR')
+        else:
+            return ('race', 'low', f'Named race but easy HR {hr_pct*100:.0f}%LTHR — DNS/jogged?')
     
-    # 2. Race keyword + high HR → race
-    if has_race_kw and hr_pct > 0.88:
-        return ('race', 'high', f'Race keyword + HR {hr_pct*100:.0f}%LTHR')
+    # 2. Race keyword + no anti-keyword — use relaxed HR threshold
+    if has_race_kw and not has_anti_kw:
+        if hr_pct >= named_hr:
+            return ('race', 'high', f'Race keyword + HR {hr_pct*100:.0f}%LTHR')
+        else:
+            return ('race', 'low', f'Race keyword but HR {hr_pct*100:.0f}%LTHR — easy effort')
     
-    # 3. Race keyword + low HR → easy race (jogged parkrun etc)
-    if has_race_kw and hr_pct <= 0.88:
-        return ('race', 'low', f'Race keyword but easy HR {hr_pct*100:.0f}%LTHR — jogged?')
+    # 3. Anti-keyword only → training (regardless of HR — sessions can have high HR)
+    if has_anti_kw and not has_race_kw and not has_race_name:
+        return ('training', 'high', f'Training keyword: "{_first_match(ANTI_KEYWORDS, name)}", HR {hr_pct*100:.0f}%LTHR')
     
-    # 4. Both keywords (conflicting) → trust HR
-    if has_anti_kw and has_race_kw and hr_pct > 0.90:
-        return ('race', 'medium', f'Conflicting keywords, HR {hr_pct*100:.0f}%LTHR suggests race')
+    # 4. Both race + anti keywords → check context
+    if has_race_kw and has_anti_kw:
+        decisive_anti = re.search(
+            r'sandwich|calibrat|shakeout|pre.?match|preamble|'
+            r'\btempo\b|\bsession\b|\binterval|FK Studenterna|FKS\b|'
+            r'\bWU\b.*\bCD\b|\bCD\b.*\bWU\b|warm.?up.*cool.?down|'
+            r'\bstreaks?\b|\bprep\b',
+            name, re.I)
+        if decisive_anti:
+            return ('training', 'high', f'Decisive training keyword: "{decisive_anti.group()}"')
+        if hr_pct >= min_hr:
+            return ('race', 'medium', f'Mixed keywords, HR {hr_pct*100:.0f}%LTHR suggests race')
+        else:
+            return ('training', 'medium', f'Mixed keywords, HR {hr_pct*100:.0f}%LTHR suggests training')
     
-    # 5. No keywords — use HR and pace (strict: only flag as race with very high HR)
-    if hr_pct > 0.97 and is_race_dist and pace_min_km < pace_p10 * 1.05:
-        return ('race', 'medium', f'No name clue, but HR {hr_pct*100:.0f}%LTHR + race distance + fast pace — REVIEW')
-    
-    if hr_pct < 0.90:
-        return ('training', 'medium', f'No race keyword, HR {hr_pct*100:.0f}%LTHR')
-    
-    # 6. Middle ground — default to training, flag for review
-    return ('uncertain', 'low', f'HR {hr_pct*100:.0f}%LTHR, no clear signal — REVIEW')
+    # 5. No keywords — rely entirely on calibrated HR thresholds
+    if hr_pct >= min_hr:
+        return ('race', 'medium', f'HR {hr_pct*100:.0f}%LTHR ≥ {min_hr*100:.0f}% for {race_type} — REVIEW')
+    else:
+        return ('training', 'medium', f'HR {hr_pct*100:.0f}%LTHR < {min_hr*100:.0f}% for {race_type}')
+
+
+def _first_match(pattern, text):
+    """Return the first regex match from text, for readable reasons."""
+    m = pattern.search(text)
+    return m.group(0) if m else ""
 
 
 def detect_candidates_from_master(master_df: pd.DataFrame, lthr: float,
                                   max_hr: float) -> pd.DataFrame:
-    """Detect race candidates from Master file (replaces onboard FIT scanning).
+    """Find ALL runs at standard race distances with HR above 75% LTHR.
     
-    Uses pace distribution + HR + distance to find candidate races.
+    No pace filter. The classify_run() step handles the actual classification.
     """
     df = master_df.copy()
-    
-    # Need pace
-    df['pace_min_km'] = df['elapsed_time_s'] / 60 / df['distance_km']
-    valid = df[df['pace_min_km'].between(2.5, 10) & df['avg_hr'].notna()].copy()
-    
-    pace_p10 = valid['pace_min_km'].quantile(0.10)
-    pace_median = valid['pace_min_km'].median()
+    valid = df[df['avg_hr'].notna() & df['distance_km'].notna()].copy()
     
     candidates = []
     for _, row in valid.iterrows():
-        pace = row['pace_min_km']
         dist = row['distance_km']
         hr = row['avg_hr']
         
-        # Must be faster than median AND at race-ish distance
-        if pace >= pace_median * 0.95:
-            continue
-        
-        is_race_dist = False
+        matched = False
         official_dist = None
         race_type = None
         for dmin, dmax, odist, label in RACE_DISTANCES:
             if dmin <= dist <= dmax:
-                is_race_dist = True
+                matched = True
                 official_dist = odist
                 race_type = label
                 break
         
-        if not is_race_dist:
+        if not matched:
             continue
         
-        # Must have elevated HR (> 85% LTHR) to be a candidate
-        if lthr > 0 and hr < lthr * 0.85:
+        # Minimum HR floor — below 82% LTHR nothing is a race in calibration data
+        # (Easy parkruns at 83-88% are caught by parkrun name detection instead)
+        if lthr > 0 and hr < lthr * 0.82:
             continue
         
         candidates.append({
@@ -191,21 +287,12 @@ def detect_candidates_from_master(master_df: pd.DataFrame, lthr: float,
 
 def enrich_and_classify(master_path: str, overrides_path: str,
                         lthr: float, max_hr: float,
-                        from_master: bool = False) -> str:
-    """Main function: enrich overrides with names + smart classification.
-    
-    Returns path to output file.
-    """
+                        from_master: bool = False,
+                        timezone: str = "UTC") -> str:
+    """Main function: detect, classify, enrich, and write overrides."""
     print(f"Loading Master: {master_path}")
     master = pd.read_excel(master_path)
     print(f"  {len(master)} runs, {master['date'].min().date()} to {master['date'].max().date()}")
-    
-    # Pace stats for calibration
-    master['_pace'] = master['elapsed_time_s'] / 60 / master['distance_km']
-    valid_paces = master['_pace'][master['_pace'].between(2.5, 10)]
-    pace_p10 = valid_paces.quantile(0.10)
-    pace_median = valid_paces.median()
-    print(f"  Pace P10={pace_p10:.2f}/km, median={pace_median:.2f}/km")
     
     master_lookup = master.set_index('file').to_dict('index')
     
@@ -213,10 +300,9 @@ def enrich_and_classify(master_path: str, overrides_path: str,
     if from_master:
         print(f"\nDetecting race candidates from Master...")
         candidates = detect_candidates_from_master(master, lthr, max_hr)
-        print(f"  {len(candidates)} candidates found")
+        print(f"  {len(candidates)} candidates at race distances")
         
-        # Build overrides DataFrame
-        ov = candidates[['file', 'official_distance_km']].copy()
+        ov = candidates[['file', 'official_distance_km', 'race_type']].copy()
         ov['race_flag'] = 1
         ov['parkrun'] = 0
         ov['surface'] = None
@@ -230,7 +316,6 @@ def enrich_and_classify(master_path: str, overrides_path: str,
         ov = pd.read_excel(overrides_path, dtype={'file': str})
         print(f"  {len(ov)} rows")
         
-        # Fix column names if needed (onboard_athlete.py bug)
         rename_map = {}
         if 'race' in ov.columns and 'race_flag' not in ov.columns:
             rename_map['race'] = 'race_flag'
@@ -240,25 +325,31 @@ def enrich_and_classify(master_path: str, overrides_path: str,
             rename_map['temp_c'] = 'temp_override'
         if rename_map:
             ov.rename(columns=rename_map, inplace=True)
-            print(f"  Fixed column names: {rename_map}")
         
-        # Ensure race_flag and parkrun are integer (onboard script may write True/False)
         if 'race_flag' in ov.columns:
             ov['race_flag'] = ov['race_flag'].astype(int)
         if 'parkrun' in ov.columns:
             ov['parkrun'] = ov['parkrun'].fillna(0).astype(int)
+        
+        if 'race_type' not in ov.columns:
+            ov['race_type'] = None
+            for i, row in ov.iterrows():
+                dist = row.get('official_distance_km', 0)
+                if dist:
+                    for _, _, odist, label in RACE_DISTANCES:
+                        if abs(dist - odist) < 0.5:
+                            ov.at[i, 'race_type'] = label
+                            break
     
-    # ── Enrich with Master data ──
-    print(f"\nEnriching with activity names and HR data...")
+    # ── Classify ──
+    print(f"\nClassifying {len(ov)} candidates...")
     enriched_cols = {
         'date': [], 'activity_name': [], 'actual_dist_km': [],
-        'avg_hr': [], 'hr_pct_lthr': [], 'verdict': [],
-        'confidence': [], 'reason': []
+        'avg_hr': [], 'hr_pct_lthr': [], 'duration_min': [],
+        'verdict': [], 'confidence': [], 'reason': []
     }
     
-    race_count = 0
-    training_count = 0
-    uncertain_count = 0
+    race_count = training_count = uncertain_count = 0
     
     for _, row in ov.iterrows():
         fname = row['file']
@@ -268,18 +359,19 @@ def enrich_and_classify(master_path: str, overrides_path: str,
         name = str(m.get('activity_name', '') or '')
         dist = m.get('distance_km', 0) or 0
         hr = m.get('avg_hr', 0) or 0
-        pace = m.get('_pace', 0) or 0
+        elapsed = m.get('elapsed_time_s', 0) or 0
+        duration = elapsed / 60
+        race_type = row.get('race_type', '') or ''
         
         enriched_cols['date'].append(
             date.strftime('%Y-%m-%d') if hasattr(date, 'strftime') else str(date)[:10] if date else '')
         enriched_cols['activity_name'].append(name)
         enriched_cols['actual_dist_km'].append(round(dist, 2) if dist else None)
         enriched_cols['avg_hr'].append(int(hr) if hr else None)
-        enriched_cols['hr_pct_lthr'].append(
-            round(hr / lthr * 100, 0) if hr and lthr else None)
+        enriched_cols['hr_pct_lthr'].append(round(hr / lthr * 100, 0) if hr and lthr else None)
+        enriched_cols['duration_min'].append(round(duration, 1) if duration else None)
         
-        verdict, conf, reason = classify_run(
-            name, hr, lthr, max_hr, dist, pace, pace_p10, pace_median)
+        verdict, conf, reason = classify_run(name, hr, lthr, max_hr, dist, duration, race_type)
         
         enriched_cols['verdict'].append(f"{verdict} ({conf})")
         enriched_cols['confidence'].append(conf)
@@ -292,32 +384,56 @@ def enrich_and_classify(master_path: str, overrides_path: str,
         else:
             uncertain_count += 1
     
-    # Add enriched columns
     for col, values in enriched_cols.items():
         ov[col] = values
     
     # ── Apply verdicts to race_flag ──
-    # High-confidence: auto-set
-    # Medium/low/uncertain: flag for review
     for i, row in ov.iterrows():
         v = row['verdict']
-        if 'training (high)' in v:
+        if 'training' in v:
             ov.at[i, 'race_flag'] = 0
         elif 'race (high)' in v:
             ov.at[i, 'race_flag'] = 1
         elif 'race (low)' in v:
             ov.at[i, 'race_flag'] = 1
-        elif 'training (medium)' in v:
-            ov.at[i, 'race_flag'] = 0
         elif 'race (medium)' in v:
             ov.at[i, 'race_flag'] = 1
-            ov.at[i, 'notes'] = f"REVIEW: {row['reason']}"
+            if 'REVIEW' in row.get('reason', ''):
+                ov.at[i, 'notes'] = f"REVIEW: {row['reason']}"
         elif 'uncertain' in v:
-            ov.at[i, 'race_flag'] = 0  # default to training, flag for review
+            ov.at[i, 'race_flag'] = 0
             ov.at[i, 'notes'] = f"REVIEW: {row['reason']}"
     
     # ── Detect parkruns ──
-    _detect_parkruns(ov, master_lookup)
+    # Parkruns at ≤5.1km are always races (even buggy, easy, or club championship ones).
+    # Parkrun name in longer runs (sandwiches) is handled by the 5.1km cap.
+    parkrun_count = 0
+    for i, row in ov.iterrows():
+        fname = row['file']
+        m = master_lookup.get(fname, {})
+        name = str(m.get('activity_name', '') or '')
+        date_val = m.get('date')
+        dist = m.get('distance_km')
+        start_hour = None
+        if hasattr(date_val, 'hour'):
+            start_hour = date_val.hour + date_val.minute / 60
+        if is_parkrun(name, date_val, dist, start_hour):
+            ov.at[i, 'parkrun'] = 1
+            ov.at[i, 'race_flag'] = 1
+            parkrun_count += 1
+    
+    # ── Detect surface from activity name ──
+    surface_count = 0
+    for i, row in ov.iterrows():
+        if pd.notna(row.get('surface')) and row['surface']:
+            continue
+        fname = row['file']
+        m = master_lookup.get(fname, {})
+        name = str(m.get('activity_name', '') or '')
+        detected = detect_surface(name)
+        if detected:
+            ov.at[i, 'surface'] = detected
+            surface_count += 1
     
     # ── Sort by date ──
     ov.sort_values('date', inplace=True)
@@ -331,24 +447,23 @@ def enrich_and_classify(master_path: str, overrides_path: str,
     print(f"  Classification results")
     print(f"{'='*60}")
     print(f"  Race (high confidence):     {race_count}")
-    print(f"  Training (high confidence): {training_count}")
-    print(f"  Uncertain / medium:         {uncertain_count + (race_count + training_count - (ov['confidence']=='high').sum())}")
+    print(f"  Training:                   {training_count}")
+    print(f"  Uncertain:                  {uncertain_count}")
     print(f"{'─'*60}")
     print(f"  Final race_flag=1:          {final_races}")
     print(f"  Final race_flag=0:          {final_training}")
+    print(f"  Parkruns detected:          {parkrun_count}")
+    print(f"  Surface detected:           {surface_count}")
     print(f"  Rows marked REVIEW:         {review_count}")
     print(f"{'='*60}")
     
     # ── Write output ──
     output_path = overrides_path
-    
-    # Column order: core fields first, then enrichment
     core_cols = ['file', 'race_flag', 'parkrun', 'official_distance_km',
                  'surface', 'surface_adj', 'temp_override', 'power_override_w', 'official_time_s']
     enrich_cols = ['date', 'activity_name', 'actual_dist_km', 'avg_hr',
-                   'hr_pct_lthr', 'verdict', 'reason', 'notes']
+                   'hr_pct_lthr', 'duration_min', 'verdict', 'reason', 'notes']
     
-    # Ensure all columns exist
     for c in core_cols + enrich_cols:
         if c not in ov.columns:
             ov[c] = None
@@ -356,27 +471,23 @@ def enrich_and_classify(master_path: str, overrides_path: str,
     out_cols = core_cols + enrich_cols
     ov_out = ov[out_cols].copy()
     
-    # Write Excel
     wb = openpyxl.Workbook()
     ws = wb.active
     ws.title = "overrides"
     
-    # Headers
     header_fill = PatternFill(start_color="D9E1F2", end_color="D9E1F2", fill_type="solid")
-    review_fill = PatternFill(start_color="FFF2CC", end_color="FFF2CC", fill_type="solid")  # yellow
-    race_fill = PatternFill(start_color="D5F5E3", end_color="D5F5E3", fill_type="solid")    # green
-    training_fill = PatternFill(start_color="FADBD8", end_color="FADBD8", fill_type="solid") # red-ish
+    review_fill = PatternFill(start_color="FFF2CC", end_color="FFF2CC", fill_type="solid")
+    race_fill = PatternFill(start_color="D5F5E3", end_color="D5F5E3", fill_type="solid")
+    training_fill = PatternFill(start_color="FADBD8", end_color="FADBD8", fill_type="solid")
     
     for col_idx, header in enumerate(out_cols, 1):
         cell = ws.cell(row=1, column=col_idx, value=header)
         cell.font = Font(bold=True)
         cell.fill = header_fill
     
-    # Data rows
     for row_idx, (_, row) in enumerate(ov_out.iterrows(), 2):
         for col_idx, col in enumerate(out_cols, 1):
             val = row[col]
-            # Convert numpy types
             if isinstance(val, (np.integer,)):
                 val = int(val)
             elif isinstance(val, (np.floating,)):
@@ -385,28 +496,23 @@ def enrich_and_classify(master_path: str, overrides_path: str,
                 val = None
             ws.cell(row=row_idx, column=col_idx, value=val)
         
-        # Color-code rows
         verdict = str(row.get('verdict', ''))
         notes = str(row.get('notes', '') or '')
         if 'REVIEW' in notes:
-            for col_idx in range(1, len(out_cols) + 1):
-                ws.cell(row=row_idx, column=col_idx).fill = review_fill
+            for c in range(1, len(out_cols) + 1):
+                ws.cell(row=row_idx, column=c).fill = review_fill
         elif 'race' in verdict:
-            for col_idx in range(1, len(out_cols) + 1):
-                ws.cell(row=row_idx, column=col_idx).fill = race_fill
+            for c in range(1, len(out_cols) + 1):
+                ws.cell(row=row_idx, column=c).fill = race_fill
         elif 'training' in verdict:
-            for col_idx in range(1, len(out_cols) + 1):
-                ws.cell(row=row_idx, column=col_idx).fill = training_fill
+            for c in range(1, len(out_cols) + 1):
+                ws.cell(row=row_idx, column=c).fill = training_fill
     
-    # Auto-width
     for col in ws.columns:
         max_len = max(len(str(cell.value or "")) for cell in col)
         ws.column_dimensions[col[0].column_letter].width = min(max_len + 3, 60)
     
-    # Freeze header row
     ws.freeze_panes = 'A2'
-    
-    # Auto-filter
     ws.auto_filter.ref = ws.dimensions
     
     wb.save(output_path)
@@ -416,82 +522,17 @@ def enrich_and_classify(master_path: str, overrides_path: str,
     return output_path
 
 
-def _is_parkrun(name, date_val, dist_km):
-    """Detect parkrun from name, day-of-week, and distance.
-    Returns True if:
-      - Activity name contains 'parkrun' or 'park run', OR
-      - It's a Saturday AND distance is 4.8-5.5 km (typical parkrun GPS range)
-    """
-    # Name match — strongest signal
-    if name and re.search(r'parkrun|park run', name, re.I):
-        return True
-    
-    # Saturday + ~5km — very likely parkrun
-    if date_val and dist_km:
-        try:
-            from datetime import datetime
-            if isinstance(date_val, str):
-                dt = datetime.strptime(str(date_val)[:10], '%Y-%m-%d')
-            elif hasattr(date_val, 'weekday'):
-                dt = date_val
-            else:
-                return False
-            if dt.weekday() == 5 and 4.8 <= float(dist_km) <= 5.5:
-                return True
-        except (ValueError, TypeError):
-            pass
-    
-    return False
-
-
-def _detect_parkruns(ov, master_lookup):
-    """Set parkrun=1 for all detected parkruns in the overrides DataFrame.
-    Uses activity name, date (Saturday), and distance (~5km).
-    Only sets — never clears an existing parkrun=1."""
-    
-    if 'parkrun' not in ov.columns:
-        ov['parkrun'] = 0
-    
-    count = 0
-    for i, row in ov.iterrows():
-        if row.get('parkrun', 0) == 1:
-            continue
-        
-        fname = str(row.get('file', ''))
-        m = master_lookup.get(fname, {}) if isinstance(master_lookup, dict) else {}
-        
-        # Get activity name from enriched column or Master
-        name = str(row.get('activity_name', '') or m.get('activity_name', '') or '')
-        date_val = row.get('date', '') or m.get('date', '')
-        dist = row.get('actual_dist_km', None) or m.get('distance_km', None)
-        
-        if _is_parkrun(name, date_val, dist):
-            ov.at[i, 'parkrun'] = 1
-            # Ensure race_flag is also 1
-            if 'race_flag' in ov.columns:
-                ov.at[i, 'race_flag'] = 1
-            count += 1
-    
-    if count > 0:
-        print(f"  Parkrun detection: marked {count} parkrun(s).")
-
-
 def _backfill_parkruns(ov, master_path, overrides_path):
-    """Lightweight parkrun detection — runs even when full classification is skipped.
-    Looks up activity names/dates/distances from Master and sets parkrun=1 where detected.
-    Only touches rows where parkrun is 0 or NaN (never clears an existing 1)."""
-    
+    """Lightweight parkrun detection — runs even when full classification is skipped."""
     if 'parkrun' not in ov.columns:
         ov['parkrun'] = 0
     
-    # Load Master for activity names + dates + distances
     try:
         master = pd.read_excel(master_path)
     except Exception as e:
         print(f"  Could not load Master for parkrun backfill: {e}")
         return
     
-    # Build lookup: filename -> {activity_name, date, distance_km}
     master_lookup = {}
     for _, row in master.iterrows():
         fname = str(row.get('file', ''))
@@ -506,14 +547,12 @@ def _backfill_parkruns(ov, master_path, overrides_path):
     for i, row in ov.iterrows():
         if row.get('parkrun', 0) == 1:
             continue
-        
         fname = str(row.get('file', ''))
         m = master_lookup.get(fname, {})
         name = m.get('activity_name', '')
         date_val = m.get('date', '')
         dist = m.get('distance_km', None)
-        
-        if _is_parkrun(name, date_val, dist):
+        if is_parkrun(name, date_val, dist):
             ov.at[i, 'parkrun'] = 1
             if 'race_flag' in ov.columns:
                 ov.at[i, 'race_flag'] = 1
@@ -526,10 +565,9 @@ def _backfill_parkruns(ov, master_path, overrides_path):
         print(f"  Parkrun backfill: no new parkruns found.")
 
 
-
 def main():
     p = argparse.ArgumentParser(description="Smart race classifier for activity overrides")
-    p.add_argument("--master", required=True, help="Path to Master_FULL_post.xlsx")
+    p.add_argument("--master", required=True, help="Path to Master_FULL.xlsx")
     p.add_argument("--overrides", required=True, help="Path to activity_overrides.xlsx")
     p.add_argument("--athlete-yml", help="Path to athlete.yml (for LTHR/max HR)")
     p.add_argument("--lthr", type=int, help="Lactate threshold HR (overrides athlete.yml)")
@@ -537,34 +575,29 @@ def main():
     p.add_argument("--from-master", action="store_true",
                    help="Generate candidates from Master instead of reading existing overrides")
     p.add_argument("--skip-if-classified", action="store_true",
-                   help="Skip if overrides already has verdict column or any race_flag values set (preserves athlete edits)")
+                   help="Skip if overrides already has verdict column (preserves athlete edits)")
     args = p.parse_args()
     
-    # Check skip condition — skip if already classified OR if athlete has manually edited race flags
     if args.skip_if_classified and Path(args.overrides).exists():
         try:
             existing = pd.read_excel(args.overrides)
             skip = False
             if 'verdict' in existing.columns:
-                print(f"Overrides already classified (has 'verdict' column) — skipping full classification.")
-                print(f"  To re-classify, remove --skip-if-classified or delete the verdict column.")
+                print(f"Overrides already classified (has 'verdict' column) — skipping.")
                 skip = True
             elif 'race_flag' in existing.columns and existing['race_flag'].notna().any():
                 n_races = (existing['race_flag'] == 1).sum()
-                print(f"Overrides already has {n_races} race flags set — skipping to preserve athlete edits.")
-                print(f"  To re-classify, remove --skip-if-classified.")
+                print(f"Overrides already has {n_races} race flags set — skipping.")
                 skip = True
-            
             if skip:
-                # Still do a lightweight parkrun backfill from Master activity names
                 _backfill_parkruns(existing, args.master, args.overrides)
                 return
         except Exception:
             pass
     
-    # Get HR thresholds
     lthr = args.lthr
     max_hr = args.max_hr
+    timezone = "UTC"
     
     if args.athlete_yml and (lthr is None or max_hr is None):
         cfg = load_athlete_config(args.athlete_yml)
@@ -572,6 +605,7 @@ def main():
             lthr = cfg.get("lthr", 160)
         if max_hr is None:
             max_hr = cfg.get("max_hr", 185)
+        timezone = cfg.get("timezone", "UTC")
     
     if lthr is None:
         lthr = 160
@@ -583,7 +617,7 @@ def main():
     print(f"HR thresholds: LTHR={lthr}, max HR={max_hr}")
     
     enrich_and_classify(args.master, args.overrides, lthr, max_hr,
-                        from_master=args.from_master)
+                        from_master=args.from_master, timezone=timezone)
 
 
 if __name__ == "__main__":
