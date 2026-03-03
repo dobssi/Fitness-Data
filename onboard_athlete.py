@@ -443,6 +443,9 @@ def generate_athlete_yml(cfg: dict) -> str:
         races_yaml = "[]"
     
     mode = cfg.get("power_mode", "gap")
+    stryd_fallback_comment = ""
+    if cfg.get("_stryd_declared") and mode == "gap":
+        stryd_fallback_comment = "  # NOTE: User has Stryd but no power data in export. Change to 'stryd' when power data appears.\n"
     peak_cp = cfg.get("peak_cp_watts", 300)
     
     # Intervals section
@@ -480,7 +483,7 @@ planned_races:
 
 power:
   mode: "{mode}"
-
+{stryd_fallback_comment}
   stryd:
     peak_cp_watts: {peak_cp}
     eras: {{}}
@@ -1275,7 +1278,15 @@ def main():
                 # Power meter detection
                 power_info = detect_power_meter(runs)
                 print(f"\n  ⚡ Power: {power_info['note']}")
-                cfg["power_mode"] = power_info["mode"]
+                if cfg.get("power_mode") == "stryd" and not power_info["has_power"]:
+                    print(f"  ⚠ User declared Stryd but no power data found in FIT files")
+                    print(f"  ⚠ Setting power_mode to 'gap' — will auto-switch when power data appears")
+                    cfg["power_mode"] = "gap"
+                    cfg["_stryd_declared"] = True  # Remember for athlete.yml comment
+                elif cfg.get("power_mode"):
+                    print(f"  ⚡ User declared power_mode: {cfg['power_mode']} (keeping)")
+                else:
+                    cfg["power_mode"] = power_info["mode"]
                 
                 # Race detection
                 detected_races = detect_races(runs)
