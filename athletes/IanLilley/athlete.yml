@@ -16,6 +16,19 @@ athlete:
   lthr: 157
   max_hr: 175
 
+  # Race HR thresholds (%LTHR) — using pipeline defaults for now.
+  # Ian's race/training HR overlaps heavily at 5K; keywords do the work.
+  # Tune once enough race data exists. Consider if LTHR=157 is accurate
+  # (training runs regularly hit 170+ suggesting LTHR may be higher).
+  # race_hr_thresholds_pct:
+  #   3K: 1.01
+  #   5K: 1.00
+  #   10K: 1.00
+  #   10M: 0.98
+  #   HM: 0.97
+  #   30K: 0.94
+  #   Marathon: 0.93
+
 planned_races:
   - name: "Burgess Parkrun"
     date: "2026-02-28"

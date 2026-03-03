@@ -17,6 +17,16 @@ athlete:
   lthr: 150
   max_hr: 170
 
+  # Race HR thresholds (%LTHR) — using pipeline defaults for now.
+  # race_hr_thresholds_pct:
+  #   3K: 1.01
+  #   5K: 1.00
+  #   10K: 1.00
+  #   10M: 0.98
+  #   HM: 0.97
+  #   30K: 0.94
+  #   Marathon: 0.93
+
 planned_races: []
 
 power:

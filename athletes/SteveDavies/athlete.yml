@@ -15,6 +15,16 @@ athlete:
   lthr: 157
   max_hr: 173
 
+  # Race HR thresholds (%LTHR) — using pipeline defaults for now.
+  # race_hr_thresholds_pct:
+  #   3K: 1.01
+  #   5K: 1.00
+  #   10K: 1.00
+  #   10M: 0.98
+  #   HM: 0.97
+  #   30K: 0.94
+  #   Marathon: 0.93
+
 planned_races:
   - name: "LFOTM 5K"
     date: "2026-03-27"
@@ -63,4 +73,9 @@ pipeline:
   temp_baseline_c: 10.0
   easy_rf:
     hr_min: 120
-    hr_max: 0
+    hr_max: 141
+    np_cp_max: 0.85
+    vi_max: 1.10
+    dist_min_km: 4.0
+    ema_span: 15
+    z_window: 30

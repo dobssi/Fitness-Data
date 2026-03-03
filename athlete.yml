@@ -15,6 +15,18 @@ athlete:
 # HR thresholds (for zone calculations)
   lthr: 178               # Lactate Threshold Heart Rate
   max_hr: 192             # Maximum Heart Rate
+
+  # Race HR thresholds (%LTHR). Minimum avg HR to classify as race effort.
+  # Below this = training regardless of name. Named races get threshold - 5%.
+  # Tuned from 3118 curated runs.
+  race_hr_thresholds_pct:
+    3K: 1.01
+    5K: 1.00
+    10K: 1.00
+    10M: 0.98
+    HM: 0.97
+    30K: 0.94
+    Marathon: 0.93
 zones:
   hr_zones: [140, 155, 169, 178]
   race_hr_zones: [163, 170, 175, 180, 184]
