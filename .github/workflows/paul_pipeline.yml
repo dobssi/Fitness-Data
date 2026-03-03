@@ -86,9 +86,9 @@ jobs:
           path: |
             ${{ env.ATHLETE_DIR }}/fit_sync_state.json
             ${{ env.ATHLETE_DIR }}/pending_activities.csv
-          key: paul_test-sync-state-${{ github.run_number }}
+          key: paul_test-sync-v2-${{ github.run_number }}
           restore-keys: |
-            paul_test-sync-state-
+            paul_test-sync-v2-
 
       - name: Download fits.zip for dedup
         if: ${{ github.event.inputs.sync != 'false' && env.PIPELINE_MODE != 'DASHBOARD' && env.PIPELINE_MODE != 'FROM_STEPB' }}
@@ -138,7 +138,7 @@ jobs:
           path: |
             ${{ env.ATHLETE_DIR }}/fit_sync_state.json
             ${{ env.ATHLETE_DIR }}/pending_activities.csv
-          key: paul_test-sync-state-${{ github.run_number }}
+          key: paul_test-sync-v2-${{ github.run_number }}
 
       # ═══════════════════════════════════════════════════════════
       # FULL PIPELINE — only if new data or manual dispatch
