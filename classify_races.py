@@ -158,7 +158,7 @@ def is_parkrun(name: str, date_val, dist_km: float, start_hour: float = None) ->
             return False  # Sandwich or longer run
         return True
     
-    # Saturday + ~5km + morning
+    # Saturday + ~5km + parkrun start time (9:00-9:10 or 9:30-9:40)
     if date_val and dist_km:
         try:
             if isinstance(date_val, str):
@@ -167,9 +167,13 @@ def is_parkrun(name: str, date_val, dist_km: float, start_hour: float = None) ->
                 dt = date_val
             else:
                 return False
-            if dt.weekday() == 5 and 4.8 <= float(dist_km) <= 5.5:
-                if start_hour is not None and not (8.0 <= start_hour <= 10.5):
-                    return False
+            if dt.weekday() == 5 and 4.8 <= float(dist_km) <= 5.1:
+                if start_hour is not None:
+                    # Parkrun starts: 9:00-9:10 or 9:30-9:40
+                    h = float(start_hour)
+                    in_window = (9.0 <= h <= 9.17) or (9.5 <= h <= 9.67)
+                    if not in_window:
+                        return False
                 return True
         except (ValueError, TypeError):
             pass
@@ -222,14 +226,14 @@ def classify_run(name: str, avg_hr: float, lthr: float, max_hr: float,
         elif hr_pct >= named_hr:
             return ('race', 'high', f'Named race + HR {hr_pct*100:.0f}%LTHR')
         else:
-            return ('race', 'low', f'Named race but easy HR {hr_pct*100:.0f}%LTHR — DNS/jogged?')
+            return ('training', 'medium', f'Named race but HR {hr_pct*100:.0f}%LTHR below race threshold')
     
     # 2. Race keyword + no anti-keyword — use relaxed HR threshold
     if has_race_kw and not has_anti_kw:
         if hr_pct >= named_hr:
             return ('race', 'high', f'Race keyword + HR {hr_pct*100:.0f}%LTHR')
         else:
-            return ('race', 'low', f'Race keyword but HR {hr_pct*100:.0f}%LTHR — easy effort')
+            return ('training', 'medium', f'Race keyword but HR {hr_pct*100:.0f}%LTHR below race threshold')
     
     # 3. Anti-keyword only → training (regardless of HR — sessions can have high HR)
     if has_anti_kw and not has_race_kw and not has_race_name:
@@ -420,10 +424,6 @@ def enrich_and_classify(master_path: str, overrides_path: str,
             ov.at[i, 'race_flag'] = 0
         elif 'race (high)' in v:
             ov.at[i, 'race_flag'] = 1
-        elif 'race (low)' in v:
-            # Race keyword present but HR below race threshold → didn't race it
-            ov.at[i, 'race_flag'] = 0
-            ov.at[i, 'notes'] = f"REVIEW: {row['reason']}"
         elif 'race (medium)' in v:
             ov.at[i, 'race_flag'] = 1
             if 'REVIEW' in row.get('reason', ''):
