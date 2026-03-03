@@ -217,13 +217,17 @@ jobs:
       - name: Rebuild from FIT files (UPDATE — append only)
         if: ${{ steps.gate.outputs.continue == 'true' && env.PIPELINE_MODE == 'UPDATE' }}
         run: |
+          STRAVA_FLAG=""
+          if [ -f "${{ env.ATHLETE_DIR }}/data/activities.csv" ]; then
+            STRAVA_FLAG="--strava ${{ env.ATHLETE_DIR }}/data/activities.csv"
+          fi
           python rebuild_from_fit_zip.py \
             --fit-zip ${{ env.ATHLETE_DIR }}/data/fits.zip \
             --template master_template.xlsx \
             --out ${{ env.ATHLETE_DIR }}/output/Master_FULL.xlsx \
             --append-master-in ${{ env.ATHLETE_DIR }}/output/Master_FULL.xlsx \
             --persec-cache-dir ${{ env.ATHLETE_DIR }}/persec_cache \
-            --strava ${{ env.ATHLETE_DIR }}/data/activities.csv \
+            $STRAVA_FLAG \
             --pending-activities ${{ env.ATHLETE_DIR }}/pending_activities.csv \
             --override-file ${{ env.ATHLETE_DIR }}/activity_overrides.xlsx \
             --tz ${{ env.TZ_LOCAL }} \
@@ -303,6 +307,7 @@ jobs:
             --local-prefix "${{ env.ATHLETE_DIR }}" \
             --items activity_overrides.xlsx \
                     athlete_data.csv \
+                    data/activities.csv \
                     fit_sync_state.json \
                     pending_activities.csv \
                     output/Master_FULL.xlsx \
