@@ -130,6 +130,12 @@ POWER_SCORE_AIR_EXCESS_FACTOR = 0.5     # Fraction of excess air power retained 
 CTL_TIME_CONSTANT = _ATHLETE_CONFIG.pipeline.ctl_time_constant
 ATL_TIME_CONSTANT = _ATHLETE_CONFIG.pipeline.atl_time_constant
 
+# Proper Banister exponential decay factors: alpha = 1 - exp(-1/tau)
+# (Not the linear approximation 1/tau which overweights recent days)
+import math as _math
+CTL_ALPHA = 1 - _math.exp(-1.0 / CTL_TIME_CONSTANT)
+ATL_ALPHA = 1 - _math.exp(-1.0 / ATL_TIME_CONSTANT)
+
 # =============================================================================
 # RF CALCULATION PARAMETERS
 # =============================================================================

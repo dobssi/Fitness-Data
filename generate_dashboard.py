@@ -1737,6 +1737,8 @@ def get_zone_data(df):
     # v52: Aggregate multiple runs on same day (warmup + race + cooldown)
     import math as _rw_math
     _TC_CTL, _TC_ATL = 42, 7
+    _ALPHA_CTL = 1 - _rw_math.exp(-1.0 / _TC_CTL)
+    _ALPHA_ATL = 1 - _rw_math.exp(-1.0 / _TC_ATL)
     _rw_recent_tss = []
     _today_dt = df['date'].iloc[-1] if len(df) > 0 else pd.Timestamp.now()
     _14d_ago = _today_dt - pd.Timedelta(days=14)
@@ -1804,9 +1806,9 @@ def get_zone_data(df):
             _prev = _daily_lookup.get(_prev_date_str)
             if not _prev or not all(pd.notna(v) for v in [_prev['ctl'], _prev['atl']]):
                 continue
-            # Decay one day with TSS=0: ctl_morning = ctl_prev * (1 - 1/tc)
-            _ctl_pre = _prev['ctl'] * (1 - 1 / _TC_CTL)
-            _atl_pre = _prev['atl'] * (1 - 1 / _TC_ATL)
+            # Decay one day with TSS=0: Banister exponential
+            _ctl_pre = _prev['ctl'] * (1 - _ALPHA_CTL)
+            _atl_pre = _prev['atl'] * (1 - _ALPHA_ATL)
             _tsb_pre = _ctl_pre - _atl_pre
             _ratio_pre = (_tsb_pre / _ctl_pre * 100) if _ctl_pre > 0 else 0
             _date_str = _r_date.strftime('%Y-%m-%d')
@@ -1906,12 +1908,15 @@ _RWP_TEMPLATES = {
     ],
 }
 _RWP_DUR_RATIOS = {'Easy': 0.70, 'Moderate': 0.65, 'Shakeout': 0.35, 'Light': 0.35, 'Rest': 0, 'Race': 0}
-_RWP_DECAY_C = 1 - 1/42  # Match StepB: ctl + (tss - ctl) / tc
-_RWP_DECAY_A = 1 - 1/7
+import math as _rwp_math
+_RWP_ALPHA_C = 1 - _rwp_math.exp(-1.0/42)  # Banister: 1 - exp(-1/tau)
+_RWP_ALPHA_A = 1 - _rwp_math.exp(-1.0/7)
+_RWP_DECAY_C = 1 - _RWP_ALPHA_C  # For zero-TSS day: ctl_next = ctl * decay
+_RWP_DECAY_A = 1 - _RWP_ALPHA_A
 
 def _rwp_project(ctl, atl, tss):
-    return (ctl + (tss - ctl) / 42,
-            atl + (tss - atl) / 7)
+    return (ctl + (tss - ctl) * _RWP_ALPHA_C,
+            atl + (tss - atl) * _RWP_ALPHA_A)
 
 def _rwp_duration(name, ctl_ref):
     for key, ratio in _RWP_DUR_RATIOS.items():
@@ -1985,13 +1990,12 @@ def _solve_taper(ctl0, atl0, days_to_race, ctl_ref, dist_cat, priority,
             tss_seq = [r['tss'] for r in lookback_rows]
             # Reverse-project to get state before first lookback day
             for tss_val in reversed(tss_seq):
-                c_back = (c_back - tss_val / 42) / (1 - 1/42)
-                a_back = (a_back - tss_val / 7) / (1 - 1/7)
+                c_back = (c_back - tss_val * _RWP_ALPHA_C) / _RWP_DECAY_C
+                a_back = (a_back - tss_val * _RWP_ALPHA_A) / _RWP_DECAY_A
             # Now forward-project to fill in actual CTL/ATL/TSB
             c_fwd, a_fwd = c_back, a_back
             for r in lookback_rows:
-                c_fwd = c_fwd + (r['tss'] - c_fwd) / 42
-                a_fwd = a_fwd + (r['tss'] - a_fwd) / 7
+                c_fwd, a_fwd = _rwp_project(c_fwd, a_fwd, r['tss'])
                 r['ctl'] = c_fwd
                 r['atl'] = a_fwd
                 r['tsb'] = c_fwd - a_fwd

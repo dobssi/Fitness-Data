@@ -295,7 +295,8 @@ HR_CV_THRESHOLD = 12.0  # If power:HR ratio CV > this %, mark HR as unreliable a
 from config import (PEAK_CP_WATTS, POWER_SCORE_RIEGEL_K, POWER_SCORE_REFERENCE_DIST_KM,
                     POWER_SCORE_RF_DIVISOR, POWER_SCORE_FACTOR_BOOST,
                     POWER_SCORE_AIR_THRESHOLD, POWER_SCORE_AIR_EXCESS_FACTOR,
-                    CTL_TIME_CONSTANT, ATL_TIME_CONSTANT, RF_TREND_WINDOW,
+                    CTL_TIME_CONSTANT, ATL_TIME_CONSTANT, CTL_ALPHA, ATL_ALPHA,
+                    RF_TREND_WINDOW,
                     RF_WINDOW_DURATION_S,
                     TERRAIN_LINEAR_SLOPE, TERRAIN_LINEAR_CAP, TERRAIN_STRAVA_ELEV_MIN,
                     DURATION_PENALTY_DAMPING,
@@ -413,6 +414,8 @@ RF_CONSTANTS = {
     # CTL/ATL
     'ctl_time_constant': CTL_TIME_CONSTANT,  # days (from config.py)
     'atl_time_constant': ATL_TIME_CONSTANT,   # days (from config.py)
+    'ctl_alpha': CTL_ALPHA,                    # Banister decay: 1 - exp(-1/tau)
+    'atl_alpha': ATL_ALPHA,                    # Banister decay: 1 - exp(-1/tau)
     
     # Days-off penalty (RF_Trend with gaps)
     'days_off_gap_threshold': 7,  # Days without activity before penalty applies
@@ -1446,8 +1449,8 @@ def calc_alert_columns(df: pd.DataFrame) -> pd.DataFrame:
                         proj_ctl = ctl_vals[i]
                         proj_atl = atl_val
                         for _d in range(int(days_to_race)):
-                            proj_ctl = proj_ctl + (light_tss - proj_ctl) / 42
-                            proj_atl = proj_atl + (light_tss - proj_atl) / 7
+                            proj_ctl = proj_ctl + (light_tss - proj_ctl) * CTL_ALPHA
+                            proj_atl = proj_atl + (light_tss - proj_atl) * ATL_ALPHA
                         proj_tsb = proj_ctl - proj_atl
                         
                         if proj_tsb < tsb_lo:
@@ -1604,10 +1607,10 @@ def _read_athlete_csv(path: str) -> pd.DataFrame:
 
 def calc_ctl_atl(df: pd.DataFrame, athlete_data_path: str = None) -> tuple:
     """
-    Calculate CTL, ATL, TSB using exponential weighted moving average.
+    Calculate CTL, ATL, TSB using Banister exponential weighted moving average.
     
-    CTL = CTL_yesterday + (TSS_today - CTL_yesterday) / 42
-    ATL = ATL_yesterday + (TSS_today - ATL_yesterday) / 7
+    CTL = CTL_yesterday + (TSS_today - CTL_yesterday) * (1 - exp(-1/42))
+    ATL = ATL_yesterday + (TSS_today - ATL_yesterday) * (1 - exp(-1/7))
     TSB = CTL - ATL
     
     Note: This operates on DAILY data. Multiple activities on same day sum their TSS.
@@ -1713,9 +1716,9 @@ def calc_ctl_atl(df: pd.DataFrame, athlete_data_path: str = None) -> tuple:
     days_with_tss = (daily_df['tss_total'] > 0).sum()
     print(f"  Daily TSS: {days_with_tss} days with activity, total TSS={total_tss:.0f}")
     
-    # Calculate CTL/ATL
-    ctl_tc = RF_CONSTANTS['ctl_time_constant']
-    atl_tc = RF_CONSTANTS['atl_time_constant']
+    # Calculate CTL/ATL using Banister exponential decay: alpha = 1 - exp(-1/tau)
+    ctl_a = RF_CONSTANTS['ctl_alpha']
+    atl_a = RF_CONSTANTS['atl_alpha']
     
     ctl = 0.0
     atl = 0.0
@@ -1727,8 +1730,8 @@ def calc_ctl_atl(df: pd.DataFrame, athlete_data_path: str = None) -> tuple:
     for _, row in daily_df.iterrows():
         tss = row['tss_total']
         
-        ctl = ctl + (tss - ctl) / ctl_tc
-        atl = atl + (tss - atl) / atl_tc
+        ctl = ctl + (tss - ctl) * ctl_a
+        atl = atl + (tss - atl) * atl_a
         tsb = ctl - atl
         
         ctl_values.append(ctl)
