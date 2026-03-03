@@ -46,7 +46,8 @@ except ImportError:
 # CONFIGURATION
 # =============================================================================
 DEFAULT_ATHLETE_DATA = "athlete_data.csv"
-INTERVALS_WEIGHT_START = "2026-01-01"   # BFW data is authoritative pre-2026
+INTERVALS_WEIGHT_START = "2026-01-01"   # Default: BFW data is authoritative pre-2026
+                                        # Override with --weight-oldest for new athletes
 RUNNING_TYPES = {"Run", "VirtualRun"}   # Excluded from non-running TSS
 
 # Non-running TSS formula: (calories - BMR_PER_HOUR * duration_hours) / TSS_DIVISOR
@@ -106,7 +107,7 @@ def read_existing_athlete_data(path: str) -> pd.DataFrame:
     return df
 
 
-def fetch_weight_from_intervals(client: IntervalsClient) -> dict:
+def fetch_weight_from_intervals(client: IntervalsClient, weight_start: str = None) -> dict:
     """
     Fetch weight data from intervals.icu wellness API.
     
@@ -114,9 +115,10 @@ def fetch_weight_from_intervals(client: IntervalsClient) -> dict:
         Dict of {date_str: weight_kg}
     """
     today = datetime.now().strftime("%Y-%m-%d")
-    print(f"  Fetching weight data from intervals.icu ({INTERVALS_WEIGHT_START} -> {today})...")
+    start = weight_start or INTERVALS_WEIGHT_START
+    print(f"  Fetching weight data from intervals.icu ({start} -> {today})...")
     
-    weight_data = client.get_weight_data(INTERVALS_WEIGHT_START, today)
+    weight_data = client.get_weight_data(start, today)
     print(f"  -> {len(weight_data)} days with weight data")
     
     if weight_data:
@@ -184,11 +186,11 @@ def fetch_non_running_tss(client: IntervalsClient, oldest: str = "2013-01-01") -
     return dict(tss_by_date)
 
 
-def postprocess_weight(df: pd.DataFrame) -> pd.DataFrame:
+def postprocess_weight(df: pd.DataFrame, weight_start: str = None) -> pd.DataFrame:
     """Post-process weight column to produce daily smoothed values.
     
-    Pre-2026 data (from BFW) is already smoothed — preserved as-is.
-    2026+ data (from intervals.icu raw) gets 7-day centred moving average.
+    Pre-cutoff data (from BFW) is already smoothed — preserved as-is.
+    Post-cutoff data (from intervals.icu raw) gets 7-day centred moving average.
     Gaps between measurements are forward-filled.
     New daily rows are added for dates not already in the DataFrame.
     """
@@ -215,7 +217,8 @@ def postprocess_weight(df: pd.DataFrame) -> pd.DataFrame:
     
     # Only smooth 2026+ (intervals.icu raw data); pre-2026 BFW is already smoothed
     daily_df["weight_out"] = daily_df["weight_filled"]
-    mask_2026 = daily_df["date"] >= INTERVALS_WEIGHT_START
+    _ws_pp = weight_start or INTERVALS_WEIGHT_START
+    mask_2026 = daily_df["date"] >= _ws_pp
     if mask_2026.any():
         smoothed = (
             daily_df.loc[mask_2026, "weight_filled"]
@@ -264,7 +267,8 @@ def postprocess_weight(df: pd.DataFrame) -> pd.DataFrame:
 
 def merge_data(existing_df: pd.DataFrame, 
                weight_intervals: dict, 
-               nr_tss_intervals: dict) -> pd.DataFrame:
+               nr_tss_intervals: dict,
+               weight_start: str = None) -> pd.DataFrame:
     """
     Merge existing athlete_data.csv with intervals.icu data.
     
@@ -325,14 +329,15 @@ def merge_data(existing_df: pd.DataFrame,
     for date_str in all_dates:
         row = {"date": date_str}
         
-        # Weight: pre-2023 from existing, 2023+ ONLY from intervals.icu
-        # v51.6: Don't fall back to existing CSV for 2023+ dates — avoids
+        # Weight: pre-cutoff from existing, cutoff+ ONLY from intervals.icu
+        # v51.6: Don't fall back to existing CSV for recent dates — avoids
         # persisting corrupted values from date-format parsing bugs.
         # postprocess_weight will fill gaps via forward-fill + smoothing.
-        if date_str >= INTERVALS_WEIGHT_START and date_str in weight_intervals:
+        _ws = weight_start or INTERVALS_WEIGHT_START
+        if date_str >= _ws and date_str in weight_intervals:
             row["weight_kg"] = weight_intervals[date_str]
             weight_updates += 1
-        elif date_str < INTERVALS_WEIGHT_START and date_str in existing_weight:
+        elif date_str < _ws and date_str in existing_weight:
             row["weight_kg"] = existing_weight[date_str]
             weight_preserved += 1
         else:
@@ -447,6 +452,11 @@ def main():
         default="2013-01-01",
         help="Oldest date for non-running TSS fetch (default: 2013-01-01)"
     )
+    parser.add_argument(
+        "--weight-oldest",
+        default=INTERVALS_WEIGHT_START,
+        help=f"Oldest date for weight fetch from intervals.icu (default: {INTERVALS_WEIGHT_START})"
+    )
     args = parser.parse_args()
     
     print("=" * 60)
@@ -475,15 +485,15 @@ def main():
     
     # Fetch from intervals.icu
     print("\n--- Fetching from intervals.icu ---")
-    weight_data = fetch_weight_from_intervals(client)
+    weight_data = fetch_weight_from_intervals(client, weight_start=args.weight_oldest)
     nr_tss_data = fetch_non_running_tss(client, oldest=args.nr_tss_oldest)
     
     # Merge
-    merged_df = merge_data(existing_df, weight_data, nr_tss_data)
+    merged_df = merge_data(existing_df, weight_data, nr_tss_data, weight_start=args.weight_oldest)
     
     # Post-process weight: forward-fill + 7-day centred average
     print("\n--- Post-processing weight ---")
-    merged_df = postprocess_weight(merged_df)
+    merged_df = postprocess_weight(merged_df, weight_start=args.weight_oldest)
     
     # Summary
     print_summary(merged_df)

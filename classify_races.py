@@ -35,12 +35,12 @@ from openpyxl.styles import Font, PatternFill
 
 # Keywords that strongly indicate a race (expanded for international events)
 RACE_KEYWORDS = re.compile(
-    r'parkrun|park run|marathon|half marathon|\brace\b|championship|league|'
+    r'parkrun|park run|marathon|half marathon|\bhalf\b|\brace\b|championship|league|'
     r'serpentine|LFOTM|cross country|\bXC\b|assembly|relays?\b|'
     r'mob match|interclub|'
     r'vitality|bupa|great run|great north|big half|'
     # Swedish / European race names
-    r'loppet|varvet|rusket|midnattsloppet|vinthund|premiärhalvan|'
+    r'loppet|varvet|rusket|midnattsloppet|vinthund|premiärhalv|'
     # Common race series / organisers
     r"RunThrough|Brooks 5k|CityRun|STHLM 10|Winter 10k|Stockholm's Bästa|"
     r'Harry Hawkes|BMC\b|\bTT\b|mästerskap|'
@@ -64,17 +64,20 @@ ANTI_KEYWORDS = re.compile(
 RACE_NAME_OVERRIDES = re.compile(
     r'\bVLM\b|London Marathon|Copenhagen Marathon|Stockholm Marathon|'
     r'Hackney Half|Battersea Park|Djurgårdsvarvet|Höstrusket|Hässelbyloppet|'
-    r'Lidingöloppet|Midnattsloppet|2 sjöar',
+    r'Lidingöloppet|Midnattsloppet|2 sjöar|'
+    # Additional known races
+    r'Royal Parks|Oxford Half|Hampton Court|Göteborgsvarvet|Premiärhalv|'
+    r'Broloppet|Örebro|Big Half|Reading Half|Willow 10k',
     re.I
 )
 
 # Race keywords excluding parkrun — used to check if "parkrun" was the only match
 # at non-5K distances (sandwich runs, longer runs containing a parkrun)
 NON_PARKRUN_RACE_KW = re.compile(
-    r'marathon|half marathon|\brace\b|championship|league|'
+    r'marathon|half marathon|\bhalf\b|\brace\b|championship|league|'
     r'serpentine|LFOTM|cross country|\bXC\b|assembly|relays?\b|'
     r'mob match|interclub|vitality|bupa|great run|great north|big half|'
-    r'loppet|varvet|rusket|midnattsloppet|vinthund|premiärhalvan|'
+    r'loppet|varvet|rusket|midnattsloppet|vinthund|premiärhalv|'
     r"RunThrough|Brooks 5k|CityRun|STHLM 10|Winter 10k|Stockholm's Bästa|"
     r'Harry Hawkes|BMC\b|\bTT\b|\bPB[!\s]|\bSB[!\s]',
     re.I
@@ -101,13 +104,13 @@ RACE_DISTANCES = [
 # Keywords do the heavy lifting; HR is the tiebreaker for unnamed runs.
 # Named races (keyword/override match) get threshold - 5%.
 DEFAULT_RACE_HR_THRESHOLDS = {
-    "3K":   1.01,
-    "5K":   1.00,
-    "10K":  1.00,
-    "10M":  0.98,
-    "HM":   0.97,
-    "30K":  0.94,
-    "Marathon": 0.93,
+    "3K":   0.98,
+    "5K":   0.98,
+    "10K":  0.97,
+    "10M":  0.95,
+    "HM":   0.94,
+    "30K":  0.90,
+    "Marathon": 0.88,
 }
 
 
@@ -206,8 +209,17 @@ def classify_run(name: str, avg_hr: float, lthr: float, max_hr: float,
     # ── Decision tree ──
     
     # 1. Specific race name override (VLM, Stockholm Marathon etc)
-    if has_race_name and not has_anti_kw:
-        if hr_pct >= named_hr:
+    #    Race names beat generic anti-keywords (e.g. "Hackney Half...steady")
+    #    UNLESS a decisive training pattern is present (e.g. "VLM week 9")
+    if has_race_name:
+        is_training_context = bool(re.search(
+            r'week\s*\d|sandwich|calibrat|shakeout|pre.?match|preamble|'
+            r'\bprep\b|\bsim\b|warm.?up.*cool.?down|\bWU\b.*\bCD\b',
+            name, re.I))
+        if is_training_context:
+            # Fall through to later steps
+            pass
+        elif hr_pct >= named_hr:
             return ('race', 'high', f'Named race + HR {hr_pct*100:.0f}%LTHR')
         else:
             return ('race', 'low', f'Named race but easy HR {hr_pct*100:.0f}%LTHR — DNS/jogged?')

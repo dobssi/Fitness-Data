@@ -15,15 +15,15 @@ athlete:
   lthr: 178
   max_hr: 192
 
-  # Race HR thresholds (%LTHR) — same as Paul A001 (test athlete)
+  # Race HR thresholds (%LTHR) — monotonic by distance
   race_hr_thresholds_pct:
-    3K: 1.01
-    5K: 1.00
-    10K: 1.00
-    10M: 0.98
-    HM: 0.97
-    30K: 0.94
-    Marathon: 0.93
+    3K: 0.98
+    5K: 0.98
+    10K: 0.97
+    10M: 0.95
+    HM: 0.94
+    30K: 0.90
+    Marathon: 0.88
 
 planned_races:
   - name: "PremHalv"

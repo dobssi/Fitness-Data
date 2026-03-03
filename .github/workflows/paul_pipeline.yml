@@ -24,7 +24,6 @@ on:
           - UPDATE
           - FULL
           - INITIAL
-          - CLASSIFY_RACES
           - FROM_STEPB
           - DASHBOARD
         default: UPDATE
@@ -91,7 +90,7 @@ jobs:
             paul_test-sync-state-
 
       - name: Download fits.zip for dedup
-        if: ${{ github.event.inputs.sync != 'false' && env.PIPELINE_MODE != 'DASHBOARD' && env.PIPELINE_MODE != 'FROM_STEPB' && env.PIPELINE_MODE != 'CLASSIFY_RACES' }}
+        if: ${{ github.event.inputs.sync != 'false' && env.PIPELINE_MODE != 'DASHBOARD' && env.PIPELINE_MODE != 'FROM_STEPB' }}
         run: |
           python ci/dropbox_sync.py download \
             --dropbox-base "${{ env.DB_BASE }}" \
@@ -101,7 +100,7 @@ jobs:
 
       - name: Check for new activities
         id: fetch
-        if: ${{ github.event.inputs.sync != 'false' && env.PIPELINE_MODE != 'DASHBOARD' && env.PIPELINE_MODE != 'FROM_STEPB' && env.PIPELINE_MODE != 'CLASSIFY_RACES' }}
+        if: ${{ github.event.inputs.sync != 'false' && env.PIPELINE_MODE != 'DASHBOARD' && env.PIPELINE_MODE != 'FROM_STEPB' }}
         run: |
           python fetch_fit_files.py \
             --fit-dir ${{ env.ATHLETE_DIR }}/data/FIT_downloads \
@@ -169,11 +168,12 @@ jobs:
         continue-on-error: true
 
       - name: Sync athlete data from intervals.icu
-        if: ${{ steps.gate.outputs.continue == 'true' && github.event.inputs.sync != 'false' && env.PIPELINE_MODE != 'DASHBOARD' && env.PIPELINE_MODE != 'CLASSIFY_RACES' }}
+        if: ${{ steps.gate.outputs.continue == 'true' && github.event.inputs.sync != 'false' && env.PIPELINE_MODE != 'DASHBOARD' }}
         run: |
           python sync_athlete_data.py \
             --athlete-data ${{ env.ATHLETE_DIR }}/athlete_data.csv \
-            --nr-tss-oldest 2020-01-01
+            --nr-tss-oldest 2020-01-01 \
+            --weight-oldest 2020-01-01
         continue-on-error: true
 
       - name: Initial data ingest (INITIAL only)
@@ -188,12 +188,15 @@ jobs:
         if: ${{ steps.gate.outputs.continue == 'true' && env.PIPELINE_MODE == 'INITIAL' }}
         run: |
           echo "Fetching intervals.icu FITs to pick up runs after Strava export date..."
+          echo "Resetting sync state so fetch covers the full gap..."
+          rm -f ${{ env.ATHLETE_DIR }}/fit_sync_state.json
           python fetch_fit_files.py \
             --fit-dir ${{ env.ATHLETE_DIR }}/data/FIT_downloads \
             --zip ${{ env.ATHLETE_DIR }}/data/fits.zip \
             --state-file ${{ env.ATHLETE_DIR }}/fit_sync_state.json \
             --pending-csv ${{ env.ATHLETE_DIR }}/pending_activities.csv \
-            --refresh-names 14
+            --refresh-names 14 \
+            --full
         continue-on-error: true
 
       - name: Rebuild from FIT files (FULL)
@@ -236,18 +239,14 @@ jobs:
             --re-constant 0.92
 
       - name: Classify races
-        if: ${{ steps.gate.outputs.continue == 'true' && (env.PIPELINE_MODE == 'FULL' || env.PIPELINE_MODE == 'INITIAL' || env.PIPELINE_MODE == 'CLASSIFY_RACES') }}
+        if: ${{ steps.gate.outputs.continue == 'true' && (env.PIPELINE_MODE == 'FULL' || env.PIPELINE_MODE == 'INITIAL') }}
         run: |
-          SKIP_FLAG=""
-          if [ "${{ env.PIPELINE_MODE }}" != "CLASSIFY_RACES" ]; then
-            SKIP_FLAG="--skip-if-classified"
-          fi
           python classify_races.py \
             --master ${{ env.ATHLETE_DIR }}/output/Master_FULL.xlsx \
             --overrides ${{ env.ATHLETE_DIR }}/activity_overrides.xlsx \
             --athlete-yml ${{ env.ATHLETE_CONFIG_PATH }} \
             --from-master \
-            $SKIP_FLAG
+            --skip-if-classified
 
       - name: StepB post-processing
         if: ${{ steps.gate.outputs.continue == 'true' && env.PIPELINE_MODE != 'DASHBOARD' }}
