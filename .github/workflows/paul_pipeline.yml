@@ -26,6 +26,7 @@ on:
           - INITIAL
           - FROM_STEPB
           - DASHBOARD
+          - CLASSIFY_RACES
         default: UPDATE
       sync:
         description: 'Sync from intervals.icu'
@@ -239,17 +240,21 @@ jobs:
             --re-constant 0.92
 
       - name: Classify races
-        if: ${{ steps.gate.outputs.continue == 'true' && (env.PIPELINE_MODE == 'FULL' || env.PIPELINE_MODE == 'INITIAL') }}
+        if: ${{ steps.gate.outputs.continue == 'true' && (env.PIPELINE_MODE == 'FULL' || env.PIPELINE_MODE == 'INITIAL' || env.PIPELINE_MODE == 'CLASSIFY_RACES') }}
         run: |
+          SKIP_FLAG=""
+          if [ "${{ env.PIPELINE_MODE }}" != "CLASSIFY_RACES" ]; then
+            SKIP_FLAG="--skip-if-classified"
+          fi
           python classify_races.py \
             --master ${{ env.ATHLETE_DIR }}/output/Master_FULL.xlsx \
             --overrides ${{ env.ATHLETE_DIR }}/activity_overrides.xlsx \
             --athlete-yml ${{ env.ATHLETE_CONFIG_PATH }} \
             --from-master \
-            --skip-if-classified
+            $SKIP_FLAG
 
       - name: StepB post-processing
-        if: ${{ steps.gate.outputs.continue == 'true' && env.PIPELINE_MODE != 'DASHBOARD' }}
+        if: ${{ steps.gate.outputs.continue == 'true' && env.PIPELINE_MODE != 'DASHBOARD' && env.PIPELINE_MODE != 'CLASSIFY_RACES' }}
         run: |
           python StepB_PostProcess.py \
             --master ${{ env.ATHLETE_DIR }}/output/Master_FULL.xlsx \
@@ -266,7 +271,7 @@ jobs:
             --progress-every 50
 
       - name: Generate dashboard
-        if: ${{ steps.gate.outputs.continue == 'true' }}
+        if: ${{ steps.gate.outputs.continue == 'true' && env.PIPELINE_MODE != 'CLASSIFY_RACES' }}
         env:
           MASTER_FILE: ${{ env.ATHLETE_DIR }}/output/Master_FULL_post.xlsx
           OUTPUT_FILE: ${{ env.ATHLETE_DIR }}/output/dashboard/index.html
@@ -309,7 +314,7 @@ jobs:
 
       # ─── Deploy dashboard to GitHub Pages ──────────────────
       - name: Prepare dashboard for Pages
-        if: ${{ steps.gate.outputs.continue == 'true' }}
+        if: ${{ steps.gate.outputs.continue == 'true' && env.PIPELINE_MODE != 'CLASSIFY_RACES' }}
         run: |
           mkdir -p docs/paul_test
           cp -f ${{ env.ATHLETE_DIR }}/output/dashboard/index.html docs/paul_test/index.html 2>/dev/null || true
@@ -317,7 +322,7 @@ jobs:
 
       - name: Deploy to GitHub Pages
         uses: peaceiris/actions-gh-pages@v3
-        if: ${{ steps.gate.outputs.continue == 'true' }}
+        if: ${{ steps.gate.outputs.continue == 'true' && env.PIPELINE_MODE != 'CLASSIFY_RACES' }}
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           publish_dir: ./docs
