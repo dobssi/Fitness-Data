@@ -24,6 +24,7 @@ on:
           - UPDATE
           - FULL
           - INITIAL
+          - CLASSIFY_RACES
           - FROM_STEPB
           - DASHBOARD
         default: UPDATE
@@ -90,7 +91,7 @@ jobs:
             paul_test-sync-state-
 
       - name: Download fits.zip for dedup
-        if: ${{ github.event.inputs.sync != 'false' && env.PIPELINE_MODE != 'DASHBOARD' && env.PIPELINE_MODE != 'FROM_STEPB' }}
+        if: ${{ github.event.inputs.sync != 'false' && env.PIPELINE_MODE != 'DASHBOARD' && env.PIPELINE_MODE != 'FROM_STEPB' && env.PIPELINE_MODE != 'CLASSIFY_RACES' }}
         run: |
           python ci/dropbox_sync.py download \
             --dropbox-base "${{ env.DB_BASE }}" \
@@ -100,7 +101,7 @@ jobs:
 
       - name: Check for new activities
         id: fetch
-        if: ${{ github.event.inputs.sync != 'false' && env.PIPELINE_MODE != 'DASHBOARD' && env.PIPELINE_MODE != 'FROM_STEPB' }}
+        if: ${{ github.event.inputs.sync != 'false' && env.PIPELINE_MODE != 'DASHBOARD' && env.PIPELINE_MODE != 'FROM_STEPB' && env.PIPELINE_MODE != 'CLASSIFY_RACES' }}
         run: |
           python fetch_fit_files.py \
             --fit-dir ${{ env.ATHLETE_DIR }}/data/FIT_downloads \
@@ -168,7 +169,7 @@ jobs:
         continue-on-error: true
 
       - name: Sync athlete data from intervals.icu
-        if: ${{ steps.gate.outputs.continue == 'true' && github.event.inputs.sync != 'false' && env.PIPELINE_MODE != 'DASHBOARD' }}
+        if: ${{ steps.gate.outputs.continue == 'true' && github.event.inputs.sync != 'false' && env.PIPELINE_MODE != 'DASHBOARD' && env.PIPELINE_MODE != 'CLASSIFY_RACES' }}
         run: |
           python sync_athlete_data.py \
             --athlete-data ${{ env.ATHLETE_DIR }}/athlete_data.csv \
@@ -235,14 +236,18 @@ jobs:
             --re-constant 0.92
 
       - name: Classify races
-        if: ${{ steps.gate.outputs.continue == 'true' && (env.PIPELINE_MODE == 'FULL' || env.PIPELINE_MODE == 'INITIAL') }}
+        if: ${{ steps.gate.outputs.continue == 'true' && (env.PIPELINE_MODE == 'FULL' || env.PIPELINE_MODE == 'INITIAL' || env.PIPELINE_MODE == 'CLASSIFY_RACES') }}
         run: |
+          SKIP_FLAG=""
+          if [ "${{ env.PIPELINE_MODE }}" != "CLASSIFY_RACES" ]; then
+            SKIP_FLAG="--skip-if-classified"
+          fi
           python classify_races.py \
             --master ${{ env.ATHLETE_DIR }}/output/Master_FULL.xlsx \
             --overrides ${{ env.ATHLETE_DIR }}/activity_overrides.xlsx \
             --athlete-yml ${{ env.ATHLETE_CONFIG_PATH }} \
             --from-master \
-            --skip-if-classified
+            $SKIP_FLAG
 
       - name: StepB post-processing
         if: ${{ steps.gate.outputs.continue == 'true' && env.PIPELINE_MODE != 'DASHBOARD' }}
