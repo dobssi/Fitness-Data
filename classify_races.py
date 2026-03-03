@@ -43,7 +43,7 @@ RACE_KEYWORDS = re.compile(
     r'loppet|varvet|rusket|midnattsloppet|vinthund|premiärhalvan|'
     # Common race series / organisers
     r"RunThrough|Brooks 5k|CityRun|STHLM 10|Winter 10k|Stockholm's Bästa|"
-    r'Harry Hawkes|BMC\b|\bTT\b|'
+    r'Harry Hawkes|BMC\b|\bTT\b|mästerskap|'
     # PB/SB mentions (strong race signal)
     r'\bPB[!\s]|\bSB[!\s]',
     re.I
@@ -96,39 +96,40 @@ RACE_DISTANCES = [
 ]
 
 # ─── HR thresholds by distance ────────────────────────────────────────────
-# Calibrated from 3118 curated runs (Paul A001 ground truth).
-# Counter-intuitive but physiologically correct: SHORTER distances need
-# HIGHER thresholds because tempo/interval sessions routinely push HR to
-# 90-93% LTHR at 5K/10K distance. Nobody sustains 90%+ for a 3-hour
-# training run at marathon distance.
-#
-# These thresholds are for HR-only classification (no name keywords).
-# With name keywords, the classifier can be more aggressive.
-RACE_HR_THRESHOLDS = {
-    "3K":       {"min_hr_pct": 0.95},   # Very high — only races push here for 3K
-    "5K":       {"min_hr_pct": 0.925},   # F1=0.948, catches 96% of races
-    "10K":      {"min_hr_pct": 0.955},   # F1=0.892, catches 97% — strict because many tempos
-    "10M":      {"min_hr_pct": 0.93},    # Few samples; interpolated between 10K and HM
-    "HM":       {"min_hr_pct": 0.90},    # F1=0.974, catches 100% — training rarely this high
-    "30K":      {"min_hr_pct": 0.895},   # F1=0.889, catches 100%
-    "Marathon":  {"min_hr_pct": 0.85},    # Very permissive — nobody trains at mara HR for 3h+
+# Default race HR thresholds as %LTHR. Loaded from athlete.yml if present,
+# otherwise these defaults apply. Athletes should tune to their own data.
+# Named races (keyword/override match) get threshold - 5%.
+DEFAULT_RACE_HR_THRESHOLDS = {
+    "3K":   1.01,   # Near max — first lap drag on short races
+    "5K":   1.00,   # First km drags avg down from 180+ effort
+    "10K":  1.00,   # Sustained near LTHR
+    "10M":  0.98,   # Interpolated
+    "HM":   0.97,   # ~172 bpm for LTHR 178
+    "30K":  0.94,   # Interpolated
+    "Marathon": 0.93,  # ~165 bpm for LTHR 178
 }
 
 
 def load_athlete_config(yml_path: str) -> dict:
-    """Load LTHR, max_hr, and timezone from athlete.yml."""
+    """Load LTHR, max_hr, timezone, and race HR thresholds from athlete.yml."""
     try:
         import yaml
         with open(yml_path) as f:
             cfg = yaml.safe_load(f)
-        return {
+        result = {
             "lthr": cfg["athlete"]["lthr"],
             "max_hr": cfg["athlete"]["max_hr"],
             "timezone": cfg["athlete"].get("timezone", "UTC"),
         }
+        # Race HR thresholds: merge athlete overrides with defaults
+        athlete_thresholds = cfg["athlete"].get("race_hr_thresholds_pct", {})
+        merged = dict(DEFAULT_RACE_HR_THRESHOLDS)
+        merged.update(athlete_thresholds)
+        result["race_hr_thresholds"] = merged
+        return result
     except Exception as e:
         print(f"Warning: Could not read {yml_path}: {e}")
-        return {}
+        return {"race_hr_thresholds": dict(DEFAULT_RACE_HR_THRESHOLDS)}
 
 
 def detect_surface(name: str) -> str:
@@ -174,12 +175,18 @@ def is_parkrun(name: str, date_val, dist_km: float, start_hour: float = None) ->
 
 def classify_run(name: str, avg_hr: float, lthr: float, max_hr: float,
                  distance_km: float, duration_min: float,
-                 race_type: str) -> tuple:
+                 race_type: str,
+                 race_hr_thresholds: dict = None) -> tuple:
     """Classify a single candidate as race/training/uncertain.
     
     Primary signal: HR intensity vs distance-specific threshold.
     Secondary signal: activity name keywords.
+    
+    race_hr_thresholds: dict of {distance_label: pct_lthr} from athlete.yml.
     """
+    if race_hr_thresholds is None:
+        race_hr_thresholds = DEFAULT_RACE_HR_THRESHOLDS
+    
     hr_pct = avg_hr / lthr if lthr > 0 and avg_hr > 0 else 0
     
     has_race_kw = bool(RACE_KEYWORDS.search(name))
@@ -191,10 +198,9 @@ def classify_run(name: str, avg_hr: float, lthr: float, max_hr: float,
         if not NON_PARKRUN_RACE_KW.search(name):
             has_race_kw = False  # Only "parkrun" matched — not a race at this distance
     
-    hr_thresh = RACE_HR_THRESHOLDS.get(race_type, {"min_hr_pct": 0.925})
-    min_hr = hr_thresh["min_hr_pct"]
+    min_hr = race_hr_thresholds.get(race_type, 1.00)
     # Named races get a lower HR bar (name is strong evidence)
-    named_hr = min_hr - 0.05  # e.g. 5K: 87.5% with name vs 92.5% without
+    named_hr = min_hr - 0.05
     
     # ── Decision tree ──
     
@@ -218,11 +224,16 @@ def classify_run(name: str, avg_hr: float, lthr: float, max_hr: float,
     
     # 4. Both race + anti keywords → check context
     if has_race_kw and has_anti_kw:
+        # Decisive race keywords override any anti-keyword (e.g. FKS championship)
+        decisive_race = re.search(r'championship|mästerskap', name, re.I)
+        if decisive_race and hr_pct >= min_hr:
+            return ('race', 'high', f'Decisive race keyword: "{decisive_race.group()}" + HR {hr_pct*100:.0f}%LTHR')
+        # Decisive anti-keywords override race keywords
         decisive_anti = re.search(
             r'sandwich|calibrat|shakeout|pre.?match|preamble|'
             r'\btempo\b|\bsession\b|\binterval|FK Studenterna|FKS\b|'
             r'\bWU\b.*\bCD\b|\bCD\b.*\bWU\b|warm.?up.*cool.?down|'
-            r'\bstreaks?\b|\bprep\b',
+            r'\bstreaks?\b|\bprep\b|buggy',
             name, re.I)
         if decisive_anti:
             return ('training', 'high', f'Decisive training keyword: "{decisive_anti.group()}"')
@@ -288,7 +299,8 @@ def detect_candidates_from_master(master_df: pd.DataFrame, lthr: float,
 def enrich_and_classify(master_path: str, overrides_path: str,
                         lthr: float, max_hr: float,
                         from_master: bool = False,
-                        timezone: str = "UTC") -> str:
+                        timezone: str = "UTC",
+                        race_hr_thresholds: dict = None) -> str:
     """Main function: detect, classify, enrich, and write overrides."""
     print(f"Loading Master: {master_path}")
     master = pd.read_excel(master_path)
@@ -371,7 +383,8 @@ def enrich_and_classify(master_path: str, overrides_path: str,
         enriched_cols['hr_pct_lthr'].append(round(hr / lthr * 100, 0) if hr and lthr else None)
         enriched_cols['duration_min'].append(round(duration, 1) if duration else None)
         
-        verdict, conf, reason = classify_run(name, hr, lthr, max_hr, dist, duration, race_type)
+        verdict, conf, reason = classify_run(name, hr, lthr, max_hr, dist, duration, race_type,
+                                               race_hr_thresholds=race_hr_thresholds)
         
         enriched_cols['verdict'].append(f"{verdict} ({conf})")
         enriched_cols['confidence'].append(conf)
@@ -395,7 +408,9 @@ def enrich_and_classify(master_path: str, overrides_path: str,
         elif 'race (high)' in v:
             ov.at[i, 'race_flag'] = 1
         elif 'race (low)' in v:
-            ov.at[i, 'race_flag'] = 1
+            # Race keyword present but HR below race threshold → didn't race it
+            ov.at[i, 'race_flag'] = 0
+            ov.at[i, 'notes'] = f"REVIEW: {row['reason']}"
         elif 'race (medium)' in v:
             ov.at[i, 'race_flag'] = 1
             if 'REVIEW' in row.get('reason', ''):
@@ -405,8 +420,9 @@ def enrich_and_classify(master_path: str, overrides_path: str,
             ov.at[i, 'notes'] = f"REVIEW: {row['reason']}"
     
     # ── Detect parkruns ──
-    # Parkruns at ≤5.1km are always races (even buggy, easy, or club championship ones).
-    # Parkrun name in longer runs (sandwiches) is handled by the 5.1km cap.
+    # parkrun=1 marks the event (always set if it's a parkrun).
+    # race_flag is set independently by the HR-based classification above.
+    # A run can be parkrun=1, race_flag=0 (jogged/buggy parkrun).
     parkrun_count = 0
     for i, row in ov.iterrows():
         fname = row['file']
@@ -419,7 +435,7 @@ def enrich_and_classify(master_path: str, overrides_path: str,
             start_hour = date_val.hour + date_val.minute / 60
         if is_parkrun(name, date_val, dist, start_hour):
             ov.at[i, 'parkrun'] = 1
-            ov.at[i, 'race_flag'] = 1
+            # race_flag already set by classify_run — don't override
             parkrun_count += 1
     
     # ── Detect surface from activity name ──
@@ -598,6 +614,7 @@ def main():
     lthr = args.lthr
     max_hr = args.max_hr
     timezone = "UTC"
+    race_hr_thresholds = None
     
     if args.athlete_yml and (lthr is None or max_hr is None):
         cfg = load_athlete_config(args.athlete_yml)
@@ -606,6 +623,7 @@ def main():
         if max_hr is None:
             max_hr = cfg.get("max_hr", 185)
         timezone = cfg.get("timezone", "UTC")
+        race_hr_thresholds = cfg.get("race_hr_thresholds")
     
     if lthr is None:
         lthr = 160
@@ -615,9 +633,14 @@ def main():
         print(f"Warning: using default max_hr={max_hr}")
     
     print(f"HR thresholds: LTHR={lthr}, max HR={max_hr}")
+    if race_hr_thresholds:
+        print(f"Race HR thresholds (from athlete.yml): { {k: f'{v:.0%}' for k,v in race_hr_thresholds.items()} }")
+    else:
+        print(f"Race HR thresholds: defaults")
     
     enrich_and_classify(args.master, args.overrides, lthr, max_hr,
-                        from_master=args.from_master, timezone=timezone)
+                        from_master=args.from_master, timezone=timezone,
+                        race_hr_thresholds=race_hr_thresholds)
 
 
 if __name__ == "__main__":
