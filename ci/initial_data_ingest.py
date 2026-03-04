@@ -5,6 +5,9 @@ Called during INITIAL pipeline mode. Finds any zip in the athlete's data/ folder
 on Dropbox, downloads it, detects whether it's a Strava or Garmin export, and
 produces fits.zip + activities.csv ready for rebuild_from_fit_zip.py.
 
+FIT files are renamed to YYYY-MM-DD_HH-MM-SS.FIT (matching intervals.icu naming)
+to prevent duplicates when intervals.icu later fetches the same runs.
+
 Usage:
     python ci/initial_data_ingest.py \
         --athlete-dir athletes/A005 \
@@ -13,13 +16,54 @@ Usage:
 """
 
 import argparse
+import io
 import os
 import sys
 import zipfile
+from datetime import timezone
 
 # Add ci/ to path for dropbox_sync imports
 sys.path.insert(0, os.path.join(os.path.dirname(__file__)))
 from dropbox_sync import get_token, dropbox_list_folder, dropbox_download
+
+
+def fit_start_timestamp(fit_bytes: bytes, tz_str: str = "UTC") -> str:
+    """Read start_time from FIT file bytes, return 'YYYY-MM-DD_HH-MM-SS' in local tz.
+
+    Returns None if timestamp cannot be read.
+    """
+    from fitparse import FitFile
+    from datetime import datetime
+    try:
+        import pytz
+        local_tz = pytz.timezone(tz_str)
+    except ImportError:
+        from zoneinfo import ZoneInfo
+        local_tz = ZoneInfo(tz_str)
+
+    try:
+        fit = FitFile(io.BytesIO(fit_bytes))
+        for msg in fit.get_messages("session"):
+            start = msg.get_value("start_time")
+            if start is not None:
+                if isinstance(start, datetime):
+                    if start.tzinfo is None:
+                        start = start.replace(tzinfo=timezone.utc)
+                    local_dt = start.astimezone(local_tz)
+                    return local_dt.strftime("%Y-%m-%d_%H-%M-%S")
+        # Fallback: try first record timestamp
+        fit = FitFile(io.BytesIO(fit_bytes))
+        for msg in fit.get_messages("record"):
+            ts = msg.get_value("timestamp")
+            if ts is not None:
+                if isinstance(ts, datetime):
+                    if ts.tzinfo is None:
+                        ts = ts.replace(tzinfo=timezone.utc)
+                    local_dt = ts.astimezone(local_tz)
+                    return local_dt.strftime("%Y-%m-%d_%H-%M-%S")
+    except Exception:
+        pass
+    return None
 
 
 def main():
@@ -121,12 +165,31 @@ def main():
 
     else:
         # Garmin or raw FIT export — extract FIT files into fits.zip
-        print(f"  Extracting {len(fit_files)} FIT files...")
+        # Rename to YYYY-MM-DD_HH-MM-SS.FIT to match intervals.icu naming
+        print(f"  Extracting and renaming {len(fit_files)} FIT files...")
+        renamed = 0
+        seen_names = set()
         with zipfile.ZipFile(local_zip, "r") as zin:
             with zipfile.ZipFile(fits_zip_path, "w", zipfile.ZIP_DEFLATED) as zout:
                 for fit in fit_files:
-                    zout.writestr(os.path.basename(fit), zin.read(fit))
-        print(f"  ✓ fits.zip ready ({len(fit_files)} files)")
+                    data = zin.read(fit)
+                    ts_name = fit_start_timestamp(data, args.tz)
+                    if ts_name:
+                        new_name = f"{ts_name}.FIT"
+                        # Handle rare same-second starts (e.g. multisport)
+                        if new_name in seen_names:
+                            for suffix in range(2, 10):
+                                candidate = f"{ts_name}_{suffix}.FIT"
+                                if candidate not in seen_names:
+                                    new_name = candidate
+                                    break
+                        seen_names.add(new_name)
+                        renamed += 1
+                    else:
+                        new_name = os.path.basename(fit)
+                        seen_names.add(new_name)
+                    zout.writestr(new_name, data)
+        print(f"  ✓ fits.zip ready ({len(fit_files)} files, {renamed} renamed)")
 
         # Create empty activities.csv if needed
         if not os.path.isfile(activities_csv):

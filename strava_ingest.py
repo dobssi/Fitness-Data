@@ -43,6 +43,44 @@ import numpy as np
 import pandas as pd
 
 
+def fit_start_timestamp(fit_path: str, tz_str: str = "UTC") -> str:
+    """Read start_time from a FIT file on disk, return 'YYYY-MM-DD_HH-MM-SS' in local tz.
+
+    Returns None if timestamp cannot be read.
+    """
+    from fitparse import FitFile
+    try:
+        import pytz
+        local_tz = pytz.timezone(tz_str)
+    except ImportError:
+        from zoneinfo import ZoneInfo
+        local_tz = ZoneInfo(tz_str)
+
+    try:
+        fit = FitFile(fit_path)
+        for msg in fit.get_messages("session"):
+            start = msg.get_value("start_time")
+            if start is not None:
+                if isinstance(start, datetime):
+                    if start.tzinfo is None:
+                        start = start.replace(tzinfo=timezone.utc)
+                    local_dt = start.astimezone(local_tz)
+                    return local_dt.strftime("%Y-%m-%d_%H-%M-%S")
+        # Fallback: first record timestamp
+        fit = FitFile(fit_path)
+        for msg in fit.get_messages("record"):
+            ts = msg.get_value("timestamp")
+            if ts is not None:
+                if isinstance(ts, datetime):
+                    if ts.tzinfo is None:
+                        ts = ts.replace(tzinfo=timezone.utc)
+                    local_dt = ts.astimezone(local_tz)
+                    return local_dt.strftime("%Y-%m-%d_%H-%M-%S")
+    except Exception:
+        pass
+    return None
+
+
 # GPX namespace
 GPX_NS = {
     'gpx': 'http://www.topografix.com/GPX/1/1',
@@ -955,15 +993,32 @@ def main():
         print(f"  GPX: {n_gpx_ok}/{len(export['gpx_files'])} processed successfully")
         print(f"  TCX: {n_tcx_ok}/{len(export['tcx_files'])} processed successfully")
     
-    # Step 5: Create consolidated FIT zip
-    print(f"\n=== Step 4: Build output FIT zip ===")
+    # Step 5: Create consolidated FIT zip (renamed to YYYY-MM-DD_HH-MM-SS.FIT)
+    print(f"\n=== Step 4: Build output FIT zip (with timestamp rename) ===")
     fits_zip_path = os.path.join(args.out_dir, 'fits.zip')
     n_fit = 0
+    n_renamed = 0
+    seen_names = set()
     with zipfile.ZipFile(fits_zip_path, 'w', zipfile.ZIP_DEFLATED) as zout:
         for fit_path in export['fit_files']:
-            zout.write(fit_path, os.path.basename(fit_path))
+            ts_name = fit_start_timestamp(fit_path, args.tz)
+            if ts_name:
+                new_name = f"{ts_name}.FIT"
+                # Handle rare same-second starts (e.g. multisport)
+                if new_name in seen_names:
+                    for suffix in range(2, 10):
+                        candidate = f"{ts_name}_{suffix}.FIT"
+                        if candidate not in seen_names:
+                            new_name = candidate
+                            break
+                seen_names.add(new_name)
+                n_renamed += 1
+            else:
+                new_name = os.path.basename(fit_path)
+                seen_names.add(new_name)
+            zout.write(fit_path, new_name)
             n_fit += 1
-    print(f"  {n_fit} FIT files → {fits_zip_path}")
+    print(f"  {n_fit} FIT files → {fits_zip_path} ({n_renamed} renamed)")
     
     # Step 6: Save GPX/TCX summaries if any
     if gpx_summaries:
