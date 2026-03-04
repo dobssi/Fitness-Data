@@ -1342,7 +1342,8 @@ def get_race_history_data(df, ctl_atl_lookup, zone_data=None):
                     grd_arr = data['grade']
                     grd_safe = np.where(np.isnan(grd_arr), 0, grd_arr)
                     gap_speed = compute_gap_for_run(spd_arr, grd_safe)
-                    gap_pace = np.where(gap_speed > 0.5, 1000.0 / gap_speed, np.nan)
+                    with np.errstate(divide='ignore', invalid='ignore'):
+                        gap_pace = np.where(gap_speed > 0.5, 1000.0 / gap_speed, np.nan)
                     gap_s = pd.Series(gap_pace).rolling(30, min_periods=1).mean().values
                     for v in gap_s:
                         if np.isnan(v) or v <= 0:
