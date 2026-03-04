@@ -3785,30 +3785,30 @@ def _generate_race_history_html(race_history_data):
                 <div class="rh-date">${{r.date_display}} · ${{r.dist_km}}km (${{r.dist_cat}})</div>
             </div>
             <div class="rh-grid">
-                <div class="rh-metric"><div class="rh-val" style="color:var(--accent)">${{r.time}}</div><div class="rh-label">Time</div><div class="rh-sub">${{r.pace}}/km</div></div>
+                <div class="rh-metric"><div class="rh-val" style="color:var(--accent)">${{r.time}}</div><div class="rh-label">Time</div></div>
+                <div class="rh-metric"><div class="rh-val">${{r.pace}}</div><div class="rh-label">/km</div></div>
                 <div class="rh-metric"><div class="rh-val">${{rhFmtVal(r.hr)}}</div><div class="rh-label">Avg HR</div></div>
                 <div class="rh-metric"><div class="rh-val">${{rhFmtVal(r.nag,'%')}}</div><div class="rh-label">nAG</div><div class="rh-sub">${{r.raw_ag?'raw '+r.raw_ag+'%':''}}</div></div>
+            </div>
+            <div class="rh-divider"></div>
+            <div class="rh-grid">
+                <div class="rh-metric"><div class="rh-val">${{rhFmtVal(r.ctl)}}</div><div class="rh-label">CTL</div></div>
+                <div class="rh-metric"><div class="rh-val">${{rhFmtVal(r.atl)}}</div><div class="rh-label">ATL</div></div>
+                <div class="rh-metric"><div class="rh-val" style="color:${{tsbCol}}">${{rhFmtTSB(r.tsb)}}</div><div class="rh-label">TSB</div></div>
                 <div class="rh-metric"><div class="rh-val">${{rhFmtVal(r.tss)}}</div><div class="rh-label">TSS</div></div>
             </div>
             <div class="rh-divider"></div>
             <div class="rh-grid">
-                <div class="rh-metric"><div class="rh-val" style="color:${{tsbCol}}">${{rhFmtTSB(r.tsb)}}</div><div class="rh-label">TSB</div></div>
-                <div class="rh-metric"><div class="rh-val">${{rhFmtVal(r.ctl)}}</div><div class="rh-label">CTL</div></div>
                 <div class="rh-metric"><div class="rh-val">${{rflVal!==null?rflVal+'%':'-'}}</div><div class="rh-label">RFL</div></div>
-                <div class="rh-metric"><div class="rh-val">${{rhFmtVal(r.atl)}}</div><div class="rh-label">ATL</div></div>
-            </div>
-            <div class="rh-divider"></div>
-            <div class="rh-grid">
-                <div class="rh-metric"><div class="rh-val rh-sm">${{r.e14}}<span style="font-size:0.7rem;color:var(--text-dim)">min</span></div><div class="rh-label">14d at effort</div></div>
-                <div class="rh-metric"><div class="rh-val rh-sm">${{r.e42}}<span style="font-size:0.7rem;color:var(--text-dim)">min</span></div><div class="rh-label">42d at effort</div></div>
-                <div class="rh-metric"><div class="rh-val rh-sm">${{r.lr_total_14}}<span style="font-size:0.7rem;color:var(--text-dim)">min</span></div><div class="rh-label">Run ≥${{r.lr_threshold}}m 14d</div></div>
-                <div class="rh-metric"><div class="rh-val rh-sm">${{r.lr_total_42}}<span style="font-size:0.7rem;color:var(--text-dim)">min</span></div><div class="rh-label">Run ≥${{r.lr_threshold}}m 42d</div></div>
+                <div class="rh-metric"><div class="rh-val rh-sm">${{r.e14}}<span style="font-size:0.7rem;color:var(--text-dim)">min</span></div><div class="rh-label">14d effort</div></div>
+                <div class="rh-metric"><div class="rh-val rh-sm">${{r.e42}}<span style="font-size:0.7rem;color:var(--text-dim)">min</span></div><div class="rh-label">42d effort</div></div>
+                <div class="rh-metric"><div class="rh-val rh-sm">${{tempStr}}</div><div class="rh-label">${{terrStr}}</div></div>
             </div>
             <div class="rh-grid">
+                <div class="rh-metric"><div class="rh-val rh-sm">${{r.lr_total_14}}<span style="font-size:0.7rem;color:var(--text-dim)">min</span></div><div class="rh-label">≥${{r.lr_threshold}}m 14d</div></div>
+                <div class="rh-metric"><div class="rh-val rh-sm">${{r.lr_total_42}}<span style="font-size:0.7rem;color:var(--text-dim)">min</span></div><div class="rh-label">≥${{r.lr_threshold}}m 42d</div></div>
                 <div class="rh-metric"><div class="rh-val rh-sm" style="color:#fb923c">${{r.lr_z3_14}}<span style="font-size:0.7rem;color:var(--text-dim)">min</span></div><div class="rh-label">Z3+ ≥${{r.lr_threshold}}m 14d</div></div>
                 <div class="rh-metric"><div class="rh-val rh-sm" style="color:#fb923c">${{r.lr_z3_42}}<span style="font-size:0.7rem;color:var(--text-dim)">min</span></div><div class="rh-label">Z3+ ≥${{r.lr_threshold}}m 42d</div></div>
-                <div class="rh-metric"><div class="rh-val rh-sm">${{tempStr}}</div><div class="rh-label">Temp</div></div>
-                <div class="rh-metric"><div class="rh-val rh-sm">${{terrStr}}</div><div class="rh-label">Terrain</div></div>
             </div>`;
         rhUpdateDelta();
     }}
@@ -4360,8 +4360,8 @@ def generate_html(stats, rf_data, volume_data, ctl_atl_data, ctl_atl_lookup, rfl
         .rh-select {{ background: var(--surface2); color: var(--text); border: 1px solid var(--border); border-radius: 6px; padding: 5px 8px; font-size: 0.74rem; font-family: 'DM Sans'; flex: 1; cursor: pointer; }}
         .rh-select:focus {{ outline: none; border-color: var(--accent); }}
         .rh-dist-select {{ flex: 0 0 auto; min-width: 110px; }}
-        .rh-card {{ background: var(--surface2); border-radius: 8px; padding: 12px; min-height: 140px; transition: all 0.2s; }}
-        .rh-card.rh-empty {{ border: 1px dashed var(--border); background: transparent; }}
+        .rh-card {{ background: var(--surface2); border-radius: 8px; padding: 12px; transition: all 0.2s; }}
+        .rh-card.rh-empty {{ border: 1px dashed var(--border); background: transparent; min-height: 60px; display: flex; align-items: center; justify-content: center; }}
         .rh-header {{ margin-bottom: 10px; }}
         .rh-name {{ font-weight: 600; font-size: 0.85rem; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }}
         .rh-date {{ font-size: 0.7rem; color: var(--text-dim); font-family: 'JetBrains Mono'; margin-top: 2px; }}
