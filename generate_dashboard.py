@@ -1705,6 +1705,7 @@ def get_zone_data(df):
                 except Exception:
                     pass  # GAP zones not available — JS will use heuristic fallback
                 
+                run_entry['_npz_path'] = npz_path  # stored for tail-slice in race readiness
                 npz_hits += 1
             except Exception as e:
                 pass  # Fall back to no zone data
@@ -2150,7 +2151,7 @@ def _generate_zone_html(zone_data, stats=None):
     from datetime import datetime as _dt
     _today = _date_cls.today()
     _c14 = _today - _td(days=14)
-    _c28 = _today - _td(days=28)
+    _c28 = _today - _td(days=42)
     
     _spec_zones_map = {
         'Sub-5K': ['Sub-5K'],
@@ -2277,36 +2278,34 @@ def _generate_zone_html(zone_data, stats=None):
     # Long run readiness: runs with duration >= 80% of predicted finish time.
     # Count qualifying runs and total minutes in those runs (all zones).
     # Tempo volume: total minutes at Z3+ (HR >= LTHR*0.90) across ALL runs.
-    # Both metrics use 8-week (56d) and 2-week (14d) windows.
-    _c14_lr = _today - _td(days=14)
-    _c56    = _today - _td(days=56)
-    _z3_hr_floor = round(_cfg_lthr * 0.90)  # Z3 lower bound
+    # Long run readiness + tempo volume for HM+ race cards.
+    # Qualifying runs: duration >= 80% of predicted finish time (rounded to nearest 10min).
+    # Reports total mins in qualifying runs + Z3+ mins within those same runs.
+    # Windows: 14d and 56d, matching the race effort spec windows.
+    _c14_lr      = _today - _td(days=14)
+    _c42         = _today - _td(days=42)
+    _z3_hr_floor = round(_cfg_lthr * 0.90)  # Z3 lower bound (LTHR * 0.90)
 
-    # Build predicted finish time (seconds) per planned race index
-    # We'll compute this per-race in the loop below, but precompute here
-    # so we can reference it. Uses same logic as race card time (t).
-    _lr_values    = {}   # race_idx -> (count_8w, mins_8w, count_2w, mins_2w)
-    _tempo_values = {}   # race_idx -> (mins_8w, mins_2w)
+    # _lr_data[race_idx] = dict with keys:
+    #   threshold_label (int, nearest 10min), total_14, total_56, z3_14, z3_56
+    # None if race is past or < 15km.
+    _lr_data = {}
 
     for _lr_idx, _lr_race in enumerate(PLANNED_RACES_DASH):
         try:
             _lr_race_dt = _dt.strptime(_lr_race['date'], '%Y-%m-%d').date()
             if _lr_race_dt < _today:
-                _lr_values[_lr_idx]    = (0, 0, 0, 0)
-                _tempo_values[_lr_idx] = (0, 0)
+                _lr_data[_lr_idx] = None
                 continue
         except (ValueError, KeyError):
             pass
 
-        # Only meaningful for HM distance and longer (>= 15km)
-        _lr_dist_km_check = _lr_race.get('distance_km', 0)
-        if _lr_dist_km_check < 15.0:
-            _lr_values[_lr_idx]    = (0, 0, 0, 0)
-            _tempo_values[_lr_idx] = (0, 0)
+        if _lr_race.get('distance_km', 0) < 15.0:
+            _lr_data[_lr_idx] = None
             continue
 
-        # Predicted finish time for this race (seconds) — same logic as card
-        _lr_dist_km  = _lr_race.get('distance_km', 5.0)
+        # Predicted finish time — same logic as race card
+        _lr_dist_km  = _lr_race.get('distance_km', 21.097)
         _lr_surface  = _lr_race.get('surface', 'road')
         _lr_road_fac = _road_cp_factor(_lr_dist_km)
         _lr_sf       = _surface_factors.get(_lr_surface, _surface_factors['road'])
@@ -2314,58 +2313,75 @@ def _generate_zone_html(zone_data, stats=None):
         _lr_re       = re_p90 * _lr_sf['re_mult']
         _lr_pw       = round(cp * _lr_factor)
         _lr_dist_m   = _lr_dist_km * 1000
-
         _lr_dk       = _lr_race.get('distance_key', 'HM')
         _lr_stepb_key_map = {'5K': '5k_raw', '10K': '10k_raw', 'HM': 'hm_raw', 'Mara': 'marathon_raw'}
         _lr_rp       = stats.get('race_predictions', {}) if stats else {}
         if _cfg_power_mode in ('gap', 'sim'):
             _lr_mode_preds = _lr_rp.get(f'_mode_{_cfg_power_mode}', {})
-            _lr_pred_s     = _lr_mode_preds.get(_lr_stepb_key_map.get(_lr_dk, ''), 0) if _lr_surface == 'road' else 0
+            _lr_pred_s = _lr_mode_preds.get(_lr_stepb_key_map.get(_lr_dk, ''), 0) if _lr_surface == 'road' else 0
         else:
-            _lr_pred_s     = _lr_rp.get(_lr_stepb_key_map.get(_lr_dk, ''), 0) if _lr_surface == 'road' else 0
+            _lr_pred_s = _lr_rp.get(_lr_stepb_key_map.get(_lr_dk, ''), 0) if _lr_surface == 'road' else 0
         if not (_lr_pred_s and _lr_pred_s > 0):
             _lr_speed  = (_lr_pw / ATHLETE_MASS_KG_DASH) * _lr_re
             _lr_pred_s = round(_lr_dist_m / _lr_speed) if _lr_speed > 0 else 0
 
-        _lr_threshold_s   = _lr_pred_s * 0.80  # 80% of predicted finish time
-        _lr_threshold_min = _lr_threshold_s / 60.0
+        _lr_threshold_min   = (_lr_pred_s * 0.80) / 60.0
+        _lr_threshold_label = round(_lr_threshold_min / 10) * 10  # nearest 10min
 
-        lr_count_8w = 0; lr_mins_8w = 0.0
-        lr_count_2w = 0; lr_mins_2w = 0.0
-        tempo_8w    = 0.0; tempo_2w = 0.0
+        total_14 = 0.0; total_42 = 0.0
+        z3_14    = 0.0; z3_42    = 0.0
+        _thr_s   = _lr_threshold_min * 60.0  # threshold in seconds for NPZ slicing
 
         for _r in _runs_for_spec:
             _rd = _dt.strptime(_r['date'], '%Y-%m-%d').date()
-            if _rd < _c56:
+            if _rd < _c42:
                 continue
             _dur = _r.get('duration_min', 0) or 0
-            if _dur <= 0:
-                continue
-            _in_2w = (_rd >= _c14_lr)
+            if _dur < _lr_threshold_min:
+                continue  # too short — not a qualifying long run
 
-            # Long run: does this run meet the 80% duration threshold?
-            if _lr_threshold_min > 0 and _dur >= _lr_threshold_min:
-                lr_mins_8w += _dur
-                lr_count_8w += 1
-                if _in_2w:
-                    lr_mins_2w += _dur
-                    lr_count_2w += 1
+            # Minutes BEYOND the threshold only (not total run duration)
+            _tail_min = _dur - _lr_threshold_min
 
-            # Tempo: minutes at Z3+ — use NPZ hz data if available, else hr fallback
+            # Z3+ mins within the tail only
             _hz = _r.get('hz')
-            if _hz:
-                _tempo_mins = _hz.get('Z3', 0) + _hz.get('Z4', 0) + _hz.get('Z5', 0)
+            _npz_path = _r.get('_npz_path')  # populated if NPZ was loaded
+            if _hz and _npz_path:
+                # Slice HR array from threshold_s onwards for accurate tail Z3
+                try:
+                    import numpy as _np2
+                    _npz_data2 = _np2.load(_npz_path, allow_pickle=True)
+                    _hr_full   = _npz_data2['hr_bpm']
+                    _thr_idx   = min(int(_thr_s), len(_hr_full) - 1)
+                    _hr_tail   = _hr_full[_thr_idx:]
+                    _z3_secs   = float(_np2.sum(_hr_tail >= _z3_hr_floor))
+                    _z3_mins   = _z3_secs / 60.0
+                except Exception:
+                    # Fallback: proportional estimate from full-run Z3 mins
+                    _z3_full = _hz.get('Z3', 0) + _hz.get('Z4', 0) + _hz.get('Z5', 0)
+                    _z3_mins = _z3_full * (_tail_min / _dur) if _dur > 0 else 0
+            elif _hz:
+                # Have summary zone data but no NPZ path — proportional estimate
+                _z3_full = _hz.get('Z3', 0) + _hz.get('Z4', 0) + _hz.get('Z5', 0)
+                _z3_mins = _z3_full * (_tail_min / _dur) if _dur > 0 else 0
             else:
-                # Fallback: estimate from avg HR — crude but better than nothing
-                _avg_hr = _r.get('avg_hr', 0) or 0
-                _tempo_mins = _dur if _avg_hr >= _z3_hr_floor else 0
+                # No zone data — avg HR proxy, proportional
+                _avg_hr  = _r.get('avg_hr', 0) or 0
+                _z3_full = _dur if _avg_hr >= _z3_hr_floor else 0
+                _z3_mins = _z3_full * (_tail_min / _dur) if _dur > 0 else 0
 
-            tempo_8w += _tempo_mins
-            if _in_2w:
-                tempo_2w += _tempo_mins
-
-        _lr_values[_lr_idx]    = (lr_count_8w, round(lr_mins_8w), lr_count_2w, round(lr_mins_2w))
-        _tempo_values[_lr_idx] = (round(tempo_8w), round(tempo_2w))
+            total_42 += _tail_min
+            z3_42    += _z3_mins
+            if _rd >= _c14_lr:
+                total_14 += _tail_min
+                z3_14    += _z3_mins
+        _lr_data[_lr_idx] = {
+            'threshold_label': int(_lr_threshold_label),
+            'total_14': round(total_14),
+            'total_42': round(total_42),
+            'z3_14':    round(z3_14),
+            'z3_42':    round(z3_42),
+        }
 
     # ── Uses module-level _solve_taper, _RWP_TSB_TARGETS ──
     
@@ -2452,20 +2468,28 @@ def _generate_zone_html(zone_data, stats=None):
         s_label = _surface_labels.get(surface, '')
         
         # Build training specificity HTML (HM+ races only)
-        if dist_km >= 15.0:
-            _lr_c8, _lr_m8, _lr_c2, _lr_m2 = _lr_values.get(race_idx, (0, 0, 0, 0))
-            _tp_8, _tp_2 = _tempo_values.get(race_idx, (0, 0))
+        # Build training specificity HTML (HM+ races only)
+        _lrd = _lr_data.get(race_idx)
+        if dist_km >= 15.0 and _lrd:
+            _thr  = _lrd['threshold_label']
+            _t14  = _lrd['total_14'];  _t42  = _lrd['total_42']
+            _z14  = _lrd['z3_14'];     _z42  = _lrd['z3_42']
             _specificity_html = (
-                '<div style="grid-column:1/-1;font-size:0.68rem;color:var(--text-dim);margin-bottom:2px;'
-                'padding-top:8px;border-top:1px solid var(--border)">TRAINING SPECIFICITY</div>'
-                f'<div><div class="rv" style="color:#a78bfa">{_lr_c8}<span style="font-size:0.75rem;color:var(--text-dim)"> runs</span></div>'
-                f'<div class="rl">Long runs 8w</div><div class="rx" style="color:var(--text-dim)">{_lr_m8}min total</div></div>'
-                f'<div><div class="rv" style="color:#a78bfa">{_lr_c2}<span style="font-size:0.75rem;color:var(--text-dim)"> runs</span></div>'
-                f'<div class="rl">Long runs 2w</div><div class="rx" style="color:var(--text-dim)">{_lr_m2}min total</div></div>'
-                f'<div><div class="rv" style="color:#fb923c">{_tp_8}<span style="font-size:0.75rem;color:var(--text-dim)">min</span></div>'
-                f'<div class="rl">Tempo Z3+ 8w</div></div>'
-                f'<div><div class="rv" style="color:#fb923c">{_tp_2}<span style="font-size:0.75rem;color:var(--text-dim)">min</span></div>'
-                f'<div class="rl">Tempo Z3+ 2w</div></div>'
+                f'<div style="grid-column:1/-1;font-size:0.68rem;color:var(--text-dim);'
+                f'margin-top:8px;padding-top:8px;border-top:1px solid var(--border)">'
+                f'Runs ≥ {_thr} min</div>'
+                f'<div><div class="rv" style="color:#a78bfa">{_t14}'
+                f'<span style="font-size:0.75rem;color:var(--text-dim)">min</span></div>'
+                f'<div class="rl">Long run 14d</div></div>'
+                f'<div><div class="rv" style="color:#a78bfa">{_t56}'
+                f'<span style="font-size:0.75rem;color:var(--text-dim)">min</span></div>'
+                f'<div class="rl">Long run 42d</div></div>'
+                f'<div><div class="rv" style="color:#fb923c">{_z14}'
+                f'<span style="font-size:0.75rem;color:var(--text-dim)">min</span></div>'
+                f'<div class="rl">Z3+ in long 14d</div></div>'
+                f'<div><div class="rv" style="color:#fb923c">{_z56}'
+                f'<span style="font-size:0.75rem;color:var(--text-dim)">min</span></div>'
+                f'<div class="rl">Z3+ in long 42d</div></div>'
             )
         else:
             _specificity_html = ''
@@ -2480,7 +2504,7 @@ def _generate_zone_html(zone_data, stats=None):
                 <div class="pace-target" style="display:none"><div class="rv" style="color:#4ade80" id="race-pace-{race_idx}">{pace_str}</div><div class="rl">Target pace</div></div>
                 <div><div class="rv" id="race-pred-{race_idx}">{t_str}</div><div class="rl">Predicted</div><div class="rx power-only">{pace_str}</div></div>
                 <div><div class="rv" id="spec14_{race_idx}">{_spec_values.get(race_idx, (0, 0))[0]}<span style="font-size:0.75rem;color:var(--text-dim)">min</span></div><div class="rl">14d at effort</div></div>
-                <div><div class="rv" id="spec28_{race_idx}">{_spec_values.get(race_idx, (0, 0))[1]}<span style="font-size:0.75rem;color:var(--text-dim)">min</span></div><div class="rl">28d at effort</div></div>
+                <div><div class="rv" id="spec28_{race_idx}">{_spec_values.get(race_idx, (0, 0))[1]}<span style="font-size:0.75rem;color:var(--text-dim)">min</span></div><div class="rl">42d at effort</div></div>
                 {_specificity_html}
             </div>
             <div style="margin-top:6px">{taper_html}</div>\n'''
@@ -2743,7 +2767,7 @@ def _generate_zone_html(zone_data, stats=None):
       const result={{}};zones.forEach(z=>result[z.id]=0);const mins=r.duration_min||0,v=valFor(r,mode),zid=assignZ(v,zones,false);if(result[zid]!==undefined)result[zid]=mins;return result;
     }}
     const SPEC_ZONES={{'Sub-5K':['Sub-5K'],'5K':['Sub-5K','5K'],'10K':['10K'],'HM':['HM'],'Mara':['Mara']}};
-    function calcSpecificity(){{const today=new Date();const c14=new Date(today);c14.setDate(c14.getDate()-14);const c28=new Date(today);c28.setDate(c28.getDate()-28);const useGAP=(typeof currentMode!=='undefined'&&currentMode==='gap');const zones=useGAP?RACE_PACE_Z:RACE_PW_Z;const modeKey='race';PLANNED_RACES.forEach((tgt,idx)=>{{let m14=0,m28=0;const atOrAbove=SPEC_ZONES[tgt.distance_key]||[tgt.distance_key];ZONE_RUNS.forEach(r=>{{const d=new Date(r.date);if(d<c28)return;const est=getZoneMins(r,modeKey,zones);let mins=0;atOrAbove.forEach(k=>{{mins+=(est[k]||0);}});if(d>=c14)m14+=mins;m28+=mins;}});const e14=document.getElementById('spec14_'+idx),e28=document.getElementById('spec28_'+idx);if(e14)e14.innerHTML=Math.round(m14)+'<span style="font-size:0.75rem;color:var(--text-dim)">min</span>';if(e28)e28.innerHTML=Math.round(m28)+'<span style="font-size:0.75rem;color:var(--text-dim)">min</span>';}});}}calcSpecificity();
+    function calcSpecificity(){{const today=new Date();const c14=new Date(today);c14.setDate(c14.getDate()-14);const c28=new Date(today);c28.setDate(c28.getDate()-42);const useGAP=(typeof currentMode!=='undefined'&&currentMode==='gap');const zones=useGAP?RACE_PACE_Z:RACE_PW_Z;const modeKey='race';PLANNED_RACES.forEach((tgt,idx)=>{{let m14=0,m28=0;const atOrAbove=SPEC_ZONES[tgt.distance_key]||[tgt.distance_key];ZONE_RUNS.forEach(r=>{{const d=new Date(r.date);if(d<c28)return;const est=getZoneMins(r,modeKey,zones);let mins=0;atOrAbove.forEach(k=>{{mins+=(est[k]||0);}});if(d>=c14)m14+=mins;m28+=mins;}});const e14=document.getElementById('spec14_'+idx),e28=document.getElementById('spec28_'+idx);if(e14)e14.innerHTML=Math.round(m14)+'<span style="font-size:0.75rem;color:var(--text-dim)">min</span>';if(e28)e28.innerHTML=Math.round(m28)+'<span style="font-size:0.75rem;color:var(--text-dim)">min</span>';}});}}calcSpecificity();
     // Weekly zone bars
     function weekKey(ds){{const d=new Date(ds),day=d.getDay(),m=new Date(d);m.setDate(d.getDate()-((day+6)%7));return m.toISOString().slice(0,10);}}
     function fmtWk(s){{const d=new Date(s),tmp=new Date(d.valueOf());tmp.setDate(tmp.getDate()+3-(tmp.getDay()+6)%7);const w1=new Date(tmp.getFullYear(),0,4);const wk=1+Math.round(((tmp-w1)/864e5-3+(w1.getDay()+6)%7)/7);return'W'+String(wk).padStart(2,'0')+'/'+String(tmp.getFullYear()).slice(-2);}}
