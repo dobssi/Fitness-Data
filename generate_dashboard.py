@@ -1160,37 +1160,52 @@ def get_race_history_data(df, ctl_atl_lookup, zone_data=None):
     elapsed_col = 'elapsed_time_s' if 'elapsed_time_s' in races.columns else 'Elapsed_s'
     moving_col = 'moving_time_s' if 'moving_time_s' in races.columns else 'Moving_s'
     
-    # ── Zone boundaries (same as get_zone_data) ──
-    try:
-        from config import load_athlete_config
-        _acfg = load_athlete_config()
-        _lthr = _acfg.lthr or 178
-        _maxhr = _acfg.max_hr or 192
-    except Exception:
-        _lthr = 178
-        _maxhr = 192
+    # ── Zone boundaries ──
+    _z3_hr = _z23_hr  # Z3 floor = module-level value (LTHR × 0.90)
     
-    _z3_hr = round(_lthr * 0.90)  # Z3 floor
+    # Determine effort mode: power (Stryd) or GAP pace or HR fallback
+    _effort_mode = _cfg_power_mode  # 'stryd', 'gap', 'sim'
     
-    # Race HR zone boundaries (ascending): Other < Mara < HM < 10K < 5K < Sub-5K
-    _rhr_mara = round(_lthr * 0.84)
-    _rhr_hm   = round(_lthr * 0.87)
-    _rhr_10k  = round(_lthr * 0.92)
-    _rhr_5k   = round(_lthr * 0.95)
-    _rhr_sub5k = round(_lthr * 0.98)
-    race_hr_bounds = [0, _rhr_mara, _rhr_hm, _rhr_10k, _rhr_5k, _rhr_sub5k, 9999]
-    race_hr_names  = ['Other', 'Mara', 'HM', '10K', '5K', 'Sub-5K']
+    # Race HR zone bounds (module-level, constant across races)
+    _race_hr_bounds = [0, _rhr_mara, _rhr_hm, _rhr_10k, _rhr_5k, _rhr_sub5k, 9999]
+    _race_hr_names  = ['Other', 'Mara', 'HM', '10K', '5K', 'Sub-5K']
     
-    # Map distance category to which race zones count as "at effort"
+    # Power/pace zone bounds are computed PER RACE from race-day fitness
+    # (see _build_race_pw_bounds and _build_race_pace_bounds below)
+    
+    # Effort zones: match SPEC_ZONES from Race Readiness (specific, not cumulative)
     _effort_zones = {
         '3K':       ['Sub-5K'],
         '5K':       ['Sub-5K', '5K'],
-        '10K':      ['10K', '5K', 'Sub-5K'],
-        '10M':      ['HM', '10K', '5K', 'Sub-5K'],
-        'HM':       ['HM', '10K', '5K', 'Sub-5K'],
-        '30K':      ['Mara', 'HM', '10K', '5K', 'Sub-5K'],
-        'Marathon':  ['Mara', 'HM', '10K', '5K', 'Sub-5K'],
+        '10K':      ['10K'],
+        '10M':      ['HM'],
+        'HM':       ['HM'],
+        '30K':      ['Mara'],
+        'Marathon':  ['Mara'],
     }
+    
+    def _build_race_pw_bounds(race_cp):
+        """Build race power zone bounds from a specific CP value."""
+        m = race_cp * 0.90
+        h = race_cp * 0.95
+        t = race_cp * 1.00
+        f = race_cp * 1.05
+        return [0, round(m*0.93), round((m+h)/2), round((h+t)/2), round((t+f)/2), round(f*1.05), 9999]
+    
+    _race_pw_names = ['Other', 'Mara', 'HM', '10K', '5K', 'Sub-5K']
+    
+    def _build_race_pace_bounds(row):
+        """Build race GAP pace zone bounds from predictions on a specific row."""
+        _suffix = '_gap' if _effort_mode == 'gap' else ('_sim' if _effort_mode == 'sim' else '')
+        p5  = round(row.get(f'pred_5k_s{_suffix}', 0) / 5.0) if pd.notna(row.get(f'pred_5k_s{_suffix}')) and row.get(f'pred_5k_s{_suffix}', 0) > 0 else 240
+        p10 = round(row.get(f'pred_10k_s{_suffix}', 0) / 10.0) if pd.notna(row.get(f'pred_10k_s{_suffix}')) and row.get(f'pred_10k_s{_suffix}', 0) > 0 else 252
+        ph  = round(row.get(f'pred_hm_s{_suffix}', 0) / 21.097) if pd.notna(row.get(f'pred_hm_s{_suffix}')) and row.get(f'pred_hm_s{_suffix}', 0) > 0 else 265
+        pm  = round(row.get(f'pred_marathon_s{_suffix}', 0) / 42.195) if pd.notna(row.get(f'pred_marathon_s{_suffix}')) and row.get(f'pred_marathon_s{_suffix}', 0) > 0 else 282
+        return [0, round(p5*0.97), round((p5+p10)/2), round((p10+ph)/2), round((ph+pm)/2), round(pm*1.07), 9999]
+    
+    _race_pace_names = ['Sub-5K', '5K', '10K', 'HM', 'Mara', 'Other']
+    
+    print(f"  Race history effort mode: {_effort_mode}")
     
     # Long run threshold: fixed 60 minutes
     LR_THRESHOLD_S = 3600  # 60 min in seconds
@@ -1282,30 +1297,80 @@ def get_race_history_data(df, ctl_atl_lookup, zone_data=None):
             _tail_cache[npz_path] = (0, 0)
             return (0, 0)
     
-    def _npz_effort(npz_path, effort_zones_tuple):
-        """Count minutes at race-relevant HR zones from NPZ."""
-        cache_key = (npz_path, effort_zones_tuple)
+    def _npz_effort(npz_path, effort_zones_tuple, pw_bounds=None, pace_bounds=None, era_adj=1.0):
+        """Count minutes at race-relevant zones from NPZ.
+        Stryd mode: race power zones (pw_bounds), with era_adj applied to raw power.
+        GAP mode: race GAP pace zones (pace_bounds). Fallback: HR zones.
+        Zone bounds are per-race (derived from race-day CP / predictions).
+        """
+        # Cache key includes bounds and era_adj since they vary per race/run
+        cache_key = (npz_path, effort_zones_tuple, 
+                     tuple(pw_bounds) if pw_bounds else None,
+                     tuple(pace_bounds) if pace_bounds else None,
+                     round(era_adj, 4))
         if cache_key in _effort_cache:
             return _effort_cache[cache_key]
         try:
             data = np.load(npz_path, allow_pickle=True)
-            hr_arr = data['hr_bpm']
-            n = len(hr_arr)
+            n = len(data['hr_bpm'])
             if n < 60:
                 _effort_cache[cache_key] = 0
                 return 0
             
-            hr_s = pd.Series(hr_arr).rolling(30, min_periods=1).mean().values
-            effort_s = 0
             effort_set = set(effort_zones_tuple)
-            for v in hr_s:
-                if np.isnan(v) or v <= 0:
-                    continue
-                for i in range(len(race_hr_bounds) - 2, -1, -1):
-                    if v >= race_hr_bounds[i]:
-                        if race_hr_names[i] in effort_set:
+            effort_s = 0
+            
+            if _effort_mode not in ('gap', 'sim') and pw_bounds and 'power_w' in data:
+                # Stryd mode: use race power zones
+                # Apply era_adj to normalise raw pod power to S4 baseline
+                pw_arr = data['power_w'].copy()
+                pw_arr = np.where(np.isnan(pw_arr), 0.0, pw_arr) * era_adj
+                pw_s = pd.Series(pw_arr).rolling(30, min_periods=1).mean().values
+                for v in pw_s:
+                    if np.isnan(v) or v <= 0:
+                        continue
+                    for i in range(len(pw_bounds) - 2, -1, -1):
+                        if v >= pw_bounds[i]:
+                            if _race_pw_names[i] in effort_set:
+                                effort_s += 1
+                            break
+            elif _effort_mode == 'gap' and pace_bounds and 'speed_mps' in data and 'grade' in data:
+                # GAP mode: use race GAP pace zones
+                try:
+                    from gap_power import compute_gap_for_run
+                    spd_arr = data['speed_mps']
+                    grd_arr = data['grade']
+                    grd_safe = np.where(np.isnan(grd_arr), 0, grd_arr)
+                    gap_speed = compute_gap_for_run(spd_arr, grd_safe)
+                    gap_pace = np.where(gap_speed > 0.5, 1000.0 / gap_speed, np.nan)
+                    gap_s = pd.Series(gap_pace).rolling(30, min_periods=1).mean().values
+                    for v in gap_s:
+                        if np.isnan(v) or v <= 0:
+                            continue
+                        assigned = False
+                        for i in range(len(pace_bounds) - 1):
+                            if pace_bounds[i] <= v < pace_bounds[i + 1]:
+                                if _race_pace_names[i] in effort_set:
+                                    effort_s += 1
+                                assigned = True
+                                break
+                        if not assigned and _race_pace_names[-1] in effort_set:
                             effort_s += 1
-                        break
+                except Exception:
+                    pass  # Fall through to HR fallback
+            
+            if effort_s == 0:
+                # HR fallback (sim mode, or if power/GAP failed)
+                hr_arr = data['hr_bpm']
+                hr_s = pd.Series(hr_arr).rolling(30, min_periods=1).mean().values
+                for v in hr_s:
+                    if np.isnan(v) or v <= 0:
+                        continue
+                    for i in range(len(_race_hr_bounds) - 2, -1, -1):
+                        if v >= _race_hr_bounds[i]:
+                            if _race_hr_names[i] in effort_set:
+                                effort_s += 1
+                            break
             
             result = effort_s / 60.0
             _effort_cache[cache_key] = result
@@ -1415,6 +1480,18 @@ def get_race_history_data(df, ctl_atl_lookup, zone_data=None):
         
         effort_zone_list = _effort_zones.get(dist_cat, ['HM', '10K', '5K', 'Sub-5K'])
         
+        # Build race-day-specific zone bounds
+        # Power: CP on race day = PEAK_CP × RFL_Trend (era-adjusted, already in master)
+        _rfl_col = {'gap': 'RFL_gap_Trend', 'sim': 'RFL_sim_Trend'}.get(_effort_mode, 'RFL_Trend')
+        _race_rfl = row.get(_rfl_col)
+        if not pd.notna(_race_rfl):
+            _race_rfl = row.get('RFL_Trend', 0.90)
+        if not pd.notna(_race_rfl):
+            _race_rfl = 0.90
+        _race_cp = round(PEAK_CP_WATTS_DASH * float(_race_rfl))
+        _pw_bounds_for_race = _build_race_pw_bounds(_race_cp) if _effort_mode not in ('gap', 'sim') else None
+        _pace_bounds_for_race = _build_race_pace_bounds(row) if _effort_mode == 'gap' else None
+        
         for train_idx, train_row in df.iterrows():
             days_before = (race_date - train_row['date']).days
             if days_before <= 0 or days_before > 42:
@@ -1425,7 +1502,8 @@ def get_race_history_data(df, ctl_atl_lookup, zone_data=None):
                 continue
             
             effort_zones_tuple = tuple(effort_zone_list)
-            eff = _npz_effort(npz_path, effort_zones_tuple)
+            _train_era_adj = float(train_row.get('Era_Adj', 1.0)) if pd.notna(train_row.get('Era_Adj')) else 1.0
+            eff = _npz_effort(npz_path, effort_zones_tuple, _pw_bounds_for_race, _pace_bounds_for_race, _train_era_adj)
             tail, z3_tail = _npz_tail(npz_path)
             
             if days_before <= 14:
@@ -3774,9 +3852,9 @@ def _generate_race_history_html(race_history_data):
         RH_SEL[slot]=r;
         const card=document.getElementById('rh-card-'+slot);
         card.classList.remove('rh-empty');
-        const surfBadge=r.surface!=='road'?'<span style="font-size:0.6rem;padding:1px 5px;border-radius:3px;background:#f59e0b22;color:#f59e0b;margin-left:4px">'+r.surface+'</span>':'';
+        const surfBadge=r.surface!=='road'?'<span class="rh-surf">'+r.surface.toUpperCase()+'</span>':'';
         const tempStr=r.temp!==null?r.temp+'°C':'-';
-        const terrStr=r.terrain!==null&&r.terrain!==1.0?(r.terrain<1?'⬇ '+(((1-r.terrain)*100).toFixed(1))+'%':'⬆ '+(((r.terrain-1)*100).toFixed(1))+'%'):'flat';
+        const terrStr=r.terrain!==null&&r.terrain!==1.0?(r.terrain<1?'↓'+(((1-r.terrain)*100).toFixed(1))+'%':'↑'+(((r.terrain-1)*100).toFixed(1))+'%'):'flat';
         const tsbCol=r.tsb!==null?(r.tsb>=0?'#4ade80':'#fbbf24'):'var(--text-dim)';
         const rflVal=(typeof currentMode!=='undefined'&&currentMode==='gap'&&r.rfl_gap!==null)?r.rfl_gap:r.rfl;
         card.innerHTML=`
@@ -3784,31 +3862,32 @@ def _generate_race_history_html(race_history_data):
                 <div class="rh-name">${{r.name}}${{surfBadge}}</div>
                 <div class="rh-date">${{r.date_display}} · ${{r.dist_km}}km (${{r.dist_cat}})</div>
             </div>
-            <div class="rh-grid">
-                <div class="rh-metric"><div class="rh-val" style="color:var(--accent)">${{r.time}}</div><div class="rh-label">Time</div></div>
-                <div class="rh-metric"><div class="rh-val">${{r.pace}}</div><div class="rh-label">/km</div></div>
-                <div class="rh-metric"><div class="rh-val">${{rhFmtVal(r.hr)}}</div><div class="rh-label">Avg HR</div></div>
-                <div class="rh-metric"><div class="rh-val">${{rhFmtVal(r.nag,'%')}}</div><div class="rh-label">nAG</div><div class="rh-sub">${{r.raw_ag?'raw '+r.raw_ag+'%':''}}</div></div>
+            <div class="rh-row">
+                <div class="ws-tip rh-metric"><div class="rh-val" style="color:var(--accent)">${{r.time}}</div><div class="rh-label">Time</div><div class="tip">Elapsed finish time</div></div>
+                <div class="ws-tip rh-metric"><div class="rh-val">${{r.pace}}</div><div class="rh-label">/km</div><div class="tip">Average pace per km</div></div>
+                <div class="ws-tip rh-metric"><div class="rh-val">${{rhFmtVal(r.hr)}}</div><div class="rh-label">Avg HR</div><div class="tip">Average heart rate during race</div></div>
+                <div class="ws-tip rh-metric"><div class="rh-val">${{rhFmtVal(r.nag,'%')}}</div><div class="rh-label">nAG</div><div class="rh-sub">${{r.raw_ag?'raw '+r.raw_ag+'%':''}}</div><div class="tip">Normalised age grade (adjusted for temp, terrain, surface)</div></div>
             </div>
-            <div class="rh-divider"></div>
-            <div class="rh-grid">
-                <div class="rh-metric"><div class="rh-val">${{rhFmtVal(r.ctl)}}</div><div class="rh-label">CTL</div></div>
-                <div class="rh-metric"><div class="rh-val">${{rhFmtVal(r.atl)}}</div><div class="rh-label">ATL</div></div>
-                <div class="rh-metric"><div class="rh-val" style="color:${{tsbCol}}">${{rhFmtTSB(r.tsb)}}</div><div class="rh-label">TSB</div></div>
-                <div class="rh-metric"><div class="rh-val">${{rhFmtVal(r.tss)}}</div><div class="rh-label">TSS</div></div>
+            <div class="rh-sep"></div>
+            <div class="rh-row">
+                <div class="ws-tip rh-metric"><div class="rh-val">${{rhFmtVal(r.ctl)}}</div><div class="rh-label">CTL</div><div class="tip">Chronic training load (42-day) morning of race</div></div>
+                <div class="ws-tip rh-metric"><div class="rh-val">${{rhFmtVal(r.atl)}}</div><div class="rh-label">ATL</div><div class="tip">Acute training load (7-day) morning of race</div></div>
+                <div class="ws-tip rh-metric"><div class="rh-val" style="color:${{tsbCol}}">${{rhFmtTSB(r.tsb)}}</div><div class="rh-label">TSB</div><div class="tip">Training stress balance (CTL − ATL) morning of race</div></div>
+                <div class="ws-tip rh-metric"><div class="rh-val">${{rhFmtVal(r.tss)}}</div><div class="rh-label">TSS</div><div class="tip">Training stress score for this race</div></div>
             </div>
-            <div class="rh-divider"></div>
-            <div class="rh-grid">
-                <div class="rh-metric"><div class="rh-val">${{rflVal!==null?rflVal+'%':'-'}}</div><div class="rh-label">RFL</div></div>
-                <div class="rh-metric"><div class="rh-val rh-sm">${{r.e14}}<span style="font-size:0.7rem;color:var(--text-dim)">min</span></div><div class="rh-label">14d effort</div></div>
-                <div class="rh-metric"><div class="rh-val rh-sm">${{r.e42}}<span style="font-size:0.7rem;color:var(--text-dim)">min</span></div><div class="rh-label">42d effort</div></div>
-                <div class="rh-metric"><div class="rh-val rh-sm">${{tempStr}}</div><div class="rh-label">${{terrStr}}</div></div>
+            <div class="rh-sep"></div>
+            <div class="rh-row">
+                <div class="ws-tip rh-metric"><div class="rh-val">${{rflVal!==null?rflVal+'%':'-'}}</div><div class="rh-label">RFL</div><div class="tip">Relative fitness level on race day (shift(1) — fitness coming into the race)</div></div>
+                <div class="ws-tip rh-metric"><div class="rh-val rh-sm">${{r.e14}}<span class="rh-unit">min</span></div><div class="rh-label">Effort 14d</div><div class="tip">Minutes at ${{r.dist_cat}} race zone in 14 days before race (per-second NPZ, {_effort_mode} mode)</div></div>
+                <div class="ws-tip rh-metric"><div class="rh-val rh-sm">${{r.e42}}<span class="rh-unit">min</span></div><div class="rh-label">Effort 42d</div><div class="tip">Minutes at ${{r.dist_cat}} race zone in 42 days before race (per-second NPZ, {_effort_mode} mode)</div></div>
+                <div class="ws-tip rh-metric"><div class="rh-val rh-sm">${{tempStr}}</div><div class="rh-label">${{terrStr}}</div><div class="tip">Race day temperature · terrain adjustment factor</div></div>
             </div>
-            <div class="rh-grid">
-                <div class="rh-metric"><div class="rh-val rh-sm">${{r.lr_total_14}}<span style="font-size:0.7rem;color:var(--text-dim)">min</span></div><div class="rh-label">≥${{r.lr_threshold}}m 14d</div></div>
-                <div class="rh-metric"><div class="rh-val rh-sm">${{r.lr_total_42}}<span style="font-size:0.7rem;color:var(--text-dim)">min</span></div><div class="rh-label">≥${{r.lr_threshold}}m 42d</div></div>
-                <div class="rh-metric"><div class="rh-val rh-sm" style="color:#fb923c">${{r.lr_z3_14}}<span style="font-size:0.7rem;color:var(--text-dim)">min</span></div><div class="rh-label">Z3+ ≥${{r.lr_threshold}}m 14d</div></div>
-                <div class="rh-metric"><div class="rh-val rh-sm" style="color:#fb923c">${{r.lr_z3_42}}<span style="font-size:0.7rem;color:var(--text-dim)">min</span></div><div class="rh-label">Z3+ ≥${{r.lr_threshold}}m 42d</div></div>
+            <div class="rh-sep"></div>
+            <div class="rh-row">
+                <div class="ws-tip rh-metric"><div class="rh-val rh-sm">${{r.lr_total_14}}<span class="rh-unit">min</span></div><div class="rh-label">≥${{r.lr_threshold}}m 14d</div><div class="tip">Total running time beyond ${{r.lr_threshold}} min in last 14 days</div></div>
+                <div class="ws-tip rh-metric"><div class="rh-val rh-sm">${{r.lr_total_42}}<span class="rh-unit">min</span></div><div class="rh-label">≥${{r.lr_threshold}}m 42d</div><div class="tip">Total running time beyond ${{r.lr_threshold}} min in last 42 days</div></div>
+                <div class="ws-tip rh-metric"><div class="rh-val rh-sm" style="color:#fb923c">${{r.lr_z3_14}}<span class="rh-unit">min</span></div><div class="rh-label">Z3+ tail 14d</div><div class="tip">Time at Z3+ HR beyond ${{r.lr_threshold}} min mark in last 14 days (per-second NPZ)</div></div>
+                <div class="ws-tip rh-metric"><div class="rh-val rh-sm" style="color:#fb923c">${{r.lr_z3_42}}<span class="rh-unit">min</span></div><div class="rh-label">Z3+ tail 42d</div><div class="tip">Time at Z3+ HR beyond ${{r.lr_threshold}} min mark in last 42 days (per-second NPZ)</div></div>
             </div>`;
         rhUpdateDelta();
     }}
@@ -4360,19 +4439,20 @@ def generate_html(stats, rf_data, volume_data, ctl_atl_data, ctl_atl_lookup, rfl
         .rh-select {{ background: var(--surface2); color: var(--text); border: 1px solid var(--border); border-radius: 6px; padding: 5px 8px; font-size: 0.74rem; font-family: 'DM Sans'; flex: 1; cursor: pointer; }}
         .rh-select:focus {{ outline: none; border-color: var(--accent); }}
         .rh-dist-select {{ flex: 0 0 auto; min-width: 110px; }}
-        .rh-card {{ background: var(--surface2); border-radius: 8px; padding: 12px; transition: all 0.2s; }}
+        .rh-card {{ background: var(--surface2); border-radius: 8px; padding: 14px 16px; transition: all 0.2s; }}
         .rh-card.rh-empty {{ border: 1px dashed var(--border); background: transparent; min-height: 60px; display: flex; align-items: center; justify-content: center; }}
-        .rh-header {{ margin-bottom: 10px; }}
+        .rh-header {{ margin-bottom: 12px; }}
         .rh-name {{ font-weight: 600; font-size: 0.85rem; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }}
+        .rh-surf {{ font-size: 0.58rem; padding: 1px 5px; border-radius: 3px; background: #f59e0b22; color: #f59e0b; font-weight: 600; margin-left: 6px; vertical-align: middle; letter-spacing: 0.03em; }}
         .rh-date {{ font-size: 0.7rem; color: var(--text-dim); font-family: 'JetBrains Mono'; margin-top: 2px; }}
-        .rh-grid {{ display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; }}
-        .rh-grid-3 {{ grid-template-columns: repeat(3, 1fr); }}
-        .rh-metric {{ text-align: center; padding: 4px 0; }}
+        .rh-row {{ display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; padding: 6px 0; }}
+        .rh-sep {{ height: 1px; background: var(--border); opacity: 0.5; }}
+        .rh-metric {{ text-align: center; padding: 2px 0; position: relative; }}
         .rh-val {{ font-size: 1.05rem; font-weight: 700; font-family: 'JetBrains Mono'; }}
         .rh-val.rh-sm {{ font-size: 0.9rem; }}
+        .rh-unit {{ font-size: 0.68rem; color: var(--text-dim); margin-left: 1px; }}
         .rh-label {{ font-size: 0.65rem; color: var(--text-dim); margin-top: 1px; }}
         .rh-sub {{ font-size: 0.6rem; color: var(--text-muted, #6b7280); }}
-        .rh-divider {{ height: 1px; background: var(--border); margin: 8px 0; }}
         #rh-delta {{ background: var(--surface2); border-radius: 8px; padding: 10px 14px; }}
         .rh-delta-title {{ font-size: 0.72rem; font-weight: 600; color: var(--accent); margin-bottom: 8px; text-transform: uppercase; letter-spacing: 0.04em; }}
         .rh-delta-row {{ display: flex; justify-content: space-between; padding: 3px 0; font-size: 0.78rem; }}
