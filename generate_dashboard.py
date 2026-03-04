@@ -2272,7 +2272,101 @@ def _generate_zone_html(zone_data, stats=None):
                         m14 += contrib
                     m28 += contrib
         _spec_values[race_idx_s] = (round(m14), round(m28))
-    
+
+    # ── Long run readiness + Tempo volume (8w / 2w windows) ──
+    # Long run readiness: runs with duration >= 80% of predicted finish time.
+    # Count qualifying runs and total minutes in those runs (all zones).
+    # Tempo volume: total minutes at Z3+ (HR >= LTHR*0.90) across ALL runs.
+    # Both metrics use 8-week (56d) and 2-week (14d) windows.
+    _c14_lr = _today - _td(days=14)
+    _c56    = _today - _td(days=56)
+    _z3_hr_floor = round(_cfg_lthr * 0.90)  # Z3 lower bound
+
+    # Build predicted finish time (seconds) per planned race index
+    # We'll compute this per-race in the loop below, but precompute here
+    # so we can reference it. Uses same logic as race card time (t).
+    _lr_values    = {}   # race_idx -> (count_8w, mins_8w, count_2w, mins_2w)
+    _tempo_values = {}   # race_idx -> (mins_8w, mins_2w)
+
+    for _lr_idx, _lr_race in enumerate(PLANNED_RACES_DASH):
+        try:
+            _lr_race_dt = _dt.strptime(_lr_race['date'], '%Y-%m-%d').date()
+            if _lr_race_dt < _today:
+                _lr_values[_lr_idx]    = (0, 0, 0, 0)
+                _tempo_values[_lr_idx] = (0, 0)
+                continue
+        except (ValueError, KeyError):
+            pass
+
+        # Only meaningful for HM distance and longer (>= 15km)
+        _lr_dist_km_check = _lr_race.get('distance_km', 0)
+        if _lr_dist_km_check < 15.0:
+            _lr_values[_lr_idx]    = (0, 0, 0, 0)
+            _tempo_values[_lr_idx] = (0, 0)
+            continue
+
+        # Predicted finish time for this race (seconds) — same logic as card
+        _lr_dist_km  = _lr_race.get('distance_km', 5.0)
+        _lr_surface  = _lr_race.get('surface', 'road')
+        _lr_road_fac = _road_cp_factor(_lr_dist_km)
+        _lr_sf       = _surface_factors.get(_lr_surface, _surface_factors['road'])
+        _lr_factor   = _lr_road_fac * _lr_sf['power_mult']
+        _lr_re       = re_p90 * _lr_sf['re_mult']
+        _lr_pw       = round(cp * _lr_factor)
+        _lr_dist_m   = _lr_dist_km * 1000
+
+        _lr_dk       = _lr_race.get('distance_key', 'HM')
+        _lr_stepb_key_map = {'5K': '5k_raw', '10K': '10k_raw', 'HM': 'hm_raw', 'Mara': 'marathon_raw'}
+        _lr_rp       = stats.get('race_predictions', {}) if stats else {}
+        if _cfg_power_mode in ('gap', 'sim'):
+            _lr_mode_preds = _lr_rp.get(f'_mode_{_cfg_power_mode}', {})
+            _lr_pred_s     = _lr_mode_preds.get(_lr_stepb_key_map.get(_lr_dk, ''), 0) if _lr_surface == 'road' else 0
+        else:
+            _lr_pred_s     = _lr_rp.get(_lr_stepb_key_map.get(_lr_dk, ''), 0) if _lr_surface == 'road' else 0
+        if not (_lr_pred_s and _lr_pred_s > 0):
+            _lr_speed  = (_lr_pw / ATHLETE_MASS_KG_DASH) * _lr_re
+            _lr_pred_s = round(_lr_dist_m / _lr_speed) if _lr_speed > 0 else 0
+
+        _lr_threshold_s   = _lr_pred_s * 0.80  # 80% of predicted finish time
+        _lr_threshold_min = _lr_threshold_s / 60.0
+
+        lr_count_8w = 0; lr_mins_8w = 0.0
+        lr_count_2w = 0; lr_mins_2w = 0.0
+        tempo_8w    = 0.0; tempo_2w = 0.0
+
+        for _r in _runs_for_spec:
+            _rd = _dt.strptime(_r['date'], '%Y-%m-%d').date()
+            if _rd < _c56:
+                continue
+            _dur = _r.get('duration_min', 0) or 0
+            if _dur <= 0:
+                continue
+            _in_2w = (_rd >= _c14_lr)
+
+            # Long run: does this run meet the 80% duration threshold?
+            if _lr_threshold_min > 0 and _dur >= _lr_threshold_min:
+                lr_mins_8w += _dur
+                lr_count_8w += 1
+                if _in_2w:
+                    lr_mins_2w += _dur
+                    lr_count_2w += 1
+
+            # Tempo: minutes at Z3+ — use NPZ hz data if available, else hr fallback
+            _hz = _r.get('hz')
+            if _hz:
+                _tempo_mins = _hz.get('Z3', 0) + _hz.get('Z4', 0) + _hz.get('Z5', 0)
+            else:
+                # Fallback: estimate from avg HR — crude but better than nothing
+                _avg_hr = _r.get('avg_hr', 0) or 0
+                _tempo_mins = _dur if _avg_hr >= _z3_hr_floor else 0
+
+            tempo_8w += _tempo_mins
+            if _in_2w:
+                tempo_2w += _tempo_mins
+
+        _lr_values[_lr_idx]    = (lr_count_8w, round(lr_mins_8w), lr_count_2w, round(lr_mins_2w))
+        _tempo_values[_lr_idx] = (round(tempo_8w), round(tempo_2w))
+
     # ── Uses module-level _solve_taper, _RWP_TSB_TARGETS ──
     
     for race_idx, race in enumerate(PLANNED_RACES_DASH):
@@ -2357,6 +2451,25 @@ def _generate_zone_html(zone_data, stats=None):
         _surface_labels = {'indoor_track': '🏟️ Indoor', 'track': '🏟️ Track', 'road': '🛣️ Road', 'trail': '🌲 Trail', 'undulating_trail': '⛰️ Trail'}
         s_label = _surface_labels.get(surface, '')
         
+        # Build training specificity HTML (HM+ races only)
+        if dist_km >= 15.0:
+            _lr_c8, _lr_m8, _lr_c2, _lr_m2 = _lr_values.get(race_idx, (0, 0, 0, 0))
+            _tp_8, _tp_2 = _tempo_values.get(race_idx, (0, 0))
+            _specificity_html = (
+                '<div style="grid-column:1/-1;font-size:0.68rem;color:var(--text-dim);margin-bottom:2px;'
+                'padding-top:8px;border-top:1px solid var(--border)">TRAINING SPECIFICITY</div>'
+                f'<div><div class="rv" style="color:#a78bfa">{_lr_c8}<span style="font-size:0.75rem;color:var(--text-dim)"> runs</span></div>'
+                f'<div class="rl">Long runs 8w</div><div class="rx" style="color:var(--text-dim)">{_lr_m8}min total</div></div>'
+                f'<div><div class="rv" style="color:#a78bfa">{_lr_c2}<span style="font-size:0.75rem;color:var(--text-dim)"> runs</span></div>'
+                f'<div class="rl">Long runs 2w</div><div class="rx" style="color:var(--text-dim)">{_lr_m2}min total</div></div>'
+                f'<div><div class="rv" style="color:#fb923c">{_tp_8}<span style="font-size:0.75rem;color:var(--text-dim)">min</span></div>'
+                f'<div class="rl">Tempo Z3+ 8w</div></div>'
+                f'<div><div class="rv" style="color:#fb923c">{_tp_2}<span style="font-size:0.75rem;color:var(--text-dim)">min</span></div>'
+                f'<div class="rl">Tempo Z3+ 2w</div></div>'
+            )
+        else:
+            _specificity_html = ''
+
         race_cards += f'''<div class="rc">
             <div class="rh">
                 <span class="rn">{race['name']} <span style="font-size:0.65rem;padding:2px 6px;border-radius:4px;background:{p_color}22;color:{p_color};font-weight:600;margin-left:6px;vertical-align:middle">{p_label}</span>{f' <span style="font-size:0.65rem;color:var(--text-dim)">{s_label}</span>' if surface != 'road' else ''}</span>
@@ -2368,6 +2481,7 @@ def _generate_zone_html(zone_data, stats=None):
                 <div><div class="rv" id="race-pred-{race_idx}">{t_str}</div><div class="rl">Predicted</div><div class="rx power-only">{pace_str}</div></div>
                 <div><div class="rv" id="spec14_{race_idx}">{_spec_values.get(race_idx, (0, 0))[0]}<span style="font-size:0.75rem;color:var(--text-dim)">min</span></div><div class="rl">14d at effort</div></div>
                 <div><div class="rv" id="spec28_{race_idx}">{_spec_values.get(race_idx, (0, 0))[1]}<span style="font-size:0.75rem;color:var(--text-dim)">min</span></div><div class="rl">28d at effort</div></div>
+                {_specificity_html}
             </div>
             <div style="margin-top:6px">{taper_html}</div>\n'''
         

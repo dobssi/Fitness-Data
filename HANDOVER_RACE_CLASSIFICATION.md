@@ -1,129 +1,164 @@
-# Handover: Race Classification Calibration + Pipeline Fixes
-## Date: 2026-03-03
+# Handover: Race Classification + Pipeline Fixes + FIT Rename
+## Date: 2026-03-03/04
 
 ---
 
 ## Summary
 
-Calibrated race classification HR thresholds from actual data, eliminated false positives, fixed intervals.icu sync gap, added weight history backfill, and added CLASSIFY_RACES workflow mode.
+Calibrated race classification HR thresholds, eliminated false positives, fixed multiple pipeline issues discovered during PaulTest (A005) deployment, and added FIT file rename to prevent duplicate runs.
 
 ---
 
-## Race Classification Changes (classify_races.py)
+## 1. Race Classification (classify_races.py)
 
-### HR Thresholds — data-driven calibration
+### HR Thresholds — calibrated from Paul's data
 
-Old thresholds (from initial guess) were too high for some distances, too low for others, and not monotonic. Analysed all of Paul's races vs training by distance band to find the natural HR gap.
+| Distance | Old | New | Key evidence |
+|----------|-----|-----|--------------|
+| 3K | 1.01 | **0.98** | 2 real races (98%, 102%). "Highbury Fields 3k" at 93% = tempo run |
+| 5K | 1.00 | **0.98** | Parkruns 93-104%. Names do heavy lifting |
+| 10K | 1.00 | **0.97** | Lowest real race = 96% (Olympic Park 10k PB) |
+| 10M | 0.98 | **0.95** | Between 10K and HM (monotonic constraint) |
+| HM | 0.97 | **0.94** | Royal Parks Half 2018 at 94% = lowest real race |
+| 30K | 0.94 | **0.90** | Lidingöloppet races 90-96% |
+| Marathon | 0.93 | **0.88** | Stockholm Marathon at 89% = lowest |
 
-| Distance | Old | New | Evidence |
-|----------|-----|-----|----------|
-| 3K | 1.01 | **0.98** | Only 2 real 3K races (98%, 102%). "Highbury Fields 3k" at 93% was a tempo (13.6min for 3km). |
-| 5K | 1.00 | **0.98** | Parkruns range 53-102%. Names do the heavy lifting. |
-| 10K | 1.00 | **0.97** | Lowest real 10K race = 96%. Training well below. |
-| 10M | 0.98 | **0.95** | Must sit between 10K and HM (monotonic). |
-| HM | 0.97 | **0.94** | Royal Parks Half 2018 at 94% is lowest real race. Training maxes at 93% (Hackney Half steady, caught by name). |
-| 30K | 0.94 | **0.90** | Lidingöloppet races 90-96%. |
-| Marathon | 0.93 | **0.88** | Stockholm Marathon at 89% is lowest. |
+Thresholds must be **monotonically decreasing** with distance.
 
-Key principle: thresholds must be **monotonically decreasing** with distance — you can sustain higher HR% in shorter races.
+### "race (low)" eliminated
 
-### "race (low)" verdict eliminated
-
-Previously, keyword match + low HR → "race (low)" with race_flag=0. This was confusing — it looked like a race in the verdict column but wasn't flagged.
-
-**Now**: keyword match + low HR → "training (medium)" with reason "below race threshold". No ambiguity. Low HR = not a race, end of story.
+Previously: keyword match + low HR → "race (low)" with race_flag=0.
+Now: → "training (medium)" with reason "below race threshold".
+Low HR = not a race, full stop.
 
 ### Step 2 HR discount removed
 
-Steps 1 and 2 both used `named_hr = min_hr - 0.05` (a 5% HR discount). This let "Värmdö - Hemmesta-Stromma half marathon distance test run" (90% LTHR) slip through as a race because "half marathon" is a keyword and 90% ≥ 89% (= 94% - 5%).
+Generic keywords (step 2: "half", "race", "parkrun") now use the **full** HR threshold. Only specific named races (step 1: RACE_NAME_OVERRIDES like "Göteborgsvarvet") get the 5% discount.
 
-**Now**: Only step 1 (specific RACE_NAME_OVERRIDES like "Göteborgsvarvet", "Royal Parks Half") gets the 5% discount. Step 2 (generic keywords like "half", "race", "marathon", "parkrun") uses the **full threshold**. Zero real races affected by this change.
-
-### Keyword and regex fixes (from earlier in session)
-
-- Fixed typo: `premiärhalvan` → `premiärhalv` (matches both -halvan and -halven)
-- Added `\bhalf\b` to RACE_KEYWORDS and NON_PARKRUN_RACE_KW
-- Added missing names to RACE_NAME_OVERRIDES: Royal Parks, Oxford Half, Hampton Court, Göteborgsvarvet, Premiärhalven, Broloppet, Örebro, Big Half, Reading Half, Willow 10k
-- Step 1 restructured: named races beat generic anti-keywords (e.g. "Hackney Half...steady") UNLESS a decisive training pattern is present ("week \d+", "sandwich", "sim", "calibrat", "prep", "warm-up...cool-down")
+This fixed two false positives:
+- "Värmdö - Hemmesta-Stromma half marathon distance test run" (90% LTHR) — keyword "half marathon" + 5% discount let it through
+- "Half marathon distance hilly training run" (89% LTHR) — same issue
 
 ### Parkrun structural detection tightened
 
-For nameless athletes (future onboarding), parkrun detection by structure:
+For nameless athletes (future onboarding):
 - Distance: 4.8–5.1 km (was 4.8–5.5)
 - Day: Saturday
 - Start time: 9:00–9:10 or 9:30–9:40 (was 8:00–10:30)
 
-### Test results
+### Keyword fixes
 
-Post-changes: 299 races, 450 training. Zero "race (low)". All previously missing races (Göteborgsvarvet, Premiärhalven ×3, Royal Parks ×3, Oxford Half, Hampton Court, Broloppet, VLM 2018, Stockholm Marathon) now classified correctly. The two false HM positives (Värmdö, hilly training run) now correctly classified as training.
+- `premiärhalvan` → `premiärhalv` (matches both -halvan and -halven)
+- Added `\bhalf\b` to RACE_KEYWORDS and NON_PARKRUN_RACE_KW
+- Added missing names to RACE_NAME_OVERRIDES
+- Step 1 restructured: named races beat anti-keywords unless decisive training pattern present
+
+### Validated results
+
+299 races, 450 training. Zero "race (low)". All previously missing races correctly classified.
 
 ---
 
-## Pipeline Fixes
+## 2. Pipeline Fixes (paul_pipeline.yml)
 
-### intervals.icu sync gap (paul_pipeline.yml)
+### CLASSIFY_RACES mode added
 
-**Problem**: INITIAL mode ran fetch_fit_files.py which set `fit_sync_state.json` last_sync to March 3. The Strava export only covered through ~Feb 24. Post-ingest fetch also read the same sync state and found nothing new. Result: ~1 week of runs (Feb 25 – Mar 3) missing from Master.
+New workflow mode. Runs: download → classify (no --skip-if-classified) → upload. Skips: rebuild, GAP, StepB, dashboard, deploy.
 
-**Fix in workflow**: Post-ingest fetch (INITIAL only) now:
-1. Deletes `fit_sync_state.json` before running
-2. Uses `--full` flag to fetch all history from intervals.icu
-3. Existing FIT files on disk are deduplicated, so only the gap downloads
+### intervals.icu sync gap
 
-**For current state**: The sync state on Dropbox still says March 3. Need to manually delete `fit_sync_state.json` from Dropbox (`/Running and Cycling/DataPipeline/athletes/A005/fit_sync_state.json`), then run UPDATE. After that, daily UPDATEs will work normally.
+**Problem**: INITIAL set sync state to Mar 3. Strava export covered through ~Feb 24. Gap of ~1 week never fetched.
 
-### Weight data backfill (sync_athlete_data.py)
+**Root cause**: Sync state persisted in GitHub Actions cache (`if: always()` on save step). Deleting from Dropbox didn't help. Cache key busting only worked once — next failed run re-saved the stale state.
 
-**Problem**: `INTERVALS_WEIGHT_START = "2026-01-01"` was hardcoded — only fetched weight from intervals.icu from Jan 2026 onwards (pre-2026 came from BFW for Paul A001). New athletes like A005 had no weight history before 2026.
+**Fix**: New step before fetch that deletes `fit_sync_state.json` on any manual dispatch (`workflow_dispatch`). Forces full scan — matches existing FITs on disk, downloads only gaps. Scheduled daily runs unaffected.
 
-**Fix**: Added `--weight-oldest` CLI argument. Default unchanged (2026-01-01) for backward compatibility. PaulTest workflow now passes `--weight-oldest 2020-01-01` to backfill from intervals.icu.
+### activities.csv missing on UPDATE
 
-The parameter flows through to `fetch_weight_from_intervals()`, `merge_data()`, and `postprocess_weight()`.
+**Problem**: `--strava activities.csv` passed unconditionally. File only existed during INITIAL (from Strava export). Not uploaded to Dropbox. UPDATE crashed with FileNotFoundError.
 
-### CLASSIFY_RACES workflow mode (paul_pipeline.yml)
+**Fix**: 
+1. `--strava` flag now conditional (`if [ -f ... ]`)
+2. `data/activities.csv` added to Dropbox upload list
+3. Manually copied activities.csv to Dropbox for existing A005
 
-Added `CLASSIFY_RACES` to the mode dropdown. When selected:
-- **Runs**: checkout, setup, download from Dropbox, classify_races.py (without --skip-if-classified), upload to Dropbox, summary
-- **Skips**: rebuild, GAP power, StepB, dashboard, deploy to Pages
-- Forces full re-classification of all runs (no --skip-if-classified flag)
+### Weight history backfill
+
+**Problem**: `INTERVALS_WEIGHT_START = "2026-01-01"` hardcoded. New athletes had no weight before 2026.
+
+**Fix**: `--weight-oldest` CLI arg in `sync_athlete_data.py`. PaulTest workflow passes `--weight-oldest 2020-01-01`.
+
+---
+
+## 3. FIT File Rename (strava_ingest.py, initial_data_ingest.py)
+
+### Problem
+
+Strava exports name FIT files by activity ID (e.g. `18353724003.fit`). Intervals.icu names them by timestamp (e.g. `2026-02-02_09-20-21.FIT`). Same run, different filenames. `rebuild_from_fit_zip.py` deduplicates by filename → both copies included → double-logged runs → inflated CTL/ATL.
+
+21 dates had duplicate runs in the Master (44 extra rows). All from Feb 2-24 where Strava export and intervals.icu fetch overlapped.
+
+### Fix
+
+Both ingest paths now rename FIT files to `YYYY-MM-DD_HH-MM-SS.FIT` (local timezone) matching the intervals.icu convention:
+
+- **Strava path** (`strava_ingest.py`): reads session start_time from each FIT file at zip creation, renames in output fits.zip
+- **Garmin path** (`initial_data_ingest.py`): same logic, reads FIT bytes in memory before writing to zip
+
+`fit_start_timestamp()` utility function reads start_time from FIT session message, converts to local tz, formats as `%Y-%m-%d_%H-%M-%S`. Falls back to first record timestamp, then original filename if unreadable.
+
+Same-second collision handling: appends `_2`, `_3` etc. for rare multisport/auto-split cases.
 
 ---
 
 ## Files Changed
 
-| File | Changes |
-|------|---------|
-| `classify_races.py` | HR thresholds, race(low)→training, step 2 discount removed, parkrun tightened, keywords fixed |
-| `sync_athlete_data.py` | `--weight-oldest` CLI arg, plumbed through fetch/merge/postprocess |
-| `paul_pipeline.yml` | CLASSIFY_RACES mode, post-ingest sync reset + --full, --weight-oldest 2020-01-01 |
-| `athlete.yml` (A005) | Updated race_hr_thresholds_pct to match new defaults |
+| File | Location | Changes |
+|------|----------|---------|
+| `classify_races.py` | root | HR thresholds, race(low)→training, step 2 discount, parkrun, keywords |
+| `sync_athlete_data.py` | root | `--weight-oldest` CLI arg |
+| `paul_pipeline.yml` | `.github/workflows/` | CLASSIFY_RACES mode, sync reset, conditional --strava, activities.csv upload, cache key |
+| `athlete.yml` (A005) | `athletes/A005/` | Updated race_hr_thresholds_pct |
+| `strava_ingest.py` | root | FIT rename to timestamp-based names |
+| `initial_data_ingest.py` | `ci/` | FIT rename to timestamp-based names |
 
-All delivered as files in outputs. `classify_races_v2.py` → rename to `classify_races.py` on deploy.
+Deploy `classify_races_v2.py` as `classify_races.py`.
 
 ---
 
-## Deployment sequence
+## Clean INITIAL Rebuild Plan
 
-1. Commit all four files
-2. Delete `fit_sync_state.json` from Dropbox for A005
-3. Run CLASSIFY_RACES → regenerates overrides (done, validated)
-4. Run UPDATE → picks up missing recent runs + weight backfill
-5. Future daily UPDATEs work normally
+Deleting from Dropbox A005 folder:
+- `output/` (entire folder)
+- `persec_cache/` (entire folder)
+- `fit_sync_state.json`
+- `pending_activities.csv`
+- `athlete_data.csv`
+- `activity_overrides.xlsx`
+- `data/fits.zip`
+- `data/activities.csv`
+
+Keeping:
+- `athlete.yml`
+- `data/PaulTest_export_*.zip` (raw Strava export)
+- `onboard_config.json`
+
+Then run INITIAL. Pipeline will:
+1. Download raw Strava export from Dropbox
+2. Run strava_ingest.py → rename FITs → create fits.zip + activities.csv
+3. Fetch intervals.icu FITs (post-ingest) → filenames match, dedup works
+4. Rebuild from FIT files
+5. Classify races (fresh, no prior overrides)
+6. StepB + dashboard
+7. Upload everything to Dropbox
 
 ---
 
 ## Outstanding TODOs
 
-- **Make HR thresholds the defaults** in classify_races.py DEFAULT_RACE_HR_THRESHOLDS and onboard_athlete.py template for new athletes (stored in memory)
-- **Race (low) review**: 20 runs now correctly training(medium) — some may need manual override if genuinely raced at low HR (DNS/injury/pacing). Check the overrides spreadsheet.
-- **Ian Test pipeline**: Can onboard Ian as a test using the same infrastructure. Or re-run Paul with Strava-only data (activities.csv + FIT files from intervals.icu)
-- **Sync gap detection**: Consider adding logic to UPDATE mode that detects when Master's last date is significantly before the sync state's last_sync, and forces a broader fetch window automatically
-
----
-
-## Key Learnings
-
-- **HR thresholds must be monotonically decreasing with distance** — physiological constraint, not a tuning choice
-- **Low HR + race keyword = training**, never a race. A parkrun jogged at 83% LTHR is an event (parkrun=1) but not a race (race_flag=0)
-- **Named race discount (step 1) vs keyword discount (step 2)**: specific race names deserve HR leniency (you might jog a race you registered for). Generic keywords like "half marathon" do not — "half marathon distance training run" is not a race
-- **Sync state persistence across modes**: INITIAL creates sync state that UPDATE inherits. If INITIAL's fetch window doesn't cover the full data gap, UPDATE will never backfill it. Must reset sync state between modes or detect the gap.
+- Make HR thresholds the defaults in classify_races.py and onboard_athlete.py template
+- Add Strava activities.csv re-upload option to onboarding form return visit page
+- Onboarding paths to document: intervals.icu + Strava CSV, Strava bulk export only, Garmin bulk export, intervals.icu only
+- Surface-specific effort specificity for race readiness cards
+- Run `--refresh-weather-solar` for Ian (A002), Nadi (A003), Steve (A004)
+- Athlete folder refactor to numeric IDs (A001–A004)
