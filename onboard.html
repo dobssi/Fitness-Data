@@ -332,6 +332,18 @@
                 </div>
             </div>
 
+            <!-- Power meter -->
+            <div style="background: var(--accent-bg); border: 1px solid var(--accent-border); border-radius: 8px; padding: 1rem 1.25rem; margin-bottom: 1rem;">
+                <label class="check-row" style="font-size: 0.88rem; font-weight: 600; margin-bottom: 0;">
+                    <input type="checkbox" id="f-stryd" data-key="has_stryd" onchange="autoSave()"> I use a Stryd power meter
+                </label>
+                <p style="font-size: 0.78rem; color: var(--text-muted); margin-top: 0.4rem; margin-bottom: 0;">
+                    If checked, the pipeline will use your real power data for fitness tracking.
+                    Otherwise it uses Grade Adjusted Pace / HR (works great without a power meter).
+                    Garmin wrist-based power is <strong>not</strong> supported.
+                </p>
+            </div>
+
             <!-- intervals.icu -->
             <div class="intervals-panel" id="intervalsPanel">
                 <div class="intervals-status">
@@ -456,6 +468,7 @@ function gatherFormData() {
         max_hr_estimate: el('f-maxhr-est').checked,
         lthr_estimate: el('f-lthr-est').checked,
         intervals_id: v('f-int-id'), intervals_key: v('f-int-key'),
+        has_stryd: el('f-stryd').checked,
         pbs: gatherPbs(), upcoming: gatherUpcoming(),
         last_saved: new Date().toISOString()
     };
@@ -503,6 +516,7 @@ function populateForm(data) {
 
     setV('f-int-id', data.intervals_id); setV('f-int-key', data.intervals_key);
     updateIntervalsStatus();
+    if (data.has_stryd) el('f-stryd').checked = true;
 
     if (data.pbs) data.pbs.forEach(pb => {
         addPbRow(pb.dist_km, pb.label || distLabel(pb.dist_km));
@@ -674,6 +688,7 @@ function buildEmailBody(d) {
     let b = `RUNNING PROFILE\n${'='.repeat(40)}\n\n`;
     b += `Name: ${d.name}\nEmail: ${d.email}\nDOB: ${d.dob}\nGender: ${d.gender}\n`;
     b += `Weight: ${d.weight_kg} kg\nTimezone: ${d.timezone}\n`;
+    b += `Power meter: ${d.has_stryd ? 'Stryd' : 'None (GAP mode)'}\n`;
     b += `Max HR: ${d.max_hr}\nLTHR: ${d.lthr}\n`;
 
     if (d.intervals_id) b += `\nintervals.icu ID: ${d.intervals_id}\nintervals.icu API Key: ${d.intervals_key || '(not provided)'}\n`;
@@ -699,6 +714,7 @@ function buildEmailBody(d) {
     b += `athlete:\n  name: "${d.name}"\n  athlete_id: "A___"\n`;
     b += `  mass_kg: ${d.weight_kg}\n  date_of_birth: "${d.dob}"\n  gender: "${d.gender}"\n`;
     b += `  timezone: "${d.timezone}"\n`;
+    b += `  power_mode: "${d.has_stryd ? 'stryd' : 'gap'}"\n`;
     if (d.max_hr !== 'estimate') b += `  max_hr: ${d.max_hr}\n`;
     if (d.lthr !== 'estimate') b += `  lthr: ${d.lthr}\n`;
 
@@ -730,6 +746,7 @@ function buildEmailBody(d) {
     const config = {
         name: d.name, email: d.email, dob: d.dob, gender: d.gender,
         mass_kg: parseFloat(d.weight_kg) || 70, timezone: d.timezone,
+        power_mode: d.has_stryd ? 'stryd' : 'gap',
         max_hr: d.max_hr === 'estimate' ? null : (parseInt(d.max_hr) || null),
         lthr: d.lthr === 'estimate' ? null : (parseInt(d.lthr) || null),
         data_source: d.intervals_id ? 'intervals' : 'strava_export',
