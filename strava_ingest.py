@@ -994,13 +994,29 @@ def main():
         print(f"  TCX: {n_tcx_ok}/{len(export['tcx_files'])} processed successfully")
     
     # Step 5: Create consolidated FIT zip (renamed to YYYY-MM-DD_HH-MM-SS.FIT)
+    # Filter to running activities only by reading sport type from each FIT file
     print(f"\n=== Step 4: Build output FIT zip (with timestamp rename) ===")
     fits_zip_path = os.path.join(args.out_dir, 'fits.zip')
     n_fit = 0
     n_renamed = 0
+    n_skipped_nonrun = 0
     seen_names = set()
     with zipfile.ZipFile(fits_zip_path, 'w', zipfile.ZIP_DEFLATED) as zout:
         for fit_path in export['fit_files']:
+            # Filter: read sport type from FIT session — skip non-running
+            try:
+                from fitparse import FitFile as _FF
+                _fit = _FF(fit_path)
+                _sess = next(iter(_fit.get_messages("session")), None)
+                _sport = _sess.get_value("sport") if _sess else None
+                if _sport is not None:
+                    _s = str(_sport).lower()
+                    if ("run" not in _s) and ("running" not in _s):
+                        n_skipped_nonrun += 1
+                        continue
+            except Exception:
+                pass  # If we can't read sport, include the FIT (rebuild will filter later)
+            
             ts_name = fit_start_timestamp(fit_path, args.tz)
             if ts_name:
                 new_name = f"{ts_name}.FIT"
@@ -1019,6 +1035,8 @@ def main():
             zout.write(fit_path, new_name)
             n_fit += 1
     print(f"  {n_fit} FIT files → {fits_zip_path} ({n_renamed} renamed)")
+    if n_skipped_nonrun:
+        print(f"  Skipped {n_skipped_nonrun} non-running FIT files (filtered by FIT sport type)")
     
     # Step 6: Save GPX/TCX summaries if any
     if gpx_summaries:

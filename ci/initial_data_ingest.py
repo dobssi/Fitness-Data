@@ -166,13 +166,29 @@ def main():
     else:
         # Garmin or raw FIT export — extract FIT files into fits.zip
         # Rename to YYYY-MM-DD_HH-MM-SS.FIT to match intervals.icu naming
+        # Filter to running activities only by reading sport type from FIT session
         print(f"  Extracting and renaming {len(fit_files)} FIT files...")
         renamed = 0
+        skipped_nonrun = 0
         seen_names = set()
         with zipfile.ZipFile(local_zip, "r") as zin:
             with zipfile.ZipFile(fits_zip_path, "w", zipfile.ZIP_DEFLATED) as zout:
                 for fit in fit_files:
                     data = zin.read(fit)
+                    # Filter: read sport type from FIT session — skip non-running
+                    try:
+                        from fitparse import FitFile
+                        _fit = FitFile(io.BytesIO(data))
+                        _sess = next(iter(_fit.get_messages("session")), None)
+                        _sport = _sess.get_value("sport") if _sess else None
+                        if _sport is not None:
+                            _s = str(_sport).lower()
+                            if ("run" not in _s) and ("running" not in _s):
+                                skipped_nonrun += 1
+                                continue
+                    except Exception:
+                        pass  # If we can't read sport, include (rebuild will filter later)
+                    
                     ts_name = fit_start_timestamp(data, args.tz)
                     if ts_name:
                         new_name = f"{ts_name}.FIT"
@@ -189,7 +205,10 @@ def main():
                         new_name = os.path.basename(fit)
                         seen_names.add(new_name)
                     zout.writestr(new_name, data)
-        print(f"  ✓ fits.zip ready ({len(fit_files)} files, {renamed} renamed)")
+        n_included = len(fit_files) - skipped_nonrun
+        print(f"  ✓ fits.zip ready ({n_included} running files, {renamed} renamed)")
+        if skipped_nonrun:
+            print(f"    Skipped {skipped_nonrun} non-running FIT files")
 
         # Create empty activities.csv if needed
         if not os.path.isfile(activities_csv):

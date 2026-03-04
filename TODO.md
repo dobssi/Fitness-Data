@@ -23,7 +23,13 @@ v52 is a mature three-mode pipeline (Stryd/GAP/SIM) processing 3,900+ runs from 
 ### Dashboard features
 
 **Race History section** *(own session)*
-Two stacked card slots with distance-filtered search/select. Cards match Race Readiness design: actual time, TSB on race day, 42d/14d effort mins, long run mins + Z3+ beyond threshold. Side-by-side comparison of any two past races. ~~Decide: show predicted-at-the-time vs actual only.~~ **DONE** — shows actual time, pace, HR, nAG, TSS, CTL/ATL/TSB, RFL, effort mins (14d/42d), conditions (temp/terrain/surface). Delta comparison panel when both slots selected. Predicted-at-the-time deferred to Phase 2.
+Two stacked card slots with distance-filtered search/select. Cards match Race Readiness design: actual time, TSB on race day, 42d/14d effort mins, long run mins + Z3+ beyond threshold. Side-by-side comparison of any two past races. ~~Decide: show predicted-at-the-time vs actual only.~~ **DONE** — shows actual time, pace, HR, nAG, TSS, CTL/ATL/TSB, RFL, effort mins (14d/42d), long run tail + Z3+ tail (14d/42d), conditions (temp/terrain/surface). Delta comparison panel when both slots selected. Uses per-race CP from race-day RFL × PEAK_CP with era adjustment on training run power. Effort uses SPEC_ZONES (specific band, not cumulative). 60-min fixed threshold for long run tail.
+
+**Race History — move effort/tail to StepB** *(performance + mode toggle)*
+Currently effort mins and long run tail are computed at dashboard build time by loading NPZ files for every race's 42d window (~2 min for 328 races). Move to StepB: pre-compute per-run columns (`effort_14d_pw`, `effort_42d_pw`, `effort_14d_hr`, `lr_tail_14d`, `lr_z3_tail_14d` etc.). Dashboard reads master columns instead of scanning NPZ. Enables JS mode toggle to switch power vs HR effort client-side. Also eliminates 2-min dashboard build overhead.
+
+**Race History — predicted-at-the-time** *(Phase 2)*
+Show "predicted X, ran Y" on race cards. Prediction columns already exist per row in master — just need to extract and display.
 
 **Activity search + override editor** *(own session)*
 In-dashboard search of activity log, edit modal for overrides, connects to existing GitHub Actions override dispatch. Replaces spreadsheet editing for athletes.
@@ -72,12 +78,18 @@ Onboarding form: add planned sessions (date, type, duration). `athlete.yml`: `pl
 
 ## Recently completed (this session — 2026-03-04)
 
-- **Race History comparison section** — two side-by-side card slots, distance-filtered race select, full training context (CTL/ATL/TSB, RFL, effort mins, conditions). Delta comparison panel shows time diff, nAG, CTL, TSB, effort, HR changes between any two races.
-- **Long run tail metrics** on race readiness cards (HM+): time beyond 80% threshold + Z3+ in tail, 14d/42d windows. NPZ tail-slice for accuracy.
-- **Tooltips** on all race card metric cells (.ws-tip CSS class)
-- **All race card windows** unified to 14d / 42d
-- **INITIAL two-job CI** — `rebuild` (350min) auto-chains `stepb_deploy` (30min) on success. Safety upload preserves weather cache + Master on timeout.
-- **Dropbox upload progress counter** — silent per-file, progress every 50, summary at end
+- **Race History comparison section** — stacked card layout, distance-filtered race select, full training context per card:
+  - Row 1: Time, Pace, HR, nAG (normalised)
+  - Row 2: CTL, ATL, TSB, TSS (morning-of-race values from previous day)
+  - Row 3: RFL, Effort 14d/42d (power zones Stryd, GAP pace zones GAP mode, HR fallback), Temp/Terrain
+  - Row 4: Long run ≥60m 14d/42d, Z3+ tail 14d/42d (all from NPZ per-second data)
+  - Per-race zone bounds from race-day CP (PEAK_CP × RFL_Trend) with era adjustment on training power
+  - SPEC_ZONES (specific band, not cumulative) matching Race Readiness
+  - NPZ caching (tail cached per file, effort cached per file+zones+era)
+  - Delta comparison panel with all metrics
+  - Tooltips on every cell
+- **Race Readiness long run threshold** — changed from 80% of predicted finish time to fixed **60 minutes** for all distances
+- **Race Readiness + Race History** use consistent SPEC_ZONES (not cumulative effort zones)
 
 ## Recently completed (prior sessions — for reference)
 

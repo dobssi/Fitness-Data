@@ -88,6 +88,40 @@ def get_existing_fit_files(fit_dir: str, zip_path: str = "") -> set:
     return existing
 
 
+def _parse_timestamp_stem(stem: str) -> datetime | None:
+    """Parse a YYYY-MM-DD_HH-MM-SS filename stem to datetime, or None."""
+    try:
+        return datetime.strptime(stem[:19], "%Y-%m-%d_%H-%M-%S")
+    except (ValueError, IndexError):
+        return None
+
+
+def _build_existing_timestamps(existing_files: set) -> set:
+    """Build a set of epoch-hour values from timestamp-named existing files.
+    
+    Each timestamp is rounded to the nearest hour for fuzzy matching.
+    Returns set of (date, hour-of-day) tuples for fast lookup.
+    """
+    ts_set = set()
+    for stem in existing_files:
+        dt = _parse_timestamp_stem(stem)
+        if dt:
+            # Add the exact hour AND ±1 hour to handle timezone offsets
+            for offset_h in (-1, 0, 1):
+                adj = dt + timedelta(hours=offset_h)
+                ts_set.add((adj.strftime("%Y-%m-%d"), adj.hour, adj.minute))
+    return ts_set
+
+
+def _is_timestamp_duplicate(filename: str, existing_timestamps: set) -> bool:
+    """Check if a filename's timestamp is within ±1 hour of any existing file."""
+    dt = _parse_timestamp_stem(filename)
+    if not dt:
+        return False
+    key = (dt.strftime("%Y-%m-%d"), dt.hour, dt.minute)
+    return key in existing_timestamps
+
+
 def activity_to_filename(activity: dict) -> str:
     """
     Generate a FIT filename from an intervals.icu activity.
@@ -145,10 +179,15 @@ def fetch_new_fit_files(client: IntervalsClient,
     # Determine which need downloading
     to_download = []
     already_have = 0
+    ts_deduped = 0
     
     # Load known activity IDs from sync state (handles filename mismatch between
     # datetime-named downloads and ID-named files in the zip)
     known_activity_ids = set((sync_state or {}).get("downloaded_activity_ids", []))
+    
+    # Build timestamp index for fuzzy dedup (handles ±1 hour timezone offsets
+    # between Strava export and intervals.icu naming)
+    existing_timestamps = _build_existing_timestamps(existing_files)
     
     for act in run_activities:
         filename = activity_to_filename(act)
@@ -158,9 +197,17 @@ def fetch_new_fit_files(client: IntervalsClient,
             already_have += 1
             continue
         
+        # Timestamp-proximity dedup: skip if within ±1 hour of existing file
+        if existing_timestamps and _is_timestamp_duplicate(filename, existing_timestamps):
+            already_have += 1
+            ts_deduped += 1
+            continue
+        
         to_download.append((filename, act))
     
     print(f"  -> {already_have} already in {fit_dir}, {len(to_download)} new to download")
+    if ts_deduped:
+        print(f"     ({ts_deduped} matched by timestamp proximity — Strava/intervals.icu timezone dedup)")
     
     if not to_download:
         print("  Nothing new to download.")

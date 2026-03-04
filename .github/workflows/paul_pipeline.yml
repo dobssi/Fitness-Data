@@ -20,8 +20,8 @@
 name: Paul Test Pipeline
 
 on:
-  schedule:
-    - cron: '0 9,11,13,15,17,19,21,23 * * *'
+  # schedule:
+  #   - cron: '0 9,11,13,15,17,19,21,23 * * *'
   workflow_dispatch:
     inputs:
       mode:
@@ -173,7 +173,7 @@ jobs:
       # ── Full pipeline ──────────────────────────────────────────────────────
 
       - name: Restore persec cache
-        if: ${{ steps.gate.outputs.continue == 'true' }}
+        if: ${{ steps.gate.outputs.continue == 'true' && env.PIPELINE_MODE != 'INITIAL' }}
         uses: actions/cache/restore@v4
         with:
           path: ${{ env.ATHLETE_DIR }}/persec_cache
@@ -184,6 +184,10 @@ jobs:
       - name: Download data from Dropbox
         if: ${{ steps.gate.outputs.continue == 'true' }}
         run: |
+          CACHE_FLAG=""
+          if [ "${{ env.PIPELINE_MODE }}" != "INITIAL" ]; then
+            CACHE_FLAG="--cache-dir ${{ env.ATHLETE_DIR }}/persec_cache"
+          fi
           python ci/dropbox_sync.py download \
             --dropbox-base "${{ env.DB_BASE }}" \
             --local-prefix "${{ env.ATHLETE_DIR }}" \
@@ -193,7 +197,7 @@ jobs:
                     output/Master_FULL.xlsx \
                     output/Master_FULL_post.xlsx \
                     output/_weather_cache_openmeteo/openmeteo_cache.sqlite \
-            --cache-dir ${{ env.ATHLETE_DIR }}/persec_cache
+            $CACHE_FLAG
         continue-on-error: true
 
       - name: Sync athlete data from intervals.icu
@@ -274,7 +278,7 @@ jobs:
         if: ${{ steps.gate.outputs.continue == 'true' && (env.PIPELINE_MODE == 'FULL' || env.PIPELINE_MODE == 'INITIAL' || env.PIPELINE_MODE == 'CLASSIFY_RACES') }}
         run: |
           SKIP_FLAG=""
-          if [ "${{ env.PIPELINE_MODE }}" != "CLASSIFY_RACES" ]; then
+          if [ "${{ env.PIPELINE_MODE }}" != "CLASSIFY_RACES" ] && [ "${{ env.PIPELINE_MODE }}" != "INITIAL" ]; then
             SKIP_FLAG="--skip-if-classified"
           fi
           python classify_races.py \

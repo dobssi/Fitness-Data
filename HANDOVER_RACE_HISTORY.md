@@ -1,98 +1,88 @@
-# Handover: Race History Comparison Cards
+# Handover: Race History Dashboard Feature
 ## Date: 2026-03-04
 
 ---
 
-## What happened this session
+## What was built
 
-Added **Race History** section to `generate_dashboard.py` — a side-by-side race comparison tool positioned between Top Race Performances and All-Time Milestones.
+Race History comparison section in `generate_dashboard.py` — lets the athlete select any two past races and compare them side-by-side with full training context.
 
-### Feature overview
+### Card layout (stacked, one above the other)
 
-Two stacked card slots, each with:
-1. **Distance filter dropdown** — All distances / 3K / 5K / 10K / 10M / HM / 30K / Marathon (auto-populated from actual race data)
-2. **Race select dropdown** — searchable list showing `date · name · distance · time`
-3. **Race card** — matching the Race Readiness card design
+Each race card has 4 rows of 4 metrics:
 
-### Card metrics (3 rows)
+| Row | Col 1 | Col 2 | Col 3 | Col 4 |
+|-----|-------|-------|-------|-------|
+| 1 | Time | Pace /km | Avg HR | nAG (raw AG below) |
+| 2 | CTL | ATL | TSB | TSS |
+| 3 | RFL | Effort 14d | Effort 42d | Temp / Terrain |
+| 4 | ≥60m 14d | ≥60m 42d | Z3+ tail 14d | Z3+ tail 42d |
 
-**Row 1 — Performance:**
-- Time (with pace/km below)
-- Avg HR
-- nAG% (normalised AG, with raw AG as subtitle)
-- TSS
+Delta comparison panel appears when both slots are filled.
 
-**Row 2 — Training state:**
-- TSB (colour-coded: green if positive, amber if negative)
-- CTL
-- RFL (switches to RFL_gap in GAP mode via `currentMode`)
-- ATL
+### Key design decisions
 
-**Row 3 — Preparation + conditions:**
-- 14d effort mins (HR race zones)
-- 42d effort mins (HR race zones)
-- Temperature + terrain indicator
+**CTL/ATL/TSB**: Uses previous day's values (morning of race, not post-race). Lookup: `ctl_atl_lookup[prev_date]`.
 
-### Delta comparison panel
+**Effort mins**: Per-second NPZ data, matching Race Readiness `calcSpecificity()`:
+- **Stryd mode**: Race power zone bands from race-day CP
+- **GAP mode**: Race GAP pace zone bands from race-day predictions  
+- **Fallback**: HR race zones
+- Uses **SPEC_ZONES** (specific band, not cumulative): Marathon counts only Mara zone, HM only HM zone, 5K counts 5K+Sub-5K
 
-When both slots have a race selected, a comparison panel appears below showing the difference (B minus A) for: time (formatted M:SS, green=faster, red=slower), nAG, CTL, TSB, 14d/42d effort, avg HR.
+**Race-day CP**: `PEAK_CP × race_row['RFL_Trend']` — era-adjusted since RFL_Trend is computed from era-adjusted power. Training run raw power multiplied by `train_row['Era_Adj']` before zone classification.
 
-Time comparison only shown when both races are the same distance category (otherwise meaningless).
+**Long run threshold**: Fixed 60 minutes for all distances (changed from 80% of predicted time). Consistent across Race History and Race Readiness cards.
 
----
+**Long run tail**: NPZ HR array sliced from second 3600 onwards. Total seconds beyond mark + seconds at Z3+ (HR ≥ LTHR×0.90).
 
-## Implementation details
+**Caching**: 
+- `_tail_cache`: NPZ path → (total_tail_min, z3_tail_min) — shared across all races
+- `_effort_cache`: (NPZ path, zones_tuple, pw_bounds, pace_bounds, era_adj) → effort_min
 
-### Data function: `get_race_history_data(df, ctl_atl_lookup, zone_data)`
+### Performance
 
-- Extracts all races from master (race_flag=1)
-- Computes normalised AG on-the-fly using `_calc_normalised_ag()` (same as get_top_races)
-- Looks up CTL/ATL/TSB from daily lookup dict
-- Computes 14d/42d effort mins using HR race zone data from zone_runs
-- Returns list of race dicts sorted by date descending
+~2 minutes for 328 races on CI (NPZ loading for 42d windows). Acceptable for now. TODO: move to StepB pre-computation for speed + mode toggle support.
 
-### HTML generator: `_generate_race_history_html(race_history_data)`
+### What mode toggle does NOT do
 
-- Generates the section HTML + all JavaScript inline
-- CSS classes prefixed with `rh-` to avoid collision with existing `rc`/`rh` race readiness classes
-- Mobile responsive: stacks cards vertically below 599px
-
-### Wiring
-
-- `main()` calls `get_race_history_data()` after milestones, passes to `generate_html()`
-- `generate_html()` accepts `race_history_data=None` parameter
-- HTML template calls `_generate_race_history_html()` between Top Races and Milestones
+The JS Stryd/GAP/SIM toggle switches which RFL value displays but does NOT recalculate effort mins. Effort is baked in at build time using the pipeline's power_mode. Moving to StepB would enable per-mode columns that the toggle can switch between.
 
 ---
 
 ## Files changed
 
-| File | Change |
-|---|---|
-| `generate_dashboard.py` | +360 lines: `get_race_history_data()`, `_generate_race_history_html()`, CSS, wiring |
-| `TODO.md` | Race History moved to completed |
+- `generate_dashboard.py` — Race History section (+400 lines from original)
+  - `get_race_history_data()` (~line 1141): data extraction with NPZ effort + tail
+  - `_generate_race_history_html()` (~line 3768): HTML/JS/CSS generation
+  - Race Readiness long run threshold changed to fixed 60 min (~line 2635)
+- `TODO.md` — updated with new items
 
 ---
 
-## Not yet implemented (Phase 2 candidates)
+## Key functions
 
-- **Predicted-at-the-time** — show what the pipeline predicted for this race on race day. Requires storing historical predictions in the master (not currently retained).
-- **Long run tail metrics per race** — time beyond 80% of race duration in qualifying long runs. Currently only on Race Readiness cards.
-- **Surface-specific effort** — count only trail runs for trail race cards, only road for road.
-- **Sparkline CTL curve** — mini chart showing 42d CTL trajectory into race day.
+### `get_race_history_data(df, ctl_atl_lookup, zone_data=None)`
+- Builds NPZ index once (same pattern as `get_zone_data`)
+- Pre-maps all runs to their NPZ paths
+- For each race: computes race-day CP, builds zone bounds, scans 42d window
+- Returns list of race dicts sorted by date desc
+
+### `_generate_race_history_html(race_history_data)`
+- JS: `rhFilterRaces(slot)`, `rhSelectRace(slot)`, `rhUpdateDelta()`
+- CSS classes prefixed `rh-` (avoids collision with `rc-` race readiness)
+- Tooltips via existing `.ws-tip` / `.tip` pattern
 
 ---
 
-## PaulTest INITIAL rebuild
+## Pending issues
 
-Not yet run. Plan from prior session:
-1. Delete from Dropbox A005: output/, persec_cache/, fit_sync_state.json, pending_activities.csv, athlete_data.csv, activity_overrides.xlsx, data/fits.zip, data/activities.csv
-2. Keep: athlete.yml, data/PaulTest_export_*.zip, onboard_config.json
-3. Push updated generate_dashboard.py + TODO.md
-4. Trigger INITIAL — two-job workflow handles 6h limit
+1. **Mode toggle doesn't affect effort** — effort is server-side, toggle is client-side. Fix: StepB pre-computation with per-mode columns.
+2. **Empty card width alignment** — overflow:hidden added, should be fixed but verify.
+3. **2-minute build overhead** — NPZ scanning adds ~2 min. Fix: move to StepB.
 
 ---
 
 ## For next Claude
 
-"Race History comparison section added to generate_dashboard.py. Two card slots with distance filtering, race selection, full training context, and delta comparison. File compiles clean, ready to deploy. PaulTest INITIAL rebuild hasn't run yet — needs Dropbox cleanup + INITIAL trigger. See HANDOVER_RACE_HISTORY.md."
+"Race History comparison section is complete and deployed. Uses NPZ per-second data for effort (power zones in Stryd mode, GAP pace in GAP mode, HR fallback) with race-day CP from RFL×PEAK_CP and era adjustment on training power. Long run tail fixed at 60 min threshold. TODO: move effort/tail computation to StepB for performance + mode toggle support. See HANDOVER_RACE_HISTORY.md."
