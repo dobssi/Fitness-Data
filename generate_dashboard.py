@@ -1136,6 +1136,188 @@ def get_top_races(df, n=10):
 
 
 # ============================================================================
+# RACE HISTORY DATA — for side-by-side comparison cards
+# ============================================================================
+def get_race_history_data(df, ctl_atl_lookup, zone_data=None):
+    """Extract all past races with training context for comparison cards.
+    
+    Each race gets:
+    - Basic info: date, name, distance, time, pace, HR, AG
+    - Training state: CTL, ATL, TSB on race day
+    - Preparation: 14d/42d effort mins at race-specific zones
+    - Conditions: temperature, terrain adj, surface
+    
+    Returns list of race dicts sorted by date descending.
+    """
+    race_col = 'race_flag' if 'race_flag' in df.columns else 'Race'
+    races = df[df[race_col] == 1].copy()
+    
+    if len(races) == 0:
+        return []
+    
+    # Column name resolution
+    dist_col = 'distance_km' if 'distance_km' in df.columns else 'Distance_m'
+    official_dist_col = 'official_distance_km' if 'official_distance_km' in races.columns else 'Official_Dist_km'
+    elapsed_col = 'elapsed_time_s' if 'elapsed_time_s' in races.columns else 'Elapsed_s'
+    moving_col = 'moving_time_s' if 'moving_time_s' in races.columns else 'Moving_s'
+    
+    # Zone runs for effort calculation (if available)
+    zone_runs = zone_data.get('runs', []) if zone_data else []
+    
+    result = []
+    
+    for _, row in races.iterrows():
+        # Distance
+        official_dist = row.get(official_dist_col)
+        if pd.notna(official_dist) and official_dist > 0:
+            dist_km = float(official_dist)
+        elif dist_col == 'distance_km':
+            dist_km = row[dist_col] if pd.notna(row.get(dist_col)) else 0
+        else:
+            dist_km = row[dist_col] / 1000 if pd.notna(row.get(dist_col)) else 0
+        
+        if dist_km <= 0:
+            continue
+        
+        # Distance category for filtering
+        if dist_km <= 3.5:
+            dist_cat = '3K'
+        elif dist_km <= 5.5:
+            dist_cat = '5K'
+        elif dist_km <= 12:
+            dist_cat = '10K'
+        elif dist_km <= 17:
+            dist_cat = '10M'
+        elif dist_km <= 25:
+            dist_cat = 'HM'
+        elif dist_km <= 35:
+            dist_cat = '30K'
+        else:
+            dist_cat = 'Marathon'
+        
+        # Time — prefer elapsed for races
+        elapsed_s = row.get(elapsed_col)
+        time_s = elapsed_s if pd.notna(elapsed_s) and elapsed_s > 0 else row.get(moving_col, None)
+        
+        if pd.notna(time_s) and time_s > 0:
+            hours = int(time_s // 3600)
+            mins = int((time_s % 3600) // 60)
+            secs = int(time_s % 60)
+            time_str = f"{hours}:{mins:02d}:{secs:02d}" if hours > 0 else f"{mins}:{secs:02d}"
+            pace_skm = time_s / dist_km if dist_km > 0 else 0
+            pace_min = int(pace_skm // 60)
+            pace_sec = int(pace_skm % 60)
+            pace_str = f"{pace_min}:{pace_sec:02d}"
+        else:
+            time_str = "-"
+            pace_str = "-"
+            time_s = None
+        
+        # Name
+        name_val = row.get('activity_name', row.get('Activity_Name', ''))
+        name = str(name_val) if pd.notna(name_val) and name_val else ''
+        
+        # HR
+        hr = int(round(row['avg_hr'])) if pd.notna(row.get('avg_hr')) else None
+        
+        # AG (normalised) — compute on the fly like get_top_races does
+        raw_ag = round(row['age_grade_pct'], 1) if pd.notna(row.get('age_grade_pct')) else None
+        _off_dist_col_r = 'official_distance_km' if 'official_distance_km' in races.columns else 'Official_Dist_km'
+        nag_raw = _calc_normalised_ag(
+            row.get('age_grade_pct'),
+            row.get('moving_time_s', row.get('elapsed_time_s')),
+            row.get('Temp_Adj'),
+            row.get('Terrain_Adj'),
+            row.get('surface_adj'),
+            row.get('Elevation_Adj'),
+            row.get('avg_temp_c'),
+            row.get(_off_dist_col_r, row.get('distance_km')),
+        ) if pd.notna(row.get('age_grade_pct')) else None
+        nag = round(nag_raw, 1) if nag_raw is not None and pd.notna(nag_raw) else raw_ag
+        
+        # TSS
+        tss = int(round(row['TSS'])) if pd.notna(row.get('TSS')) else None
+        
+        # Training state on race day from daily lookup
+        date_str = row['date'].strftime('%Y-%m-%d')
+        day_data = ctl_atl_lookup.get(date_str, {})
+        ctl = day_data.get('ctl')
+        atl = day_data.get('atl')
+        tsb = day_data.get('tsb')
+        
+        # RFL on race day
+        rfl = round(row['RFL_Trend'] * 100, 1) if pd.notna(row.get('RFL_Trend')) else None
+        rfl_gap = round(row['RFL_gap_Trend'] * 100, 1) if pd.notna(row.get('RFL_gap_Trend')) else None
+        
+        # Conditions
+        temp = round(row['avg_temp_c'], 1) if pd.notna(row.get('avg_temp_c')) else None
+        terrain = round(row['Terrain_Adj'], 3) if pd.notna(row.get('Terrain_Adj')) else None
+        surface = row.get('surface', 'road')
+        surface = str(surface) if pd.notna(surface) else 'road'
+        
+        # Effort minutes (14d and 42d before race) from zone runs
+        race_date = row['date']
+        e14, e42 = 0, 0
+        for zr in zone_runs:
+            zr_date = pd.Timestamp(zr['date'])
+            days_before = (race_date - zr_date).days
+            if days_before < 0 or days_before > 42:
+                continue
+            dur = zr.get('duration_min', 0)
+            if dur <= 0:
+                continue
+            rhz = zr.get('rhz', {})
+            if rhz:
+                _race_zones = {
+                    '3K': ['Sub-5K'],
+                    '5K': ['Sub-5K', '5K'],
+                    '10K': ['10K', '5K', 'Sub-5K'],
+                    '10M': ['HM', '10K', '5K', 'Sub-5K'],
+                    'HM': ['HM', '10K', '5K', 'Sub-5K'],
+                    '30K': ['Mara', 'HM', '10K', '5K', 'Sub-5K'],
+                    'Marathon': ['Mara', 'HM', '10K', '5K', 'Sub-5K'],
+                }
+                relevant = _race_zones.get(dist_cat, [dist_cat])
+                mins = sum(rhz.get(z, 0) for z in relevant)
+            else:
+                mins = 0
+            
+            if days_before <= 14:
+                e14 += mins
+            e42 += mins
+        
+        result.append({
+            'date': date_str,
+            'date_display': row['date'].strftime('%d %b %y'),
+            'name': name,
+            'dist_km': round(dist_km, 2),
+            'dist_cat': dist_cat,
+            'time': time_str,
+            'time_s': round(time_s) if time_s else None,
+            'pace': pace_str,
+            'hr': hr,
+            'nag': nag,
+            'raw_ag': raw_ag,
+            'tss': tss,
+            'ctl': ctl,
+            'atl': atl,
+            'tsb': tsb,
+            'rfl': rfl,
+            'rfl_gap': rfl_gap,
+            'e14': round(e14),
+            'e42': round(e42),
+            'temp': temp,
+            'terrain': terrain,
+            'surface': surface,
+        })
+    
+    # Sort by date descending (most recent first)
+    result.sort(key=lambda x: x['date'], reverse=True)
+    print(f"  Race history: {len(result)} races extracted for comparison")
+    return result
+
+
+# ============================================================================
 # v51: RACE PREDICTION TREND DATA
 # ============================================================================
 def get_prediction_trend_data(df):
@@ -3351,6 +3533,162 @@ _MILESTONE_CSS = '''
 '''
 
 
+def _generate_race_history_html(race_history_data):
+    """Generate the Race History comparison section with two selectable card slots."""
+    if not race_history_data:
+        return ''
+    
+    import json as _json
+    
+    # Build distance options from actual race data
+    dist_cats = sorted(set(r['dist_cat'] for r in race_history_data),
+                       key=lambda x: {'3K':0,'5K':1,'10K':2,'10M':3,'HM':4,'30K':5,'Marathon':6}.get(x, 99))
+    
+    _rh_json = _json.dumps(race_history_data)
+    
+    return f'''
+    <div class="chart-container" id="race-history-section">
+        <div class="chart-title-row">
+            <span class="chart-title">📊 Race History</span>
+            <span class="badge" style="font-size:0.68rem">compare any two races</span>
+        </div>
+        <div id="rh-cards" style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:8px;">
+            <div class="rh-slot" id="rh-slot-0">
+                <div class="rh-picker">
+                    <select id="rh-dist-0" class="rh-select rh-dist-select" onchange="rhFilterRaces(0)">
+                        <option value="all">All distances</option>
+                        {"".join(f'<option value="{d}">{d}</option>' for d in dist_cats)}
+                    </select>
+                    <select id="rh-race-0" class="rh-select rh-race-select" onchange="rhSelectRace(0)">
+                        <option value="">Select a race...</option>
+                    </select>
+                </div>
+                <div class="rh-card rh-empty" id="rh-card-0">
+                    <div style="text-align:center;color:var(--text-dim);padding:24px 0;font-size:0.8rem">
+                        Select a race above
+                    </div>
+                </div>
+            </div>
+            <div class="rh-slot" id="rh-slot-1">
+                <div class="rh-picker">
+                    <select id="rh-dist-1" class="rh-select rh-dist-select" onchange="rhFilterRaces(1)">
+                        <option value="all">All distances</option>
+                        {"".join(f'<option value="{d}">{d}</option>' for d in dist_cats)}
+                    </select>
+                    <select id="rh-race-1" class="rh-select rh-race-select" onchange="rhSelectRace(1)">
+                        <option value="">Select a race...</option>
+                    </select>
+                </div>
+                <div class="rh-card rh-empty" id="rh-card-1">
+                    <div style="text-align:center;color:var(--text-dim);padding:24px 0;font-size:0.8rem">
+                        Select a race above
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div id="rh-delta" style="display:none"></div>
+    </div>
+    <script>
+    const RH_RACES={_rh_json};
+    const RH_SEL=[null,null];
+    function rhFilterRaces(slot){{
+        const distSel=document.getElementById('rh-dist-'+slot);
+        const raceSel=document.getElementById('rh-race-'+slot);
+        const dist=distSel.value;
+        const filtered=dist==='all'?RH_RACES:RH_RACES.filter(r=>r.dist_cat===dist);
+        raceSel.innerHTML='<option value="">Select a race...</option>';
+        filtered.forEach((r,i)=>{{
+            const idx=RH_RACES.indexOf(r);
+            const opt=document.createElement('option');
+            opt.value=idx;
+            opt.textContent=r.date_display+' · '+r.name+(r.name?' · ':'')+r.dist_cat+' · '+r.time;
+            raceSel.appendChild(opt);
+        }});
+        // Clear card
+        RH_SEL[slot]=null;
+        document.getElementById('rh-card-'+slot).innerHTML='<div style="text-align:center;color:var(--text-dim);padding:24px 0;font-size:0.8rem">Select a race above</div>';
+        document.getElementById('rh-card-'+slot).classList.add('rh-empty');
+        rhUpdateDelta();
+    }}
+    function rhFmtTSB(v){{if(v===null||v===undefined)return'-';return(v>=0?'+':'')+v.toFixed(1);}}
+    function rhFmtVal(v,unit){{if(v===null||v===undefined)return'-';return v+((unit)?'<span style="font-size:0.7rem;color:var(--text-dim)">'+unit+'</span>':'');}}
+    function rhSelectRace(slot){{
+        const raceSel=document.getElementById('rh-race-'+slot);
+        const idx=parseInt(raceSel.value);
+        if(isNaN(idx)){{RH_SEL[slot]=null;rhUpdateDelta();return;}}
+        const r=RH_RACES[idx];
+        RH_SEL[slot]=r;
+        const card=document.getElementById('rh-card-'+slot);
+        card.classList.remove('rh-empty');
+        const surfBadge=r.surface!=='road'?'<span style="font-size:0.6rem;padding:1px 5px;border-radius:3px;background:#f59e0b22;color:#f59e0b;margin-left:4px">'+r.surface+'</span>':'';
+        const tempStr=r.temp!==null?r.temp+'°C':'-';
+        const terrStr=r.terrain!==null&&r.terrain!==1.0?(r.terrain<1?'⬇ '+(((1-r.terrain)*100).toFixed(1))+'%':'⬆ '+(((r.terrain-1)*100).toFixed(1))+'%'):'flat';
+        const tsbCol=r.tsb!==null?(r.tsb>=0?'#4ade80':'#fbbf24'):'var(--text-dim)';
+        const rflVal=(typeof currentMode!=='undefined'&&currentMode==='gap'&&r.rfl_gap!==null)?r.rfl_gap:r.rfl;
+        card.innerHTML=`
+            <div class="rh-header">
+                <div class="rh-name">${{r.name}}${{surfBadge}}</div>
+                <div class="rh-date">${{r.date_display}} · ${{r.dist_km}}km (${{r.dist_cat}})</div>
+            </div>
+            <div class="rh-grid">
+                <div class="rh-metric"><div class="rh-val" style="color:var(--accent)">${{r.time}}</div><div class="rh-label">Time</div><div class="rh-sub">${{r.pace}}/km</div></div>
+                <div class="rh-metric"><div class="rh-val">${{rhFmtVal(r.hr)}}</div><div class="rh-label">Avg HR</div></div>
+                <div class="rh-metric"><div class="rh-val">${{rhFmtVal(r.nag,'%')}}</div><div class="rh-label">nAG</div><div class="rh-sub">${{r.raw_ag?'raw '+r.raw_ag+'%':''}}</div></div>
+                <div class="rh-metric"><div class="rh-val">${{rhFmtVal(r.tss)}}</div><div class="rh-label">TSS</div></div>
+            </div>
+            <div class="rh-divider"></div>
+            <div class="rh-grid">
+                <div class="rh-metric"><div class="rh-val" style="color:${{tsbCol}}">${{rhFmtTSB(r.tsb)}}</div><div class="rh-label">TSB</div></div>
+                <div class="rh-metric"><div class="rh-val">${{rhFmtVal(r.ctl)}}</div><div class="rh-label">CTL</div></div>
+                <div class="rh-metric"><div class="rh-val">${{rflVal!==null?rflVal+'%':'-'}}</div><div class="rh-label">RFL</div></div>
+                <div class="rh-metric"><div class="rh-val">${{rhFmtVal(r.atl)}}</div><div class="rh-label">ATL</div></div>
+            </div>
+            <div class="rh-divider"></div>
+            <div class="rh-grid rh-grid-3">
+                <div class="rh-metric"><div class="rh-val rh-sm">${{r.e14}}<span style="font-size:0.7rem;color:var(--text-dim)">min</span></div><div class="rh-label">14d effort</div></div>
+                <div class="rh-metric"><div class="rh-val rh-sm">${{r.e42}}<span style="font-size:0.7rem;color:var(--text-dim)">min</span></div><div class="rh-label">42d effort</div></div>
+                <div class="rh-metric"><div class="rh-val rh-sm">${{tempStr}}</div><div class="rh-label">${{terrStr}}</div></div>
+            </div>`;
+        rhUpdateDelta();
+    }}
+    function rhUpdateDelta(){{
+        const el=document.getElementById('rh-delta');
+        const a=RH_SEL[0],b=RH_SEL[1];
+        if(!a||!b){{el.style.display='none';return;}}
+        el.style.display='block';
+        // Compare
+        const rows=[];
+        function d(label,va,vb,unit,invert){{
+            if(va===null||va===undefined||vb===null||vb===undefined)return;
+            const diff=vb-va;
+            const sign=diff>0?'+':'';
+            const col=invert?(diff<0?'#4ade80':(diff>0?'#ef4444':'var(--text-dim)')):(diff>0?'#4ade80':(diff<0?'#ef4444':'var(--text-dim)'));
+            rows.push(`<div class="rh-delta-row"><span class="rh-delta-label">${{label}}</span><span style="color:${{col}};font-family:'JetBrains Mono';font-weight:600">${{sign}}${{typeof diff==='number'?diff.toFixed(1):diff}}${{unit||''}}</span></div>`);
+        }}
+        // Time diff
+        if(a.time_s&&b.time_s&&a.dist_cat===b.dist_cat){{
+            const ds=b.time_s-a.time_s;
+            const sign=ds>0?'+':'-';
+            const abs=Math.abs(ds);
+            const m=Math.floor(abs/60),s=Math.round(abs%60);
+            const col=ds<0?'#4ade80':(ds>0?'#ef4444':'var(--text-dim)');
+            rows.push(`<div class="rh-delta-row"><span class="rh-delta-label">Time</span><span style="color:${{col}};font-family:'JetBrains Mono';font-weight:600">${{sign}}${{m}}:${{String(s).padStart(2,'0')}}</span></div>`);
+        }}
+        d('nAG',a.nag,b.nag,'%',false);
+        d('CTL',a.ctl,b.ctl,'',false);
+        d('TSB',a.tsb,b.tsb,'',false);
+        d('14d effort',a.e14,b.e14,' min',false);
+        d('42d effort',a.e42,b.e42,' min',false);
+        d('Avg HR',a.hr,b.hr,' bpm',true);
+        if(rows.length===0){{el.style.display='none';return;}}
+        el.innerHTML='<div class="rh-delta-title">Δ '+a.date_display+' → '+b.date_display+'</div>'+rows.join('');
+    }}
+    // Init: populate race selects
+    [0,1].forEach(slot=>rhFilterRaces(slot));
+    </script>
+    '''
+
+
 def _generate_alert_banner(alert_data, critical_power=None):
     """Generate dark-themed alert banner with per-mode switching."""
     import json as _json
@@ -3398,7 +3736,7 @@ def _generate_alert_banner(alert_data, critical_power=None):
     # The initial call uses the fallback CP value.
 
 
-def generate_html(stats, rf_data, volume_data, ctl_atl_data, ctl_atl_lookup, rfl_trend_dates, rfl_trend_values, rfl_trendline, rfl_projection, rfl_ci_upper, rfl_ci_lower, alltime_rfl_dates, alltime_rfl_values, recent_runs, top_races, alert_data=None, weight_data=None, prediction_data=None, ag_data=None, zone_data=None, rfl_trend_gap=None, rfl_trend_sim=None, milestone_data=None):
+def generate_html(stats, rf_data, volume_data, ctl_atl_data, ctl_atl_lookup, rfl_trend_dates, rfl_trend_values, rfl_trendline, rfl_projection, rfl_ci_upper, rfl_ci_lower, alltime_rfl_dates, alltime_rfl_values, recent_runs, top_races, alert_data=None, weight_data=None, prediction_data=None, ag_data=None, zone_data=None, rfl_trend_gap=None, rfl_trend_sim=None, milestone_data=None, race_history_data=None):
     """Generate the HTML dashboard."""
     
     # --- Helper for None-safe delta formatting ---
@@ -3853,6 +4191,30 @@ def generate_html(stats, rf_data, volume_data, ctl_atl_data, ctl_atl_lookup, rfl
         #milestoneTimeline::-webkit-scrollbar-track {{ background: transparent; }}
         #milestoneTimeline::-webkit-scrollbar-thumb {{ background: var(--border); border-radius: 2px; }}
         
+        /* Race History */
+        .rh-slot {{ }}
+        .rh-picker {{ display: flex; gap: 6px; margin-bottom: 8px; }}
+        .rh-select {{ background: var(--surface2); color: var(--text); border: 1px solid var(--border); border-radius: 6px; padding: 5px 8px; font-size: 0.74rem; font-family: 'DM Sans'; flex: 1; cursor: pointer; }}
+        .rh-select:focus {{ outline: none; border-color: var(--accent); }}
+        .rh-dist-select {{ flex: 0 0 auto; min-width: 110px; }}
+        .rh-card {{ background: var(--surface2); border-radius: 8px; padding: 12px; min-height: 140px; transition: all 0.2s; }}
+        .rh-card.rh-empty {{ border: 1px dashed var(--border); background: transparent; }}
+        .rh-header {{ margin-bottom: 10px; }}
+        .rh-name {{ font-weight: 600; font-size: 0.85rem; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }}
+        .rh-date {{ font-size: 0.7rem; color: var(--text-dim); font-family: 'JetBrains Mono'; margin-top: 2px; }}
+        .rh-grid {{ display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; }}
+        .rh-grid-3 {{ grid-template-columns: repeat(3, 1fr); }}
+        .rh-metric {{ text-align: center; padding: 4px 0; }}
+        .rh-val {{ font-size: 1.05rem; font-weight: 700; font-family: 'JetBrains Mono'; }}
+        .rh-val.rh-sm {{ font-size: 0.9rem; }}
+        .rh-label {{ font-size: 0.65rem; color: var(--text-dim); margin-top: 1px; }}
+        .rh-sub {{ font-size: 0.6rem; color: var(--text-muted, #6b7280); }}
+        .rh-divider {{ height: 1px; background: var(--border); margin: 8px 0; }}
+        #rh-delta {{ background: var(--surface2); border-radius: 8px; padding: 10px 14px; }}
+        .rh-delta-title {{ font-size: 0.72rem; font-weight: 600; color: var(--accent); margin-bottom: 8px; text-transform: uppercase; letter-spacing: 0.04em; }}
+        .rh-delta-row {{ display: flex; justify-content: space-between; padding: 3px 0; font-size: 0.78rem; }}
+        .rh-delta-label {{ color: var(--text-dim); }}
+        
         .footer {{
             text-align: center;
             font-size: 0.72em;
@@ -3882,6 +4244,9 @@ def generate_html(stats, rf_data, volume_data, ctl_atl_data, ctl_atl_lookup, rfl
         }}
         @media (max-width: 599px) {{
             .rs {{ grid-template-columns: repeat(2, 1fr); }}
+            #rh-cards {{ grid-template-columns: 1fr !important; }}
+            .rh-grid {{ grid-template-columns: repeat(2, 1fr); }}
+            .rh-grid-3 {{ grid-template-columns: repeat(3, 1fr); }}
         }}
         
         /* Legacy chart classes — dark theme */
@@ -4373,6 +4738,9 @@ function raceAnnotations(dates) {{
         </div>
     </div>
     """]) if top_races and any(top_races.get(k) for k in top_races) else ''}
+    
+    <!-- Race History Comparison -->
+    {_generate_race_history_html(race_history_data) if race_history_data else ''}
     
     <!-- All-Time Milestones (career retrospective at bottom) -->
     {_generate_milestones_html(milestone_data) if milestone_data else ''}
@@ -5922,9 +6290,13 @@ def main():
     n_ra = len(milestone_data.get('recent_achievements', []))
     print(f"  {n_ms} milestones, {n_ra} recent achievements")
     
+    # Race History data
+    print("Computing race history...")
+    race_history_data = get_race_history_data(df, ctl_atl_lookup, zone_data=zone_data)
+    
     # Generate HTML
     print("Generating HTML...")
-    html = generate_html(stats, rf_data, volume_data, ctl_atl_data, ctl_atl_lookup, rfl_trend_dates, rfl_trend_values, rfl_trendline, rfl_projection, rfl_ci_upper, rfl_ci_lower, alltime_rfl_dates, alltime_rfl_values, recent_runs, top_races, alert_data=alert_data, weight_data=weight_data, prediction_data=prediction_data, ag_data=ag_data, zone_data=zone_data, rfl_trend_gap={'values': rfl_trend_gap_values, 'trendline': rfl_trendline_gap, 'projection': rfl_proj_gap, 'ci_upper': rfl_ci_upper_gap, 'ci_lower': rfl_ci_lower_gap}, rfl_trend_sim={'values': rfl_trend_sim_values, 'trendline': rfl_trendline_sim, 'projection': rfl_proj_sim, 'ci_upper': rfl_ci_upper_sim, 'ci_lower': rfl_ci_lower_sim}, milestone_data=milestone_data)
+    html = generate_html(stats, rf_data, volume_data, ctl_atl_data, ctl_atl_lookup, rfl_trend_dates, rfl_trend_values, rfl_trendline, rfl_projection, rfl_ci_upper, rfl_ci_lower, alltime_rfl_dates, alltime_rfl_values, recent_runs, top_races, alert_data=alert_data, weight_data=weight_data, prediction_data=prediction_data, ag_data=ag_data, zone_data=zone_data, rfl_trend_gap={'values': rfl_trend_gap_values, 'trendline': rfl_trendline_gap, 'projection': rfl_proj_gap, 'ci_upper': rfl_ci_upper_gap, 'ci_lower': rfl_ci_lower_gap}, rfl_trend_sim={'values': rfl_trend_sim_values, 'trendline': rfl_trendline_sim, 'projection': rfl_proj_sim, 'ci_upper': rfl_ci_upper_sim, 'ci_lower': rfl_ci_lower_sim}, milestone_data=milestone_data, race_history_data=race_history_data)
     
     # Write file
     with open(OUTPUT_FILE, 'w', encoding='utf-8') as f:
