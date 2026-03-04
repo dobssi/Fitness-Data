@@ -3878,8 +3878,8 @@ def _generate_race_history_html(race_history_data):
             <div class="rh-sep"></div>
             <div class="rh-row">
                 <div class="ws-tip rh-metric"><div class="rh-val">${{rflVal!==null?rflVal+'%':'-'}}</div><div class="rh-label">RFL</div><div class="tip">Relative fitness level on race day (shift(1) — fitness coming into the race)</div></div>
-                <div class="ws-tip rh-metric"><div class="rh-val rh-sm">${{r.e14}}<span class="rh-unit">min</span></div><div class="rh-label">Effort 14d</div><div class="tip">Minutes at ${{r.dist_cat}} race zone in 14 days before race (per-second NPZ, {_effort_mode} mode)</div></div>
-                <div class="ws-tip rh-metric"><div class="rh-val rh-sm">${{r.e42}}<span class="rh-unit">min</span></div><div class="rh-label">Effort 42d</div><div class="tip">Minutes at ${{r.dist_cat}} race zone in 42 days before race (per-second NPZ, {_effort_mode} mode)</div></div>
+                <div class="ws-tip rh-metric"><div class="rh-val rh-sm">${{r.e14}}<span class="rh-unit">min</span></div><div class="rh-label">Effort 14d</div><div class="tip">Minutes at ${{r.dist_cat}} race zone in 14 days before race (per-second NPZ, {_cfg_power_mode} mode)</div></div>
+                <div class="ws-tip rh-metric"><div class="rh-val rh-sm">${{r.e42}}<span class="rh-unit">min</span></div><div class="rh-label">Effort 42d</div><div class="tip">Minutes at ${{r.dist_cat}} race zone in 42 days before race (per-second NPZ, {_cfg_power_mode} mode)</div></div>
                 <div class="ws-tip rh-metric"><div class="rh-val rh-sm">${{tempStr}}</div><div class="rh-label">${{terrStr}}</div><div class="tip">Race day temperature · terrain adjustment factor</div></div>
             </div>
             <div class="rh-sep"></div>
