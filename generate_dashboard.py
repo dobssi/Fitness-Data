@@ -1141,14 +1141,13 @@ def get_top_races(df, n=10):
 def get_race_history_data(df, ctl_atl_lookup, zone_data=None):
     """Extract all past races with training context for comparison cards.
     
-    Each race gets:
-    - Basic info: date, name, distance, time, pace, HR, AG
-    - Training state: CTL, ATL, TSB on race day
-    - Preparation: 14d/42d effort mins at race-specific zones
-    - Conditions: temperature, terrain adj, surface
+    Uses NPZ per-second data for accurate time-in-zone and long run tail
+    metrics in the 14d/42d windows before each race.
     
     Returns list of race dicts sorted by date descending.
     """
+    import glob, os
+    
     race_col = 'race_flag' if 'race_flag' in df.columns else 'Race'
     races = df[df[race_col] == 1].copy()
     
@@ -1161,9 +1160,161 @@ def get_race_history_data(df, ctl_atl_lookup, zone_data=None):
     elapsed_col = 'elapsed_time_s' if 'elapsed_time_s' in races.columns else 'Elapsed_s'
     moving_col = 'moving_time_s' if 'moving_time_s' in races.columns else 'Moving_s'
     
-    # Zone runs for effort calculation (if available)
-    zone_runs = zone_data.get('runs', []) if zone_data else []
+    # ── Zone boundaries (same as get_zone_data) ──
+    try:
+        from config import load_athlete_config
+        _acfg = load_athlete_config()
+        _lthr = _acfg.lthr or 178
+        _maxhr = _acfg.max_hr or 192
+    except Exception:
+        _lthr = 178
+        _maxhr = 192
     
+    _z3_hr = round(_lthr * 0.90)  # Z3 floor
+    
+    # Race HR zone boundaries (ascending): Other < Mara < HM < 10K < 5K < Sub-5K
+    _rhr_mara = round(_lthr * 0.84)
+    _rhr_hm   = round(_lthr * 0.87)
+    _rhr_10k  = round(_lthr * 0.92)
+    _rhr_5k   = round(_lthr * 0.95)
+    _rhr_sub5k = round(_lthr * 0.98)
+    race_hr_bounds = [0, _rhr_mara, _rhr_hm, _rhr_10k, _rhr_5k, _rhr_sub5k, 9999]
+    race_hr_names  = ['Other', 'Mara', 'HM', '10K', '5K', 'Sub-5K']
+    
+    # Map distance category to which race zones count as "at effort"
+    _effort_zones = {
+        '3K':       ['Sub-5K'],
+        '5K':       ['Sub-5K', '5K'],
+        '10K':      ['10K', '5K', 'Sub-5K'],
+        '10M':      ['HM', '10K', '5K', 'Sub-5K'],
+        'HM':       ['HM', '10K', '5K', 'Sub-5K'],
+        '30K':      ['Mara', 'HM', '10K', '5K', 'Sub-5K'],
+        'Marathon':  ['Mara', 'HM', '10K', '5K', 'Sub-5K'],
+    }
+    
+    # Long run threshold: fixed 60 minutes
+    LR_THRESHOLD_S = 3600  # 60 min in seconds
+    LR_THRESHOLD_MIN = 60
+    
+    # ── NPZ cache index ──
+    npz_dir = None
+    _master_dir = os.path.dirname(os.path.abspath(MASTER_FILE))
+    for candidate in ['persec_cache_FULL', '../persec_cache_FULL', 'persec_cache',
+                       os.path.join(_master_dir, 'persec_cache_FULL'),
+                       os.path.join(_master_dir, 'persec_cache'),
+                       os.path.join(_master_dir, '..', 'persec_cache_FULL'),
+                       os.path.join(_master_dir, '..', 'persec_cache')]:
+        if os.path.isdir(candidate):
+            npz_dir = candidate
+            break
+    
+    npz_index = {}
+    npz_by_date = {}
+    if npz_dir:
+        for fp in glob.glob(os.path.join(npz_dir, '*.npz')):
+            base = os.path.basename(fp).replace('.npz', '')
+            npz_index[base] = fp
+            date_prefix = base[:10]
+            if date_prefix not in npz_by_date:
+                npz_by_date[date_prefix] = []
+            npz_by_date[date_prefix].append(fp)
+        print(f"  Race history NPZ cache: {npz_dir} ({len(npz_index)} files)")
+    
+    # ── Build run-to-NPZ lookup for all runs ──
+    # Pre-index: for each run in df, resolve its NPZ path once
+    _run_npz = {}  # index in df -> npz_path
+    for idx, row in df.iterrows():
+        run_date = row['date']
+        run_id = run_date.strftime('%Y-%m-%d_%H-%M-%S')
+        
+        master_run_id = str(row.get('run_id', '')).strip() if pd.notna(row.get('run_id')) else ''
+        npz_key = master_run_id.replace('&', '_').replace('?', '_').replace('=', '_') if master_run_id else ''
+        
+        file_id = ''
+        if not npz_key and pd.notna(row.get('file')):
+            file_id = str(row['file']).replace('.fit', '').replace('.FIT', '').strip()
+        
+        npz_path = npz_index.get(npz_key) if npz_key else None
+        if not npz_path and file_id:
+            npz_path = npz_index.get(file_id)
+        if not npz_path:
+            npz_path = npz_index.get(run_id)
+        if not npz_path:
+            date_prefix = run_date.strftime('%Y-%m-%d')
+            candidates = npz_by_date.get(date_prefix, [])
+            if len(candidates) == 1:
+                npz_path = candidates[0]
+        if npz_path:
+            _run_npz[idx] = npz_path
+    
+    print(f"  Race history: {len(_run_npz)}/{len(df)} runs have NPZ files")
+    
+    # ── NPZ helpers with caching ──
+    _tail_cache = {}   # npz_path -> (total_tail_min, z3_tail_min)
+    _effort_cache = {} # (npz_path, tuple(zones)) -> effort_min
+    
+    def _npz_tail(npz_path):
+        """Load NPZ, return (hr_arr_or_None, total_tail_mins, z3_tail_mins)."""
+        if npz_path in _tail_cache:
+            return _tail_cache[npz_path]
+        try:
+            data = np.load(npz_path, allow_pickle=True)
+            hr_arr = data['hr_bpm']
+            n = len(hr_arr)
+            if n < 60:
+                _tail_cache[npz_path] = (0, 0)
+                return (0, 0)
+            
+            # Long run tail: seconds beyond 60 min mark
+            total_tail_s = 0
+            z3_tail_s = 0
+            if n > LR_THRESHOLD_S:
+                hr_s = pd.Series(hr_arr).rolling(30, min_periods=1).mean().values
+                tail_hr = hr_s[LR_THRESHOLD_S:]
+                valid_tail = tail_hr[~np.isnan(tail_hr) & (tail_hr > 0)]
+                total_tail_s = len(valid_tail)
+                z3_tail_s = int(np.sum(valid_tail >= _z3_hr))
+            
+            result = (total_tail_s / 60.0, z3_tail_s / 60.0)
+            _tail_cache[npz_path] = result
+            return result
+        except Exception:
+            _tail_cache[npz_path] = (0, 0)
+            return (0, 0)
+    
+    def _npz_effort(npz_path, effort_zones_tuple):
+        """Count minutes at race-relevant HR zones from NPZ."""
+        cache_key = (npz_path, effort_zones_tuple)
+        if cache_key in _effort_cache:
+            return _effort_cache[cache_key]
+        try:
+            data = np.load(npz_path, allow_pickle=True)
+            hr_arr = data['hr_bpm']
+            n = len(hr_arr)
+            if n < 60:
+                _effort_cache[cache_key] = 0
+                return 0
+            
+            hr_s = pd.Series(hr_arr).rolling(30, min_periods=1).mean().values
+            effort_s = 0
+            effort_set = set(effort_zones_tuple)
+            for v in hr_s:
+                if np.isnan(v) or v <= 0:
+                    continue
+                for i in range(len(race_hr_bounds) - 2, -1, -1):
+                    if v >= race_hr_bounds[i]:
+                        if race_hr_names[i] in effort_set:
+                            effort_s += 1
+                        break
+            
+            result = effort_s / 60.0
+            _effort_cache[cache_key] = result
+            return result
+        except Exception:
+            _effort_cache[cache_key] = 0
+            return 0
+    
+    # ── Process each race ──
     result = []
     
     for _, row in races.iterrows():
@@ -1179,7 +1330,7 @@ def get_race_history_data(df, ctl_atl_lookup, zone_data=None):
         if dist_km <= 0:
             continue
         
-        # Distance category for filtering
+        # Distance category
         if dist_km <= 3.5:
             dist_cat = '3K'
         elif dist_km <= 5.5:
@@ -1220,7 +1371,7 @@ def get_race_history_data(df, ctl_atl_lookup, zone_data=None):
         # HR
         hr = int(round(row['avg_hr'])) if pd.notna(row.get('avg_hr')) else None
         
-        # AG (normalised) — compute on the fly like get_top_races does
+        # AG (normalised)
         raw_ag = round(row['age_grade_pct'], 1) if pd.notna(row.get('age_grade_pct')) else None
         _off_dist_col_r = 'official_distance_km' if 'official_distance_km' in races.columns else 'Official_Dist_km'
         nag_raw = _calc_normalised_ag(
@@ -1238,9 +1389,10 @@ def get_race_history_data(df, ctl_atl_lookup, zone_data=None):
         # TSS
         tss = int(round(row['TSS'])) if pd.notna(row.get('TSS')) else None
         
-        # Training state on race day from daily lookup
+        # Training state MORNING of race (previous day's end-of-day values)
         date_str = row['date'].strftime('%Y-%m-%d')
-        day_data = ctl_atl_lookup.get(date_str, {})
+        prev_date = (row['date'] - pd.Timedelta(days=1)).strftime('%Y-%m-%d')
+        day_data = ctl_atl_lookup.get(prev_date, ctl_atl_lookup.get(date_str, {}))
         ctl = day_data.get('ctl')
         atl = day_data.get('atl')
         tsb = day_data.get('tsb')
@@ -1255,36 +1407,34 @@ def get_race_history_data(df, ctl_atl_lookup, zone_data=None):
         surface = row.get('surface', 'road')
         surface = str(surface) if pd.notna(surface) else 'road'
         
-        # Effort minutes (14d and 42d before race) from zone runs
+        # ── NPZ-based effort + long run tail for 14d/42d windows ──
         race_date = row['date']
-        e14, e42 = 0, 0
-        for zr in zone_runs:
-            zr_date = pd.Timestamp(zr['date'])
-            days_before = (race_date - zr_date).days
-            if days_before < 0 or days_before > 42:
+        e14, e42 = 0.0, 0.0
+        lr_total_14, lr_total_42 = 0.0, 0.0
+        lr_z3_14, lr_z3_42 = 0.0, 0.0
+        
+        effort_zone_list = _effort_zones.get(dist_cat, ['HM', '10K', '5K', 'Sub-5K'])
+        
+        for train_idx, train_row in df.iterrows():
+            days_before = (race_date - train_row['date']).days
+            if days_before <= 0 or days_before > 42:
                 continue
-            dur = zr.get('duration_min', 0)
-            if dur <= 0:
+            
+            npz_path = _run_npz.get(train_idx)
+            if not npz_path:
                 continue
-            rhz = zr.get('rhz', {})
-            if rhz:
-                _race_zones = {
-                    '3K': ['Sub-5K'],
-                    '5K': ['Sub-5K', '5K'],
-                    '10K': ['10K', '5K', 'Sub-5K'],
-                    '10M': ['HM', '10K', '5K', 'Sub-5K'],
-                    'HM': ['HM', '10K', '5K', 'Sub-5K'],
-                    '30K': ['Mara', 'HM', '10K', '5K', 'Sub-5K'],
-                    'Marathon': ['Mara', 'HM', '10K', '5K', 'Sub-5K'],
-                }
-                relevant = _race_zones.get(dist_cat, [dist_cat])
-                mins = sum(rhz.get(z, 0) for z in relevant)
-            else:
-                mins = 0
+            
+            effort_zones_tuple = tuple(effort_zone_list)
+            eff = _npz_effort(npz_path, effort_zones_tuple)
+            tail, z3_tail = _npz_tail(npz_path)
             
             if days_before <= 14:
-                e14 += mins
-            e42 += mins
+                e14 += eff
+                lr_total_14 += tail
+                lr_z3_14 += z3_tail
+            e42 += eff
+            lr_total_42 += tail
+            lr_z3_42 += z3_tail
         
         result.append({
             'date': date_str,
@@ -1306,6 +1456,11 @@ def get_race_history_data(df, ctl_atl_lookup, zone_data=None):
             'rfl_gap': rfl_gap,
             'e14': round(e14),
             'e42': round(e42),
+            'lr_total_14': round(lr_total_14),
+            'lr_total_42': round(lr_total_42),
+            'lr_z3_14': round(lr_z3_14),
+            'lr_z3_42': round(lr_z3_42),
+            'lr_threshold': LR_THRESHOLD_MIN,
             'temp': temp,
             'terrain': terrain,
             'surface': surface,
@@ -2457,13 +2612,12 @@ def _generate_zone_html(zone_data, stats=None):
         _spec_values[race_idx_s] = (round(m14), round(m28))
 
     # ── Long run readiness + Tempo volume (8w / 2w windows) ──
-    # Long run readiness: runs with duration >= 80% of predicted finish time.
-    # Count qualifying runs and total minutes in those runs (all zones).
-    # Tempo volume: total minutes at Z3+ (HR >= LTHR*0.90) across ALL runs.
+    # Long run readiness: runs with duration >= 60 minutes.
+    # Count qualifying runs and total minutes beyond threshold in those runs.
+    # Tempo volume: total minutes at Z3+ (HR >= LTHR*0.90) beyond threshold.
     # Long run readiness + tempo volume for HM+ race cards.
-    # Qualifying runs: duration >= 80% of predicted finish time (rounded to nearest 10min).
-    # Reports total mins in qualifying runs + Z3+ mins within those same runs.
-    # Windows: 14d and 56d, matching the race effort spec windows.
+    # Reports total mins beyond 60 min + Z3+ mins beyond 60 min.
+    # Windows: 14d and 42d.
     _c14_lr      = _today - _td(days=14)
     _c42         = _today - _td(days=42)
     _z3_hr_floor = round(_cfg_lthr * 0.90)  # Z3 lower bound (LTHR * 0.90)
@@ -2507,8 +2661,8 @@ def _generate_zone_html(zone_data, stats=None):
             _lr_speed  = (_lr_pw / ATHLETE_MASS_KG_DASH) * _lr_re
             _lr_pred_s = round(_lr_dist_m / _lr_speed) if _lr_speed > 0 else 0
 
-        _lr_threshold_min   = (_lr_pred_s * 0.80) / 60.0
-        _lr_threshold_label = round(_lr_threshold_min / 10) * 10  # nearest 10min
+        _lr_threshold_min   = 60.0  # fixed 60-minute threshold
+        _lr_threshold_label = 60
 
         total_14 = 0.0; total_42 = 0.0
         z3_14    = 0.0; z3_42    = 0.0
@@ -2656,7 +2810,7 @@ def _generate_zone_html(zone_data, stats=None):
             _thr  = _lrd['threshold_label']
             _t14  = _lrd['total_14'];  _t42  = _lrd['total_42']
             _z14  = _lrd['z3_14'];     _z42  = _lrd['z3_42']
-            _tip_lr  = f"Total time in runs lasting ≥ {_thr} min (80% of predicted finish time)"
+            _tip_lr  = f"Total running time beyond {_thr} min"
             _tip_z3  = f"Minutes at Z3+ effort (HR ≥ {_z3_hr_floor} bpm) within those long runs only"
             _specificity_html = (
                 f'<div style="grid-column:1/-1;font-size:0.68rem;color:var(--text-dim);'
@@ -3552,7 +3706,7 @@ def _generate_race_history_html(race_history_data):
             <span class="chart-title">📊 Race History</span>
             <span class="badge" style="font-size:0.68rem">compare any two races</span>
         </div>
-        <div id="rh-cards" style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:8px;">
+        <div id="rh-cards" style="display:grid;grid-template-columns:1fr;gap:12px;margin-top:8px;">
             <div class="rh-slot" id="rh-slot-0">
                 <div class="rh-picker">
                     <select id="rh-dist-0" class="rh-select rh-dist-select" onchange="rhFilterRaces(0)">
@@ -3644,10 +3798,17 @@ def _generate_race_history_html(race_history_data):
                 <div class="rh-metric"><div class="rh-val">${{rhFmtVal(r.atl)}}</div><div class="rh-label">ATL</div></div>
             </div>
             <div class="rh-divider"></div>
-            <div class="rh-grid rh-grid-3">
-                <div class="rh-metric"><div class="rh-val rh-sm">${{r.e14}}<span style="font-size:0.7rem;color:var(--text-dim)">min</span></div><div class="rh-label">14d effort</div></div>
-                <div class="rh-metric"><div class="rh-val rh-sm">${{r.e42}}<span style="font-size:0.7rem;color:var(--text-dim)">min</span></div><div class="rh-label">42d effort</div></div>
-                <div class="rh-metric"><div class="rh-val rh-sm">${{tempStr}}</div><div class="rh-label">${{terrStr}}</div></div>
+            <div class="rh-grid">
+                <div class="rh-metric"><div class="rh-val rh-sm">${{r.e14}}<span style="font-size:0.7rem;color:var(--text-dim)">min</span></div><div class="rh-label">14d at effort</div></div>
+                <div class="rh-metric"><div class="rh-val rh-sm">${{r.e42}}<span style="font-size:0.7rem;color:var(--text-dim)">min</span></div><div class="rh-label">42d at effort</div></div>
+                <div class="rh-metric"><div class="rh-val rh-sm">${{r.lr_total_14}}<span style="font-size:0.7rem;color:var(--text-dim)">min</span></div><div class="rh-label">Run ≥${{r.lr_threshold}}m 14d</div></div>
+                <div class="rh-metric"><div class="rh-val rh-sm">${{r.lr_total_42}}<span style="font-size:0.7rem;color:var(--text-dim)">min</span></div><div class="rh-label">Run ≥${{r.lr_threshold}}m 42d</div></div>
+            </div>
+            <div class="rh-grid">
+                <div class="rh-metric"><div class="rh-val rh-sm" style="color:#fb923c">${{r.lr_z3_14}}<span style="font-size:0.7rem;color:var(--text-dim)">min</span></div><div class="rh-label">Z3+ ≥${{r.lr_threshold}}m 14d</div></div>
+                <div class="rh-metric"><div class="rh-val rh-sm" style="color:#fb923c">${{r.lr_z3_42}}<span style="font-size:0.7rem;color:var(--text-dim)">min</span></div><div class="rh-label">Z3+ ≥${{r.lr_threshold}}m 42d</div></div>
+                <div class="rh-metric"><div class="rh-val rh-sm">${{tempStr}}</div><div class="rh-label">Temp</div></div>
+                <div class="rh-metric"><div class="rh-val rh-sm">${{terrStr}}</div><div class="rh-label">Terrain</div></div>
             </div>`;
         rhUpdateDelta();
     }}
@@ -3679,6 +3840,8 @@ def _generate_race_history_html(race_history_data):
         d('TSB',a.tsb,b.tsb,'',false);
         d('14d effort',a.e14,b.e14,' min',false);
         d('42d effort',a.e42,b.e42,' min',false);
+        d('Long 14d',a.lr_total_14,b.lr_total_14,' min',false);
+        d('Long 42d',a.lr_total_42,b.lr_total_42,' min',false);
         d('Avg HR',a.hr,b.hr,' bpm',true);
         if(rows.length===0){{el.style.display='none';return;}}
         el.innerHTML='<div class="rh-delta-title">Δ '+a.date_display+' → '+b.date_display+'</div>'+rows.join('');
@@ -4244,9 +4407,6 @@ def generate_html(stats, rf_data, volume_data, ctl_atl_data, ctl_atl_lookup, rfl
         }}
         @media (max-width: 599px) {{
             .rs {{ grid-template-columns: repeat(2, 1fr); }}
-            #rh-cards {{ grid-template-columns: 1fr !important; }}
-            .rh-grid {{ grid-template-columns: repeat(2, 1fr); }}
-            .rh-grid-3 {{ grid-template-columns: repeat(3, 1fr); }}
         }}
         
         /* Legacy chart classes — dark theme */
