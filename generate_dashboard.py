@@ -2474,22 +2474,28 @@ def _generate_zone_html(zone_data, stats=None):
             _thr  = _lrd['threshold_label']
             _t14  = _lrd['total_14'];  _t42  = _lrd['total_42']
             _z14  = _lrd['z3_14'];     _z42  = _lrd['z3_42']
+            _tip_lr  = f"Total time in runs lasting ≥ {_thr} min (80% of predicted finish time)"
+            _tip_z3  = f"Minutes at Z3+ effort (HR ≥ {_z3_hr_floor} bpm) within those long runs only"
             _specificity_html = (
                 f'<div style="grid-column:1/-1;font-size:0.68rem;color:var(--text-dim);'
                 f'margin-top:8px;padding-top:8px;border-top:1px solid var(--border)">'
-                f'Runs ≥ {_thr} min</div>'
-                f'<div><div class="rv" style="color:#a78bfa">{_t14}'
+                f'Run time ≥ {_thr} min</div>'
+                f'<div class="ws-tip"><div class="rv" style="color:#a78bfa">{_t14}'
                 f'<span style="font-size:0.75rem;color:var(--text-dim)">min</span></div>'
-                f'<div class="rl">Long run 14d</div></div>'
-                f'<div><div class="rv" style="color:#a78bfa">{_t42}'
+                f'<div class="rl">Long run 14d</div>'
+                f'<div class="tip">Time spent running beyond {_thr} mins in last 14 days</div></div>'
+                f'<div class="ws-tip"><div class="rv" style="color:#a78bfa">{_t42}'
                 f'<span style="font-size:0.75rem;color:var(--text-dim)">min</span></div>'
-                f'<div class="rl">Long run 42d</div></div>'
-                f'<div><div class="rv" style="color:#fb923c">{_z14}'
+                f'<div class="rl">Long run 42d</div>'
+                f'<div class="tip">Time spent running beyond {_thr} mins in last 42 days</div></div>'
+                f'<div class="ws-tip"><div class="rv" style="color:#fb923c">{_z14}'
                 f'<span style="font-size:0.75rem;color:var(--text-dim)">min</span></div>'
-                f'<div class="rl">Z3+ in long 14d</div></div>'
-                f'<div><div class="rv" style="color:#fb923c">{_z42}'
+                f'<div class="rl">Z3+ in long 14d</div>'
+                f'<div class="tip">Time spent running in Z3 or harder beyond {_thr} mins in last 14 days</div></div>'
+                f'<div class="ws-tip"><div class="rv" style="color:#fb923c">{_z42}'
                 f'<span style="font-size:0.75rem;color:var(--text-dim)">min</span></div>'
-                f'<div class="rl">Z3+ in long 42d</div></div>'
+                f'<div class="rl">Z3+ in long 42d</div>'
+                f'<div class="tip">Time spent running in Z3 or harder beyond {_thr} mins in last 42 days</div></div>'
             )
         else:
             _specificity_html = ''
@@ -2500,11 +2506,11 @@ def _generate_zone_html(zone_data, stats=None):
                 <span class="rd">{race['date']} · {days_str}</span>
             </div>
             <div class="rs">
-                <div class="power-only"><div class="rv" style="color:var(--accent)" id="race-pw-{race_idx}">{pw}W</div><div class="rl">Target</div><div class="rx">±{band}W</div></div>
+                <div class="power-only ws-tip"><div class="rv" style="color:var(--accent)" id="race-pw-{race_idx}">{pw}W</div><div class="rl">Target</div><div class="rx">±{band}W</div><div class="tip">Target power for this race distance and surface · ±3% band shown</div></div>
                 <div class="pace-target" style="display:none"><div class="rv" style="color:#4ade80" id="race-pace-{race_idx}">{pace_str}</div><div class="rl">Target pace</div></div>
-                <div><div class="rv" id="race-pred-{race_idx}">{t_str}</div><div class="rl">Predicted</div><div class="rx power-only">{pace_str}</div></div>
-                <div><div class="rv" id="spec14_{race_idx}">{_spec_values.get(race_idx, (0, 0))[0]}<span style="font-size:0.75rem;color:var(--text-dim)">min</span></div><div class="rl">14d at effort</div></div>
-                <div><div class="rv" id="spec28_{race_idx}">{_spec_values.get(race_idx, (0, 0))[1]}<span style="font-size:0.75rem;color:var(--text-dim)">min</span></div><div class="rl">42d at effort</div></div>
+                <div class="ws-tip"><div class="rv" id="race-pred-{race_idx}">{t_str}</div><div class="rl">Predicted</div><div class="rx power-only">{pace_str}</div><div class="tip">Predicted finish time based on current fitness (RFL trend × CP)</div></div>
+                <div class="ws-tip"><div class="rv" id="spec14_{race_idx}">{_spec_values.get(race_idx, (0, 0))[0]}<span style="font-size:0.75rem;color:var(--text-dim)">min</span></div><div class="rl">14d at effort</div><div class="tip">Minutes at race-specific effort (pace or power zone) in the last 14 days</div></div>
+                <div class="ws-tip"><div class="rv" id="spec28_{race_idx}">{_spec_values.get(race_idx, (0, 0))[1]}<span style="font-size:0.75rem;color:var(--text-dim)">min</span></div><div class="rl">42d at effort</div><div class="tip">Minutes at race-specific effort (pace or power zone) in the last 42 days</div></div>
                 {_specificity_html}
             </div>
             <div style="margin-top:6px">{taper_html}</div>\n'''
@@ -3729,6 +3735,9 @@ def generate_html(stats, rf_data, volume_data, ctl_atl_data, ctl_atl_lookup, rfl
         .ws:hover {{ filter: brightness(1.15); }}
         .ws .tip {{ display: none; position: absolute; bottom: 100%; left: 50%; transform: translateX(-50%); background: var(--surface2); border: 1px solid var(--border); padding: 3px 7px; border-radius: 4px; font-size: 0.68rem; white-space: nowrap; z-index: 10; color: var(--text); pointer-events: none; margin-bottom: 4px; }}
         .ws:hover .tip {{ display: block; }}
+        .ws-tip {{ position: relative; cursor: default; }}
+        .ws-tip .tip {{ display: none; position: absolute; bottom: 100%; left: 50%; transform: translateX(-50%); background: #1e2130; border: 1px solid var(--border); padding: 5px 9px; border-radius: 5px; font-size: 0.67rem; white-space: nowrap; z-index: 20; color: var(--text); pointer-events: none; margin-bottom: 4px; max-width: 280px; white-space: normal; text-align: center; line-height: 1.4; }}
+        .ws-tip:hover .tip {{ display: block; }}
         .wt {{ font-size: 0.72rem; font-family: 'JetBrains Mono'; color: var(--text-dim); width: 48px; text-align: right; flex-shrink: 0; }}
         
         /* Race readiness cards */
