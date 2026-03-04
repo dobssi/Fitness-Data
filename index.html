@@ -302,26 +302,25 @@
         #milestoneTimeline::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
         
         /* Race History */
-        .rh-slot { }
+        .rh-slot { overflow: hidden; }
         .rh-picker { display: flex; gap: 6px; margin-bottom: 8px; }
-        .rh-select { background: var(--surface2); color: var(--text); border: 1px solid var(--border); border-radius: 6px; padding: 5px 8px; font-size: 0.74rem; font-family: 'DM Sans'; flex: 1; cursor: pointer; }
+        .rh-select { background: var(--surface2); color: var(--text); border: 1px solid var(--border); border-radius: 6px; padding: 5px 8px; font-size: 0.74rem; font-family: 'DM Sans'; flex: 1; cursor: pointer; min-width: 0; }
         .rh-select:focus { outline: none; border-color: var(--accent); }
         .rh-dist-select { flex: 0 0 auto; min-width: 110px; }
-        .rh-card { background: var(--surface2); border-radius: 8px; padding: 14px 16px; transition: all 0.2s; }
-        .rh-card.rh-empty { border: 1px dashed var(--border); background: transparent; min-height: 60px; display: flex; align-items: center; justify-content: center; }
-        .rh-header { margin-bottom: 12px; }
+        .rh-card { background: var(--surface2); border-radius: 8px; padding: 14px 16px; transition: all 0.2s; overflow: hidden; }
+        .rh-card.rh-empty { border: 1px dashed var(--border); background: transparent; min-height: 50px; display: flex; align-items: center; justify-content: center; padding: 12px; }
+        .rh-header { margin-bottom: 10px; }
         .rh-name { font-weight: 600; font-size: 0.85rem; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
         .rh-surf { font-size: 0.58rem; padding: 1px 5px; border-radius: 3px; background: #f59e0b22; color: #f59e0b; font-weight: 600; margin-left: 6px; vertical-align: middle; letter-spacing: 0.03em; }
         .rh-date { font-size: 0.7rem; color: var(--text-dim); font-family: 'JetBrains Mono'; margin-top: 2px; }
         .rh-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; padding: 6px 0; }
         .rh-sep { height: 1px; background: var(--border); opacity: 0.5; }
         .rh-metric { text-align: center; padding: 2px 0; position: relative; }
-        .rh-val { font-size: 1.05rem; font-weight: 700; font-family: 'JetBrains Mono'; }
-        .rh-val.rh-sm { font-size: 0.9rem; }
+        .rh-val { font-size: 0.95rem; font-weight: 700; font-family: 'JetBrains Mono'; }
         .rh-unit { font-size: 0.68rem; color: var(--text-dim); margin-left: 1px; }
-        .rh-label { font-size: 0.65rem; color: var(--text-dim); margin-top: 1px; }
-        .rh-sub { font-size: 0.6rem; color: var(--text-muted, #6b7280); }
-        #rh-delta { background: var(--surface2); border-radius: 8px; padding: 10px 14px; }
+        .rh-label { font-size: 0.63rem; color: var(--text-dim); margin-top: 1px; }
+        .rh-sub { font-size: 0.58rem; color: var(--text-muted, #6b7280); }
+        #rh-delta { background: var(--surface2); border-radius: 8px; padding: 10px 14px; overflow: hidden; }
         .rh-delta-title { font-size: 0.72rem; font-weight: 600; color: var(--accent); margin-bottom: 8px; text-transform: uppercase; letter-spacing: 0.04em; }
         .rh-delta-row { display: flex; justify-content: space-between; padding: 3px 0; font-size: 0.78rem; }
         .rh-delta-label { color: var(--text-dim); }
@@ -491,7 +490,7 @@ function raceAnnotations(dates) {
 }catch(e){console.warn('Chart.js not loaded:',e);}
 </script>
     <h1>🏃 Paul Collyer</h1>
-    <div class="dash-sub">Wednesday 04 March 2026, 14:41</div>
+    <div class="dash-sub">Wednesday 04 March 2026, 14:56</div>
     
     <!-- Phase 2: Mode Toggle -->
     <div class="mode-toggle" style="display:flex;gap:6px;margin:10px 0 8px;align-items:center;">
@@ -1070,7 +1069,7 @@ function raceAnnotations(dates) {
             <span class="chart-title">📊 Race History</span>
             <span class="badge" style="font-size:0.68rem">compare any two races</span>
         </div>
-        <div id="rh-cards" style="display:grid;grid-template-columns:1fr;gap:12px;margin-top:8px;">
+        <div id="rh-cards" style="display:grid;grid-template-columns:1fr;gap:12px;margin-top:8px;max-width:100%;overflow:hidden;">
             <div class="rh-slot" id="rh-slot-0">
                 <div class="rh-picker">
                     <select id="rh-dist-0" class="rh-select rh-dist-select" onchange="rhFilterRaces(0)">
@@ -1164,16 +1163,16 @@ function raceAnnotations(dates) {
             <div class="rh-sep"></div>
             <div class="rh-row">
                 <div class="ws-tip rh-metric"><div class="rh-val">${rflVal!==null?rflVal+'%':'-'}</div><div class="rh-label">RFL</div><div class="tip">Relative fitness level on race day (shift(1) — fitness coming into the race)</div></div>
-                <div class="ws-tip rh-metric"><div class="rh-val rh-sm">${r.e14}<span class="rh-unit">min</span></div><div class="rh-label">Effort 14d</div><div class="tip">Minutes at ${r.dist_cat} race zone in 14 days before race (per-second NPZ, stryd mode)</div></div>
-                <div class="ws-tip rh-metric"><div class="rh-val rh-sm">${r.e42}<span class="rh-unit">min</span></div><div class="rh-label">Effort 42d</div><div class="tip">Minutes at ${r.dist_cat} race zone in 42 days before race (per-second NPZ, stryd mode)</div></div>
-                <div class="ws-tip rh-metric"><div class="rh-val rh-sm">${tempStr}</div><div class="rh-label">${terrStr}</div><div class="tip">Race day temperature · terrain adjustment factor</div></div>
+                <div class="ws-tip rh-metric"><div class="rh-val">${r.e14}<span class="rh-unit">min</span></div><div class="rh-label">Effort 14d</div><div class="tip">Minutes at ${r.dist_cat} race zone in 14 days before race (per-second NPZ, stryd mode)</div></div>
+                <div class="ws-tip rh-metric"><div class="rh-val">${r.e42}<span class="rh-unit">min</span></div><div class="rh-label">Effort 42d</div><div class="tip">Minutes at ${r.dist_cat} race zone in 42 days before race (per-second NPZ, stryd mode)</div></div>
+                <div class="ws-tip rh-metric"><div class="rh-val">${tempStr}</div><div class="rh-label">${terrStr}</div><div class="tip">Race day temperature · terrain adjustment factor</div></div>
             </div>
             <div class="rh-sep"></div>
             <div class="rh-row">
-                <div class="ws-tip rh-metric"><div class="rh-val rh-sm">${r.lr_total_14}<span class="rh-unit">min</span></div><div class="rh-label">≥${r.lr_threshold}m 14d</div><div class="tip">Total running time beyond ${r.lr_threshold} min in last 14 days</div></div>
-                <div class="ws-tip rh-metric"><div class="rh-val rh-sm">${r.lr_total_42}<span class="rh-unit">min</span></div><div class="rh-label">≥${r.lr_threshold}m 42d</div><div class="tip">Total running time beyond ${r.lr_threshold} min in last 42 days</div></div>
-                <div class="ws-tip rh-metric"><div class="rh-val rh-sm" style="color:#fb923c">${r.lr_z3_14}<span class="rh-unit">min</span></div><div class="rh-label">Z3+ tail 14d</div><div class="tip">Time at Z3+ HR beyond ${r.lr_threshold} min mark in last 14 days (per-second NPZ)</div></div>
-                <div class="ws-tip rh-metric"><div class="rh-val rh-sm" style="color:#fb923c">${r.lr_z3_42}<span class="rh-unit">min</span></div><div class="rh-label">Z3+ tail 42d</div><div class="tip">Time at Z3+ HR beyond ${r.lr_threshold} min mark in last 42 days (per-second NPZ)</div></div>
+                <div class="ws-tip rh-metric"><div class="rh-val">${r.lr_total_14}<span class="rh-unit">min</span></div><div class="rh-label">≥${r.lr_threshold}m 14d</div><div class="tip">Total running time beyond ${r.lr_threshold} min in last 14 days</div></div>
+                <div class="ws-tip rh-metric"><div class="rh-val">${r.lr_total_42}<span class="rh-unit">min</span></div><div class="rh-label">≥${r.lr_threshold}m 42d</div><div class="tip">Total running time beyond ${r.lr_threshold} min in last 42 days</div></div>
+                <div class="ws-tip rh-metric"><div class="rh-val" style="color:#fb923c">${r.lr_z3_14}<span class="rh-unit">min</span></div><div class="rh-label">Z3+ tail 14d</div><div class="tip">Time at Z3+ HR beyond ${r.lr_threshold} min mark in last 14 days (per-second NPZ)</div></div>
+                <div class="ws-tip rh-metric"><div class="rh-val" style="color:#fb923c">${r.lr_z3_42}<span class="rh-unit">min</span></div><div class="rh-label">Z3+ tail 42d</div><div class="tip">Time at Z3+ HR beyond ${r.lr_threshold} min mark in last 42 days (per-second NPZ)</div></div>
             </div>`;
         rhUpdateDelta();
     }
@@ -1247,7 +1246,7 @@ function raceAnnotations(dates) {
     
     
     <div class="footer">
-        Updated: 2026-03-04 14:41<br>
+        Updated: 2026-03-04 14:56<br>
         Data through: 2026-03-04
     </div>
     
