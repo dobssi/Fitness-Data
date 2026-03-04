@@ -9,6 +9,13 @@
 #   DROPBOX_TOKEN / DROPBOX_REFRESH_TOKEN / DROPBOX_APP_KEY / DROPBOX_APP_SECRET
 #   PAUL_TEST_INTERVALS_API_KEY    — Paul Test's intervals.icu API key
 #   PAUL_TEST_INTERVALS_ATHLETE_ID — Paul Test's intervals.icu athlete ID
+#
+# INITIAL mode — two sequential jobs, each with their own 6h clock:
+#   rebuild:      FIT ingest + full rebuild + weather fetch (~5h). Uploads
+#                 Master_FULL.xlsx + weather cache + persec NPZs to Dropbox.
+#   stepb_deploy: Auto-triggered after rebuild succeeds. Downloads from
+#                 Dropbox, runs StepB + dashboard + deploy (~15 min).
+#                 Also triggered directly by FROM_STEPB / DASHBOARD modes.
 
 name: Paul Test Pipeline
 
@@ -38,22 +45,36 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  pipeline:
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # JOB 1: rebuild
+  # Handles UPDATE / FULL / INITIAL / CLASSIFY_RACES and the lightweight
+  # scheduled check. For INITIAL this is the slow job (~5h): FIT ingest,
+  # full rebuild, weather fetch, persec NPZ upload to Dropbox.
+  # FROM_STEPB and DASHBOARD skip this job entirely.
+  # ═══════════════════════════════════════════════════════════════════════════
+  rebuild:
     runs-on: ubuntu-latest
-    timeout-minutes: 350  # Hard GitHub limit is 6h (360 min) — stay safely under it
+    timeout-minutes: 350  # GitHub hard limit is 6h — stay comfortably under it
+    if: ${{ github.event.inputs.mode != 'FROM_STEPB' && github.event.inputs.mode != 'DASHBOARD' }}
+
+    outputs:
+      continue: ${{ steps.gate.outputs.continue }}
+      new_runs: ${{ steps.fetch.outputs.new_runs }}
+      mode:     ${{ steps.mode.outputs.mode }}
 
     env:
-      DROPBOX_TOKEN: ${{ secrets.DROPBOX_TOKEN }}
+      DROPBOX_TOKEN:         ${{ secrets.DROPBOX_TOKEN }}
       DROPBOX_REFRESH_TOKEN: ${{ secrets.DROPBOX_REFRESH_TOKEN }}
-      DROPBOX_APP_KEY: ${{ secrets.DROPBOX_APP_KEY }}
-      DROPBOX_APP_SECRET: ${{ secrets.DROPBOX_APP_SECRET }}
-      INTERVALS_API_KEY: ${{ secrets.PAUL_TEST_INTERVALS_API_KEY }}
-      INTERVALS_ATHLETE_ID: ${{ secrets.PAUL_TEST_INTERVALS_ATHLETE_ID }}
-      ATHLETE_DIR: athletes/A005
-      ATHLETE_CONFIG_PATH: athletes/A005/athlete.yml
-      DB_BASE: /Running and Cycling/DataPipeline/athletes/A005
-      TZ_LOCAL: Europe/Stockholm
-      PIPELINE_MODE: ${{ github.event.inputs.mode || 'UPDATE' }}
+      DROPBOX_APP_KEY:       ${{ secrets.DROPBOX_APP_KEY }}
+      DROPBOX_APP_SECRET:    ${{ secrets.DROPBOX_APP_SECRET }}
+      INTERVALS_API_KEY:     ${{ secrets.PAUL_TEST_INTERVALS_API_KEY }}
+      INTERVALS_ATHLETE_ID:  ${{ secrets.PAUL_TEST_INTERVALS_ATHLETE_ID }}
+      ATHLETE_DIR:           athletes/A005
+      ATHLETE_CONFIG_PATH:   athletes/A005/athlete.yml
+      DB_BASE:               /Running and Cycling/DataPipeline/athletes/A005
+      TZ_LOCAL:              Europe/Stockholm
+      PIPELINE_MODE:         ${{ github.event.inputs.mode || 'UPDATE' }}
 
     steps:
       - name: Checkout repository
@@ -75,10 +96,13 @@ jobs:
           mkdir -p ${{ env.ATHLETE_DIR }}/data/FIT_downloads
           mkdir -p ${{ env.ATHLETE_DIR }}/persec_cache
           mkdir -p ${{ env.ATHLETE_DIR }}/output/dashboard
+          mkdir -p ${{ env.ATHLETE_DIR }}/output/_weather_cache_openmeteo
 
-      # ═══════════════════════════════════════════════════════════
-      # LIGHTWEIGHT CHECK — runs every time (~30s)
-      # ═══════════════════════════════════════════════════════════
+      - name: Expose mode
+        id: mode
+        run: echo "mode=${{ env.PIPELINE_MODE }}" >> $GITHUB_OUTPUT
+
+      # ── Lightweight check ──────────────────────────────────────────────────
 
       - name: Restore sync state
         uses: actions/cache/restore@v4
@@ -91,7 +115,7 @@ jobs:
             paul_test-sync-v2-
 
       - name: Download fits.zip for dedup
-        if: ${{ github.event.inputs.sync != 'false' && env.PIPELINE_MODE != 'DASHBOARD' && env.PIPELINE_MODE != 'FROM_STEPB' }}
+        if: ${{ github.event.inputs.sync != 'false' }}
         run: |
           python ci/dropbox_sync.py download \
             --dropbox-base "${{ env.DB_BASE }}" \
@@ -107,7 +131,7 @@ jobs:
 
       - name: Check for new activities
         id: fetch
-        if: ${{ github.event.inputs.sync != 'false' && env.PIPELINE_MODE != 'DASHBOARD' && env.PIPELINE_MODE != 'FROM_STEPB' }}
+        if: ${{ github.event.inputs.sync != 'false' }}
         run: |
           python fetch_fit_files.py \
             --fit-dir ${{ env.ATHLETE_DIR }}/data/FIT_downloads \
@@ -146,9 +170,7 @@ jobs:
             ${{ env.ATHLETE_DIR }}/pending_activities.csv
           key: paul_test-sync-v2-${{ github.run_number }}
 
-      # ═══════════════════════════════════════════════════════════
-      # FULL PIPELINE — only if new data or manual dispatch
-      # ═══════════════════════════════════════════════════════════
+      # ── Full pipeline ──────────────────────────────────────────────────────
 
       - name: Restore persec cache
         if: ${{ steps.gate.outputs.continue == 'true' }}
@@ -175,7 +197,7 @@ jobs:
         continue-on-error: true
 
       - name: Sync athlete data from intervals.icu
-        if: ${{ steps.gate.outputs.continue == 'true' && github.event.inputs.sync != 'false' && env.PIPELINE_MODE != 'DASHBOARD' }}
+        if: ${{ steps.gate.outputs.continue == 'true' && github.event.inputs.sync != 'false' && env.PIPELINE_MODE != 'CLASSIFY_RACES' }}
         run: |
           python sync_athlete_data.py \
             --athlete-data ${{ env.ATHLETE_DIR }}/athlete_data.csv \
@@ -195,7 +217,6 @@ jobs:
         if: ${{ steps.gate.outputs.continue == 'true' && env.PIPELINE_MODE == 'INITIAL' }}
         run: |
           echo "Fetching intervals.icu FITs to pick up runs after Strava export date..."
-          echo "Resetting sync state so fetch covers the full gap..."
           rm -f ${{ env.ATHLETE_DIR }}/fit_sync_state.json
           python fetch_fit_files.py \
             --fit-dir ${{ env.ATHLETE_DIR }}/data/FIT_downloads \
@@ -206,7 +227,7 @@ jobs:
             --full
         continue-on-error: true
 
-      - name: Rebuild from FIT files (FULL)
+      - name: Rebuild from FIT files (FULL / INITIAL)
         if: ${{ steps.gate.outputs.continue == 'true' && (env.PIPELINE_MODE == 'FULL' || env.PIPELINE_MODE == 'INITIAL') }}
         run: |
           python rebuild_from_fit_zip.py \
@@ -263,8 +284,205 @@ jobs:
             --from-master \
             $SKIP_FLAG
 
+      # StepB runs here for UPDATE / FULL only.
+      # For INITIAL it runs in stepb_deploy (separate job, fresh 6h clock).
+      - name: StepB post-processing (UPDATE / FULL)
+        if: ${{ steps.gate.outputs.continue == 'true' && (env.PIPELINE_MODE == 'UPDATE' || env.PIPELINE_MODE == 'FULL') }}
+        run: |
+          python StepB_PostProcess.py \
+            --master ${{ env.ATHLETE_DIR }}/output/Master_FULL.xlsx \
+            --persec-cache-dir ${{ env.ATHLETE_DIR }}/persec_cache \
+            --out ${{ env.ATHLETE_DIR }}/output/Master_FULL_post.xlsx \
+            --model-json re_model_generic.json \
+            --override-file ${{ env.ATHLETE_DIR }}/activity_overrides.xlsx \
+            --athlete-data ${{ env.ATHLETE_DIR }}/athlete_data.csv \
+            --mass-kg 75 \
+            --tz ${{ env.TZ_LOCAL }} \
+            --runner-dob "1969-05-27" \
+            --runner-gender male \
+            --strava ${{ env.ATHLETE_DIR }}/data/activities.csv \
+            --progress-every 50
+
+      - name: Generate dashboard (UPDATE / FULL)
+        if: ${{ steps.gate.outputs.continue == 'true' && (env.PIPELINE_MODE == 'UPDATE' || env.PIPELINE_MODE == 'FULL') }}
+        env:
+          MASTER_FILE:       ${{ env.ATHLETE_DIR }}/output/Master_FULL_post.xlsx
+          OUTPUT_FILE:       ${{ env.ATHLETE_DIR }}/output/dashboard/index.html
+          ATHLETE_DATA_FILE: ${{ env.ATHLETE_DIR }}/athlete_data.csv
+        run: python generate_dashboard.py
+        continue-on-error: true
+
+      - name: Save persec cache
+        uses: actions/cache/save@v4
+        if: ${{ steps.gate.outputs.continue == 'true' }}
+        with:
+          path: ${{ env.ATHLETE_DIR }}/persec_cache
+          key: paul_test-persec-${{ github.run_number }}
+
+      - name: Upload fits.zip to Dropbox (if new FITs added OR INITIAL / FULL)
+        if: ${{ steps.gate.outputs.continue == 'true' && (steps.fetch.outputs.new_runs == 'true' || env.PIPELINE_MODE == 'INITIAL' || env.PIPELINE_MODE == 'FULL') }}
+        run: |
+          python ci/dropbox_sync.py upload \
+            --dropbox-base "${{ env.DB_BASE }}" \
+            --local-prefix "${{ env.ATHLETE_DIR }}" \
+            --items data/fits.zip
+        continue-on-error: true
+
+      # Safety upload — always runs, preserves critical files even on timeout.
+      - name: Safety upload — weather cache + Master (always)
+        if: ${{ always() && steps.gate.outputs.continue == 'true' }}
+        run: |
+          python ci/dropbox_sync.py upload \
+            --dropbox-base "${{ env.DB_BASE }}" \
+            --local-prefix "${{ env.ATHLETE_DIR }}" \
+            --items output/_weather_cache_openmeteo/openmeteo_cache.sqlite \
+                    output/Master_FULL.xlsx \
+                    output/Master_FULL_post.xlsx
+        continue-on-error: true
+
+      - name: Upload results to Dropbox (UPDATE / FULL / CLASSIFY_RACES)
+        if: ${{ steps.gate.outputs.continue == 'true' && (env.PIPELINE_MODE == 'UPDATE' || env.PIPELINE_MODE == 'FULL' || env.PIPELINE_MODE == 'CLASSIFY_RACES') }}
+        run: |
+          python ci/dropbox_sync.py upload \
+            --dropbox-base "${{ env.DB_BASE }}" \
+            --local-prefix "${{ env.ATHLETE_DIR }}" \
+            --items activity_overrides.xlsx \
+                    athlete_data.csv \
+                    data/activities.csv \
+                    fit_sync_state.json \
+                    pending_activities.csv \
+                    output/Master_FULL.xlsx \
+                    output/Master_FULL_post.xlsx \
+                    output/dashboard/index.html \
+                    output/_weather_cache_openmeteo/openmeteo_cache.sqlite \
+            --cache-dir ${{ env.ATHLETE_DIR }}/persec_cache
+
+      # ── Deploy (UPDATE / FULL) ─────────────────────────────────────────────
+      - name: Prepare dashboard for Pages (UPDATE / FULL)
+        if: ${{ steps.gate.outputs.continue == 'true' && (env.PIPELINE_MODE == 'UPDATE' || env.PIPELINE_MODE == 'FULL') }}
+        run: |
+          mkdir -p docs/paul_test
+          cp -f ${{ env.ATHLETE_DIR }}/output/dashboard/index.html docs/paul_test/index.html 2>/dev/null || true
+        continue-on-error: true
+
+      - name: Deploy to GitHub Pages (UPDATE / FULL)
+        uses: peaceiris/actions-gh-pages@v3
+        if: ${{ steps.gate.outputs.continue == 'true' && (env.PIPELINE_MODE == 'UPDATE' || env.PIPELINE_MODE == 'FULL') }}
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./docs
+          publish_branch: gh-pages
+          keep_files: true
+        continue-on-error: true
+
+      # ── Summary ───────────────────────────────────────────────────────────
+      - name: Summary
+        if: always()
+        run: |
+          echo "## Paul Test Pipeline — rebuild job" >> $GITHUB_STEP_SUMMARY
+          echo "- **Mode:** ${{ env.PIPELINE_MODE }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Status:** ${{ job.status }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Time:** $(date -u +%Y-%m-%dT%H:%M:%SZ)" >> $GITHUB_STEP_SUMMARY
+          CACHE="${{ env.ATHLETE_DIR }}/persec_cache"
+          if [ -d "$CACHE" ]; then
+            COUNT=$(find "$CACHE" -name "*.npz" | wc -l)
+            echo "- **NPZ cache:** $COUNT files" >> $GITHUB_STEP_SUMMARY
+          fi
+          MASTER="${{ env.ATHLETE_DIR }}/output/Master_FULL.xlsx"
+          if [ -f "$MASTER" ]; then
+            SIZE=$(stat -c%s "$MASTER" 2>/dev/null || echo "?")
+            echo "- **Master_FULL:** $SIZE bytes" >> $GITHUB_STEP_SUMMARY
+          fi
+
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # JOB 2: stepb_deploy
+  # Runs StepB + dashboard + GitHub Pages deploy.
+  # Auto-triggered after INITIAL rebuild succeeds (fresh 6h clock).
+  # Also triggered directly via FROM_STEPB or DASHBOARD modes.
+  # ═══════════════════════════════════════════════════════════════════════════
+  stepb_deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    needs: [rebuild]
+
+    # Conditions:
+    #  - INITIAL rebuild succeeded  → auto-chain into StepB + deploy
+    #  - FROM_STEPB or DASHBOARD    → rebuild job was skipped, run directly
+    if: |
+      always() && (
+        (needs.rebuild.result == 'success' && needs.rebuild.outputs.mode == 'INITIAL') ||
+        github.event.inputs.mode == 'FROM_STEPB' ||
+        github.event.inputs.mode == 'DASHBOARD'
+      )
+
+    env:
+      DROPBOX_TOKEN:         ${{ secrets.DROPBOX_TOKEN }}
+      DROPBOX_REFRESH_TOKEN: ${{ secrets.DROPBOX_REFRESH_TOKEN }}
+      DROPBOX_APP_KEY:       ${{ secrets.DROPBOX_APP_KEY }}
+      DROPBOX_APP_SECRET:    ${{ secrets.DROPBOX_APP_SECRET }}
+      INTERVALS_API_KEY:     ${{ secrets.PAUL_TEST_INTERVALS_API_KEY }}
+      INTERVALS_ATHLETE_ID:  ${{ secrets.PAUL_TEST_INTERVALS_ATHLETE_ID }}
+      ATHLETE_DIR:           athletes/A005
+      ATHLETE_CONFIG_PATH:   athletes/A005/athlete.yml
+      DB_BASE:               /Running and Cycling/DataPipeline/athletes/A005
+      TZ_LOCAL:              Europe/Stockholm
+      PIPELINE_MODE:         ${{ github.event.inputs.mode || 'FROM_STEPB' }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Create directories
+        run: |
+          mkdir -p ${{ env.ATHLETE_DIR }}/persec_cache
+          mkdir -p ${{ env.ATHLETE_DIR }}/output/dashboard
+          mkdir -p ${{ env.ATHLETE_DIR }}/output/_weather_cache_openmeteo
+
+      - name: Restore persec cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ env.ATHLETE_DIR }}/persec_cache
+          key: paul_test-persec-${{ github.run_number }}
+          restore-keys: |
+            paul_test-persec-
+
+      - name: Download data from Dropbox
+        run: |
+          python ci/dropbox_sync.py download \
+            --dropbox-base "${{ env.DB_BASE }}" \
+            --local-prefix "${{ env.ATHLETE_DIR }}" \
+            --items data/activities.csv \
+                    activity_overrides.xlsx \
+                    athlete_data.csv \
+                    output/Master_FULL.xlsx \
+                    output/Master_FULL_post.xlsx \
+                    output/_weather_cache_openmeteo/openmeteo_cache.sqlite \
+            --cache-dir ${{ env.ATHLETE_DIR }}/persec_cache
+        continue-on-error: true
+
+      - name: Sync athlete data from intervals.icu
+        if: ${{ env.PIPELINE_MODE != 'DASHBOARD' }}
+        run: |
+          python sync_athlete_data.py \
+            --athlete-data ${{ env.ATHLETE_DIR }}/athlete_data.csv \
+            --nr-tss-oldest 2020-01-01 \
+            --weight-oldest 2020-01-01
+        continue-on-error: true
+
       - name: StepB post-processing
-        if: ${{ steps.gate.outputs.continue == 'true' && env.PIPELINE_MODE != 'DASHBOARD' && env.PIPELINE_MODE != 'CLASSIFY_RACES' }}
+        if: ${{ env.PIPELINE_MODE != 'DASHBOARD' }}
         run: |
           python StepB_PostProcess.py \
             --master ${{ env.ATHLETE_DIR }}/output/Master_FULL.xlsx \
@@ -281,46 +499,14 @@ jobs:
             --progress-every 50
 
       - name: Generate dashboard
-        if: ${{ steps.gate.outputs.continue == 'true' && env.PIPELINE_MODE != 'CLASSIFY_RACES' }}
         env:
-          MASTER_FILE: ${{ env.ATHLETE_DIR }}/output/Master_FULL_post.xlsx
-          OUTPUT_FILE: ${{ env.ATHLETE_DIR }}/output/dashboard/index.html
+          MASTER_FILE:       ${{ env.ATHLETE_DIR }}/output/Master_FULL_post.xlsx
+          OUTPUT_FILE:       ${{ env.ATHLETE_DIR }}/output/dashboard/index.html
           ATHLETE_DATA_FILE: ${{ env.ATHLETE_DIR }}/athlete_data.csv
         run: python generate_dashboard.py
         continue-on-error: true
 
-      - name: Save persec cache
-        uses: actions/cache/save@v4
-        if: ${{ steps.gate.outputs.continue == 'true' }}
-        with:
-          path: ${{ env.ATHLETE_DIR }}/persec_cache
-          key: paul_test-persec-${{ github.run_number }}
-
-      - name: Upload fits.zip to Dropbox (if new FITs added OR INITIAL mode)
-        if: ${{ steps.gate.outputs.continue == 'true' && (steps.fetch.outputs.new_runs == 'true' || env.PIPELINE_MODE == 'INITIAL' || env.PIPELINE_MODE == 'FULL') }}
-        run: |
-          python ci/dropbox_sync.py upload \
-            --dropbox-base "${{ env.DB_BASE }}" \
-            --local-prefix "${{ env.ATHLETE_DIR }}" \
-            --items data/fits.zip
-        continue-on-error: true
-
-      # ── Safety upload — runs even on timeout/failure ──────────
-      # Preserves weather cache + Master files so next INITIAL
-      # doesn't have to re-fetch everything from scratch.
-      - name: Safety upload — weather cache + Master (always)
-        if: ${{ always() && steps.gate.outputs.continue == 'true' }}
-        run: |
-          python ci/dropbox_sync.py upload \
-            --dropbox-base "${{ env.DB_BASE }}" \
-            --local-prefix "${{ env.ATHLETE_DIR }}" \
-            --items output/_weather_cache_openmeteo/openmeteo_cache.sqlite \
-                    output/Master_FULL.xlsx \
-                    output/Master_FULL_post.xlsx
-        continue-on-error: true
-
       - name: Upload results to Dropbox
-        if: ${{ steps.gate.outputs.continue == 'true' }}
         run: |
           python ci/dropbox_sync.py upload \
             --dropbox-base "${{ env.DB_BASE }}" \
@@ -328,18 +514,12 @@ jobs:
             --items activity_overrides.xlsx \
                     athlete_data.csv \
                     data/activities.csv \
-                    fit_sync_state.json \
-                    pending_activities.csv \
-                    output/Master_FULL.xlsx \
                     output/Master_FULL_post.xlsx \
                     output/dashboard/index.html \
                     output/_weather_cache_openmeteo/openmeteo_cache.sqlite \
             --cache-dir ${{ env.ATHLETE_DIR }}/persec_cache
 
-
-      # ─── Deploy dashboard to GitHub Pages ──────────────────
       - name: Prepare dashboard for Pages
-        if: ${{ steps.gate.outputs.continue == 'true' && env.PIPELINE_MODE != 'CLASSIFY_RACES' }}
         run: |
           mkdir -p docs/paul_test
           cp -f ${{ env.ATHLETE_DIR }}/output/dashboard/index.html docs/paul_test/index.html 2>/dev/null || true
@@ -347,7 +527,6 @@ jobs:
 
       - name: Deploy to GitHub Pages
         uses: peaceiris/actions-gh-pages@v3
-        if: ${{ steps.gate.outputs.continue == 'true' && env.PIPELINE_MODE != 'CLASSIFY_RACES' }}
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           publish_dir: ./docs
@@ -355,25 +534,15 @@ jobs:
           keep_files: true
         continue-on-error: true
 
-      # ─── Summary ────────────────────────────────────────────
       - name: Summary
         if: always()
         run: |
-          echo "## Paul Test Pipeline Run Summary" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "- **Trigger:** ${{ github.event_name }}" >> $GITHUB_STEP_SUMMARY
-          echo "- **Mode:** ${{ github.event.inputs.mode || 'UPDATE' }}" >> $GITHUB_STEP_SUMMARY
+          echo "## Paul Test Pipeline — stepb_deploy job" >> $GITHUB_STEP_SUMMARY
+          echo "- **Mode:** ${{ env.PIPELINE_MODE }}" >> $GITHUB_STEP_SUMMARY
           echo "- **Status:** ${{ job.status }}" >> $GITHUB_STEP_SUMMARY
           echo "- **Time:** $(date -u +%Y-%m-%dT%H:%M:%SZ)" >> $GITHUB_STEP_SUMMARY
-          
           MASTER="${{ env.ATHLETE_DIR }}/output/Master_FULL_post.xlsx"
           if [ -f "$MASTER" ]; then
             SIZE=$(stat -c%s "$MASTER" 2>/dev/null || echo "?")
-            echo "- **Master size:** $SIZE bytes" >> $GITHUB_STEP_SUMMARY
-          fi
-          
-          CACHE="${{ env.ATHLETE_DIR }}/persec_cache"
-          if [ -d "$CACHE" ]; then
-            COUNT=$(find "$CACHE" -name "*.npz" | wc -l)
-            echo "- **NPZ cache:** $COUNT files" >> $GITHUB_STEP_SUMMARY
+            echo "- **Master_FULL_post:** $SIZE bytes" >> $GITHUB_STEP_SUMMARY
           fi
