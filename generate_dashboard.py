@@ -1467,17 +1467,19 @@ def get_race_history_data(df, ctl_atl_lookup, zone_data=None):
         rfl = round(row['RFL_Trend'] * 100, 1) if pd.notna(row.get('RFL_Trend')) else None
         rfl_gap = round(row['RFL_gap_Trend'] * 100, 1) if pd.notna(row.get('RFL_gap_Trend')) else None
         
-        # Prediction at the time (mode-aware)
-        _pred_dist_map = {'3K': '5k', '5K': '5k', '10K': '10k', '10M': '10k', 'HM': 'hm', '30K': 'marathon', 'Marathon': 'marathon'}
-        _pred_dist_key = _pred_dist_map.get(dist_cat, '5k')
-        _pred_base_col = f'pred_{_pred_dist_key}_s'
-        _pred_mode_suffix = {'gap': '_gap', 'sim': '_sim'}.get(_cfg_power_mode, '')
-        _pred_col = _pred_base_col + _pred_mode_suffix
-        _pred_s = row.get(_pred_col)
-        # Fallback to base column if mode-specific is missing
-        if (pd.isna(_pred_s) or float(_pred_s) <= 0) if pd.notna(_pred_s) else True:
-            _pred_s = row.get(_pred_base_col)
-        pred_time_s = round(float(_pred_s)) if pd.notna(_pred_s) and float(_pred_s) > 0 else None
+        # Prediction at the time (mode-aware) — only for distances with dedicated prediction columns
+        _pred_dist_map = {'5K': '5k', '10K': '10k', 'HM': 'hm', 'Marathon': 'marathon'}
+        _pred_dist_key = _pred_dist_map.get(dist_cat)
+        pred_time_s = None
+        if _pred_dist_key:
+            _pred_base_col = f'pred_{_pred_dist_key}_s'
+            _pred_mode_suffix = {'gap': '_gap', 'sim': '_sim'}.get(_cfg_power_mode, '')
+            _pred_col = _pred_base_col + _pred_mode_suffix
+            _pred_s = row.get(_pred_col)
+            # Fallback to base column if mode-specific is missing
+            if not (pd.notna(_pred_s) and float(_pred_s) > 0):
+                _pred_s = row.get(_pred_base_col)
+            pred_time_s = round(float(_pred_s)) if pd.notna(_pred_s) and float(_pred_s) > 0 else None
         
         # Conditions
         temp = round(row['avg_temp_c'], 1) if pd.notna(row.get('avg_temp_c')) else None
@@ -4513,7 +4515,7 @@ def generate_html(stats, rf_data, volume_data, ctl_atl_data, ctl_atl_lookup, rfl
         .rh-val {{ font-size: 1.1rem; font-weight: 700; font-family: 'JetBrains Mono'; }}
         .rh-unit {{ font-size: 0.75rem; color: var(--text-dim); margin-left: 1px; }}
         .rh-label {{ font-size: 0.68rem; color: var(--text-dim); margin-top: 1px; }}
-        .rh-sub {{ font-size: 0.58rem; color: var(--text-muted, #6b7280); }}
+        .rh-sub {{ font-size: 0.62rem; color: var(--text-dim); }}
         #rh-delta {{ background: var(--surface2); border-radius: 8px; padding: 10px 14px; overflow: hidden; margin-top: 12px; }}
         .rh-delta-title {{ font-size: 0.72rem; font-weight: 600; color: var(--accent); margin-bottom: 8px; text-transform: uppercase; letter-spacing: 0.04em; }}
         .rh-delta-row {{ display: flex; justify-content: space-between; padding: 3px 0; font-size: 0.78rem; }}
