@@ -1467,6 +1467,18 @@ def get_race_history_data(df, ctl_atl_lookup, zone_data=None):
         rfl = round(row['RFL_Trend'] * 100, 1) if pd.notna(row.get('RFL_Trend')) else None
         rfl_gap = round(row['RFL_gap_Trend'] * 100, 1) if pd.notna(row.get('RFL_gap_Trend')) else None
         
+        # Prediction at the time (mode-aware)
+        _pred_dist_map = {'3K': '5k', '5K': '5k', '10K': '10k', '10M': '10k', 'HM': 'hm', '30K': 'marathon', 'Marathon': 'marathon'}
+        _pred_dist_key = _pred_dist_map.get(dist_cat, '5k')
+        _pred_base_col = f'pred_{_pred_dist_key}_s'
+        _pred_mode_suffix = {'gap': '_gap', 'sim': '_sim'}.get(_cfg_power_mode, '')
+        _pred_col = _pred_base_col + _pred_mode_suffix
+        _pred_s = row.get(_pred_col)
+        # Fallback to base column if mode-specific is missing
+        if (pd.isna(_pred_s) or float(_pred_s) <= 0) if pd.notna(_pred_s) else True:
+            _pred_s = row.get(_pred_base_col)
+        pred_time_s = round(float(_pred_s)) if pd.notna(_pred_s) and float(_pred_s) > 0 else None
+        
         # Conditions
         temp = round(row['avg_temp_c'], 1) if pd.notna(row.get('avg_temp_c')) else None
         terrain = round(row['Terrain_Adj'], 3) if pd.notna(row.get('Terrain_Adj')) else None
@@ -1536,6 +1548,7 @@ def get_race_history_data(df, ctl_atl_lookup, zone_data=None):
             'tsb': tsb,
             'rfl': rfl,
             'rfl_gap': rfl_gap,
+            'pred_s': pred_time_s,
             'e14': round(e14),
             'e42': round(e42),
             'lr_total_14': round(lr_total_14),
@@ -3818,7 +3831,7 @@ def _generate_race_history_html(race_history_data):
             <span class="chart-title">📊 Race History</span>
             <span class="badge" style="font-size:0.68rem">compare any two races</span>
         </div>
-        <div id="rh-cards" style="display:grid;grid-template-columns:1fr;gap:12px;margin-top:8px;max-width:100%;">
+        <div id="rh-cards" style="display:grid;grid-template-columns:1fr;gap:12px;margin-top:8px;max-width:100%;overflow:hidden;">
             <div class="rh-slot" id="rh-slot-0">
                 <div class="rh-picker">
                     <select id="rh-dist-0" class="rh-select rh-dist-select" onchange="rhFilterRaces(0)">
@@ -3900,13 +3913,19 @@ def _generate_race_history_html(race_history_data):
         const condTip=tempTip+(terrDetail?' · '+terrDetail:'');
         const tsbCol=r.tsb!==null?(r.tsb>=0?'#4ade80':'#fbbf24'):'var(--text-dim)';
         const rflVal=(typeof currentMode!=='undefined'&&currentMode==='gap'&&r.rfl_gap!==null)?r.rfl_gap:r.rfl;
+        // Format prediction
+        function fmtSecs(s){{if(!s||s<=0)return'-';const h=Math.floor(s/3600),m=Math.floor((s%3600)/60),sc=Math.floor(s%60);return h>0?h+':'+String(m).padStart(2,'0')+':'+String(sc).padStart(2,'0'):m+':'+String(sc).padStart(2,'0');}}
+        const predStr=r.pred_s?fmtSecs(r.pred_s):null;
+        const predSub=predStr?'pred '+predStr:'';
+        const predDiff=r.pred_s&&r.time_s?r.time_s-r.pred_s:null;
+        const predTip=predDiff!==null?fmtSecs(Math.abs(predDiff))+(predDiff>0?' slower':' faster')+' than predicted':'';
         card.innerHTML=`
             <div class="rh-header">
                 <div class="rh-name">${{r.name}}${{surfBadge}}</div>
                 <div class="rh-date">${{r.date_display}} · ${{r.dist_km}}km (${{r.dist_cat}})</div>
             </div>
             <div class="rh-row">
-                <div class="ws-tip rh-metric"><div class="rh-val" style="color:var(--accent)">${{r.time}}</div><div class="rh-label">Time</div><div class="tip">Elapsed finish time</div></div>
+                <div class="ws-tip rh-metric"><div class="rh-val" style="color:var(--accent)">${{r.time}}</div><div class="rh-label">Time</div><div class="rh-sub">${{predSub}}</div><div class="tip">Elapsed finish time${{predTip?' · '+predTip:''}}</div></div>
                 <div class="ws-tip rh-metric"><div class="rh-val">${{r.pace}}</div><div class="rh-label">/km</div><div class="tip">Average pace per km</div></div>
                 <div class="ws-tip rh-metric"><div class="rh-val">${{rhFmtVal(r.hr)}}</div><div class="rh-label">Avg HR</div><div class="tip">Average heart rate during race</div></div>
                 <div class="ws-tip rh-metric"><div class="rh-val">${{rhFmtVal(r.nag,'%')}}</div><div class="rh-label">nAG</div><div class="rh-sub">${{r.raw_ag?'raw '+r.raw_ag+'%':''}}</div><div class="tip">Normalised age grade (adjusted for temp, terrain, surface)</div></div>
@@ -4477,12 +4496,12 @@ def generate_html(stats, rf_data, volume_data, ctl_atl_data, ctl_atl_lookup, rfl
         #milestoneTimeline::-webkit-scrollbar-thumb {{ background: var(--border); border-radius: 2px; }}
         
         /* Race History */
-        .rh-slot {{ }}
+        .rh-slot {{ min-width: 0; }}
         .rh-picker {{ display: flex; gap: 6px; margin-bottom: 8px; }}
-        .rh-select {{ background: var(--surface2); color: var(--text); border: 1px solid var(--border); border-radius: 6px; padding: 5px 8px; font-size: 0.74rem; font-family: 'DM Sans'; flex: 1; cursor: pointer; min-width: 0; }}
+        .rh-select {{ background: var(--surface2); color: var(--text); border: 1px solid var(--border); border-radius: 6px; padding: 5px 8px; font-size: 0.74rem; font-family: 'DM Sans'; flex: 1; cursor: pointer; min-width: 0; overflow: hidden; text-overflow: ellipsis; }}
         .rh-select:focus {{ outline: none; border-color: var(--accent); }}
         .rh-dist-select {{ flex: 0 0 auto; min-width: 110px; }}
-        .rh-card {{ background: var(--surface2); border-radius: 8px; padding: 14px 16px; transition: all 0.2s; }}
+        .rh-card {{ background: var(--surface2); border-radius: 8px; padding: 14px 16px; transition: all 0.2s; overflow: hidden; }}
         .rh-card.rh-empty {{ border: 1px dashed var(--border); background: transparent; min-height: 50px; display: flex; align-items: center; justify-content: center; padding: 12px; }}
         .rh-header {{ margin-bottom: 8px; }}
         .rh-name {{ font-weight: 600; font-size: 0.85rem; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }}
