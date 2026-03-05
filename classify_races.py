@@ -301,17 +301,18 @@ def _first_match(pattern, text):
 
 def detect_candidates_from_master(master_df: pd.DataFrame, lthr: float,
                                   max_hr: float) -> pd.DataFrame:
-    """Find ALL runs at standard race distances with HR above 75% LTHR.
+    """Find ALL runs at standard race distances that could be races.
     
+    HR above 82% LTHR, OR no HR data (classify_run handles no-HR via pace).
     No pace filter. The classify_run() step handles the actual classification.
     """
     df = master_df.copy()
-    valid = df[df['avg_hr'].notna() & df['distance_km'].notna()].copy()
+    valid = df[df['distance_km'].notna()].copy()
     
     candidates = []
     for _, row in valid.iterrows():
         dist = row['distance_km']
-        hr = row['avg_hr']
+        hr = row.get('avg_hr', 0) or 0
         
         matched = False
         official_dist = None
@@ -328,7 +329,9 @@ def detect_candidates_from_master(master_df: pd.DataFrame, lthr: float,
         
         # Minimum HR floor — below 82% LTHR nothing is a race in calibration data
         # (Easy parkruns at 83-88% are caught by parkrun name detection instead)
-        if lthr > 0 and hr < lthr * 0.82:
+        # Exception: no HR data (hr == 0 or NaN) — let through for pace-based classification
+        has_hr = hr > 0
+        if has_hr and lthr > 0 and hr < lthr * 0.82:
             continue
         
         candidates.append({
