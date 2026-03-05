@@ -1470,6 +1470,7 @@ def get_race_history_data(df, ctl_atl_lookup, zone_data=None):
         # Conditions
         temp = round(row['avg_temp_c'], 1) if pd.notna(row.get('avg_temp_c')) else None
         terrain = round(row['Terrain_Adj'], 3) if pd.notna(row.get('Terrain_Adj')) else None
+        solar_wm2 = round(row['avg_solar_rad_wm2']) if pd.notna(row.get('avg_solar_rad_wm2')) else None
         surface = row.get('surface', 'road')
         surface = str(surface) if pd.notna(surface) else 'road'
         
@@ -1541,6 +1542,7 @@ def get_race_history_data(df, ctl_atl_lookup, zone_data=None):
             'lr_z3_42': round(lr_z3_42),
             'lr_threshold': LR_THRESHOLD_MIN,
             'temp': temp,
+            'solar': solar_wm2,
             'terrain': terrain,
             'surface': surface,
         })
@@ -3855,6 +3857,11 @@ def _generate_race_history_html(race_history_data):
         card.classList.remove('rh-empty');
         const surfBadge=r.surface!=='road'?'<span class="rh-surf">'+r.surface.toUpperCase()+'</span>':'';
         const tempStr=r.temp!==null?r.temp+'°C':'-';
+        const solarBoost=(r.solar&&r.solar>0)?r.solar/200.0:0;
+        const tempEff=r.temp!==null?Math.round(r.temp+solarBoost):null;
+        const sunIcon=r.solar>400?'☀️':r.solar>200?'🌤️':'';
+        const tempDisplay=tempEff!==null?(sunIcon+tempEff+'°C'):'-';
+        const tempTip=r.temp!==null?(solarBoost>0.5?r.temp+'°C shade + '+solarBoost.toFixed(0)+'°C solar = '+tempEff+'°C effective':r.temp+'°C (low/no solar)'):'No temperature data';
         const terrStr=r.terrain!==null&&r.terrain!==1.0?(r.terrain<1?'↓'+(((1-r.terrain)*100).toFixed(1))+'%':'↑'+(((r.terrain-1)*100).toFixed(1))+'%'):'flat';
         const tsbCol=r.tsb!==null?(r.tsb>=0?'#4ade80':'#fbbf24'):'var(--text-dim)';
         const rflVal=(typeof currentMode!=='undefined'&&currentMode==='gap'&&r.rfl_gap!==null)?r.rfl_gap:r.rfl;
@@ -3878,18 +3885,18 @@ def _generate_race_history_html(race_history_data):
             </div>
             <div class="rh-sep"></div>
             <div class="rh-row">
-                <div class="ws-tip rh-metric"><div class="rh-val">${{rflVal!==null?rflVal+'%':'-'}}</div><div class="rh-label">RFL</div><div class="tip">Relative fitness level on race day (shift(1) — fitness coming into the race)</div></div>
-                <div class="ws-tip rh-metric"><div class="rh-val">${{r.e14}}<span class="rh-unit">min</span></div><div class="rh-label">Effort 14d</div><div class="tip">Minutes at ${{r.dist_cat}} race zone in 14 days before race (per-second NPZ, {_cfg_power_mode} mode)</div></div>
-                <div class="ws-tip rh-metric"><div class="rh-val">${{r.e42}}<span class="rh-unit">min</span></div><div class="rh-label">Effort 42d</div><div class="tip">Minutes at ${{r.dist_cat}} race zone in 42 days before race (per-second NPZ, {_cfg_power_mode} mode)</div></div>
-                <div class="ws-tip rh-metric"><div class="rh-val">${{tempStr}}</div><div class="rh-label">${{terrStr}}</div><div class="tip">Race day temperature · terrain adjustment factor</div></div>
+                <div class="ws-tip rh-metric"><div class="rh-val" style="color:#4ade80">${{rflVal!==null?rflVal+'%':'-'}}</div><div class="rh-label">RFL</div><div class="tip">Relative fitness level coming into the race</div></div>
+                <div class="ws-tip rh-metric"><div class="rh-val">${{r.e14}}<span class="rh-unit">min</span></div><div class="rh-label">Effort 14d</div><div class="tip">Minutes at ${{r.dist_cat}} race effort in 14 days before race</div></div>
+                <div class="ws-tip rh-metric"><div class="rh-val">${{r.e42}}<span class="rh-unit">min</span></div><div class="rh-label">Effort 42d</div><div class="tip">Minutes at ${{r.dist_cat}} race effort in 42 days before race</div></div>
+                <div class="ws-tip rh-metric"><div class="rh-val">${{tempDisplay}}</div><div class="rh-label">${{terrStr}}</div><div class="tip">${{tempTip}} · terrain adjustment</div></div>
             </div>
-            <div class="rh-sep"></div>
+            ${{r.dist_km >= 21.0 ? `<div class="rh-sep"></div>
             <div class="rh-row">
-                <div class="ws-tip rh-metric"><div class="rh-val">${{r.lr_total_14}}<span class="rh-unit">min</span></div><div class="rh-label">≥${{r.lr_threshold}}m 14d</div><div class="tip">Total running time beyond ${{r.lr_threshold}} min in last 14 days</div></div>
-                <div class="ws-tip rh-metric"><div class="rh-val">${{r.lr_total_42}}<span class="rh-unit">min</span></div><div class="rh-label">≥${{r.lr_threshold}}m 42d</div><div class="tip">Total running time beyond ${{r.lr_threshold}} min in last 42 days</div></div>
-                <div class="ws-tip rh-metric"><div class="rh-val" style="color:#fb923c">${{r.lr_z3_14}}<span class="rh-unit">min</span></div><div class="rh-label">Z3+ tail 14d</div><div class="tip">Time at Z3+ HR beyond ${{r.lr_threshold}} min mark in last 14 days (per-second NPZ)</div></div>
-                <div class="ws-tip rh-metric"><div class="rh-val" style="color:#fb923c">${{r.lr_z3_42}}<span class="rh-unit">min</span></div><div class="rh-label">Z3+ tail 42d</div><div class="tip">Time at Z3+ HR beyond ${{r.lr_threshold}} min mark in last 42 days (per-second NPZ)</div></div>
-            </div>`;
+                <div class="ws-tip rh-metric"><div class="rh-val" style="color:#a78bfa">${{r.lr_total_14}}<span class="rh-unit">min</span></div><div class="rh-label">≥${{r.lr_threshold}}m 14d</div><div class="tip">Total running time beyond ${{r.lr_threshold}} min in last 14 days</div></div>
+                <div class="ws-tip rh-metric"><div class="rh-val" style="color:#a78bfa">${{r.lr_total_42}}<span class="rh-unit">min</span></div><div class="rh-label">≥${{r.lr_threshold}}m 42d</div><div class="tip">Total running time beyond ${{r.lr_threshold}} min in last 42 days</div></div>
+                <div class="ws-tip rh-metric"><div class="rh-val" style="color:#fb923c">${{r.lr_z3_14}}<span class="rh-unit">min</span></div><div class="rh-label">Z3+ tail 14d</div><div class="tip">Time at Z3+ HR beyond ${{r.lr_threshold}} min mark in last 14 days</div></div>
+                <div class="ws-tip rh-metric"><div class="rh-val" style="color:#fb923c">${{r.lr_z3_42}}<span class="rh-unit">min</span></div><div class="rh-label">Z3+ tail 42d</div><div class="tip">Time at Z3+ HR beyond ${{r.lr_threshold}} min mark in last 42 days</div></div>
+            </div>` : ''}}`;
         rhUpdateDelta();
     }}
     function rhUpdateDelta(){{
@@ -3920,8 +3927,8 @@ def _generate_race_history_html(race_history_data):
         d('TSB',a.tsb,b.tsb,'',false);
         d('14d effort',a.e14,b.e14,' min',false);
         d('42d effort',a.e42,b.e42,' min',false);
-        d('Long 14d',a.lr_total_14,b.lr_total_14,' min',false);
-        d('Long 42d',a.lr_total_42,b.lr_total_42,' min',false);
+        if(a.dist_km>=21.0||b.dist_km>=21.0){{d('Long 14d',a.lr_total_14,b.lr_total_14,' min',false);
+        d('Long 42d',a.lr_total_42,b.lr_total_42,' min',false);}}
         d('Avg HR',a.hr,b.hr,' bpm',true);
         if(rows.length===0){{el.style.display='none';return;}}
         el.innerHTML='<div class="rh-delta-title">Δ '+a.date_display+' → '+b.date_display+'</div>'+rows.join('');
@@ -4442,18 +4449,18 @@ def generate_html(stats, rf_data, volume_data, ctl_atl_data, ctl_atl_lookup, rfl
         .rh-dist-select {{ flex: 0 0 auto; min-width: 110px; }}
         .rh-card {{ background: var(--surface2); border-radius: 8px; padding: 14px 16px; transition: all 0.2s; overflow: hidden; }}
         .rh-card.rh-empty {{ border: 1px dashed var(--border); background: transparent; min-height: 50px; display: flex; align-items: center; justify-content: center; padding: 12px; }}
-        .rh-header {{ margin-bottom: 10px; }}
+        .rh-header {{ margin-bottom: 8px; }}
         .rh-name {{ font-weight: 600; font-size: 0.85rem; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }}
         .rh-surf {{ font-size: 0.58rem; padding: 1px 5px; border-radius: 3px; background: #f59e0b22; color: #f59e0b; font-weight: 600; margin-left: 6px; vertical-align: middle; letter-spacing: 0.03em; }}
         .rh-date {{ font-size: 0.7rem; color: var(--text-dim); font-family: 'JetBrains Mono'; margin-top: 2px; }}
-        .rh-row {{ display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; padding: 6px 0; }}
-        .rh-sep {{ height: 1px; background: var(--border); opacity: 0.5; }}
+        .rh-row {{ display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; padding: 4px 0; }}
+        .rh-sep {{ height: 1px; background: var(--border); opacity: 0.5; margin: 4px 0; }}
         .rh-metric {{ text-align: center; padding: 2px 0; position: relative; }}
-        .rh-val {{ font-size: 0.95rem; font-weight: 700; font-family: 'JetBrains Mono'; }}
-        .rh-unit {{ font-size: 0.68rem; color: var(--text-dim); margin-left: 1px; }}
-        .rh-label {{ font-size: 0.63rem; color: var(--text-dim); margin-top: 1px; }}
+        .rh-val {{ font-size: 1.1rem; font-weight: 700; font-family: 'JetBrains Mono'; }}
+        .rh-unit {{ font-size: 0.75rem; color: var(--text-dim); margin-left: 1px; }}
+        .rh-label {{ font-size: 0.68rem; color: var(--text-dim); margin-top: 1px; }}
         .rh-sub {{ font-size: 0.58rem; color: var(--text-muted, #6b7280); }}
-        #rh-delta {{ background: var(--surface2); border-radius: 8px; padding: 10px 14px; overflow: hidden; }}
+        #rh-delta {{ background: var(--surface2); border-radius: 8px; padding: 10px 14px; overflow: hidden; margin-top: 12px; }}
         .rh-delta-title {{ font-size: 0.72rem; font-weight: 600; color: var(--accent); margin-bottom: 8px; text-transform: uppercase; letter-spacing: 0.04em; }}
         .rh-delta-row {{ display: flex; justify-content: space-between; padding: 3px 0; font-size: 0.78rem; }}
         .rh-delta-label {{ color: var(--text-dim); }}
