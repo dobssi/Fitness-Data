@@ -344,9 +344,13 @@ jobs:
                     output/Master_FULL_post.xlsx
         continue-on-error: true
 
-      - name: Upload results to Dropbox (UPDATE / FULL / CLASSIFY_RACES)
-        if: ${{ steps.gate.outputs.continue == 'true' && (env.PIPELINE_MODE == 'UPDATE' || env.PIPELINE_MODE == 'FULL' || env.PIPELINE_MODE == 'CLASSIFY_RACES') }}
+      - name: Upload results to Dropbox (UPDATE / FULL / INITIAL / CLASSIFY_RACES)
+        if: ${{ steps.gate.outputs.continue == 'true' && (env.PIPELINE_MODE == 'UPDATE' || env.PIPELINE_MODE == 'FULL' || env.PIPELINE_MODE == 'INITIAL' || env.PIPELINE_MODE == 'CLASSIFY_RACES') }}
         run: |
+          CACHE_UPLOAD=""
+          if [ "${{ env.PIPELINE_MODE }}" != "INITIAL" ]; then
+            CACHE_UPLOAD="--cache-dir ${{ env.ATHLETE_DIR }}/persec_cache"
+          fi
           python ci/dropbox_sync.py upload \
             --dropbox-base "${{ env.DB_BASE }}" \
             --local-prefix "${{ env.ATHLETE_DIR }}" \
@@ -359,7 +363,7 @@ jobs:
                     output/Master_FULL_post.xlsx \
                     output/dashboard/index.html \
                     output/_weather_cache_openmeteo/openmeteo_cache.sqlite \
-            --cache-dir ${{ env.ATHLETE_DIR }}/persec_cache
+            $CACHE_UPLOAD
 
       # ── Deploy (UPDATE / FULL) ─────────────────────────────────────────────
       - name: Prepare dashboard for Pages (UPDATE / FULL)
@@ -520,8 +524,7 @@ jobs:
                     data/activities.csv \
                     output/Master_FULL_post.xlsx \
                     output/dashboard/index.html \
-                    output/_weather_cache_openmeteo/openmeteo_cache.sqlite \
-            --cache-dir ${{ env.ATHLETE_DIR }}/persec_cache
+                    output/_weather_cache_openmeteo/openmeteo_cache.sqlite
 
       - name: Prepare dashboard for Pages
         run: |
