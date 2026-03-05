@@ -411,7 +411,7 @@ jobs:
   # ═══════════════════════════════════════════════════════════════════════════
   stepb_deploy:
     runs-on: ubuntu-latest
-    timeout-minutes: 90  # Generous for first persec cache sync; drop to 60 after
+    timeout-minutes: 120  # First persec cache sync; drop to 45 after
     needs: [rebuild]
 
     # Conditions:
