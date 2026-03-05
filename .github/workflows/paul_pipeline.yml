@@ -524,7 +524,8 @@ jobs:
                     data/activities.csv \
                     output/Master_FULL_post.xlsx \
                     output/dashboard/index.html \
-                    output/_weather_cache_openmeteo/openmeteo_cache.sqlite
+                    output/_weather_cache_openmeteo/openmeteo_cache.sqlite \
+            --cache-dir ${{ env.ATHLETE_DIR }}/persec_cache
 
       - name: Prepare dashboard for Pages
         run: |
