@@ -3497,6 +3497,78 @@ def refresh_activity_names(dfm: pd.DataFrame, strava_path: str, tz_local: str) -
     return updated
 
 
+# ─── v52: Auto-exclude junk/duplicate activities ─────────────────────────────
+# Vectorised pass that flags activities which should not contribute to
+# RF_Trend, TSS/CTL/ATL/TSB, or volume charts.  Sets:
+#   auto_exclude = 1        (flagged)
+#   auto_exclude_reason     (human-readable reason)
+#   Factor = 0, TSS = 0     (nullified in the per-row loop later)
+#
+# Categories (applied in priority order — first match wins):
+#   1. timestamp_duplicate  — same date as an earlier row (Strava+Garmin
+#                             double-import, multi-sport split files)
+#   2. no_data              — NaN distance or NaN pace (corrupt / non-running)
+#   3. sub_1km              — distance < 1 km (warmups, calibrations, fragments)
+#   4. sub_5min             — elapsed_time < 300s (strides, aborted recordings)
+#   5. cycling_segment      — pace < 3:00/km AND distance > 5 km (duathlon bike legs)
+#   6. very_slow            — pace > 10 min/km (walks, GPS errors, split fragments)
+#   7. no_hr                — avg_hr missing or zero (can't compute RF)
+
+def apply_auto_excludes(dfm: pd.DataFrame) -> pd.DataFrame:
+    """Flag and nullify junk/duplicate activities."""
+
+    print("\n=== v52: Auto-excluding junk/duplicate activities ===")
+
+    dist = pd.to_numeric(dfm['distance_km'], errors='coerce')
+    pace = pd.to_numeric(dfm['avg_pace_min_per_km'], errors='coerce')
+    elapsed = pd.to_numeric(dfm['elapsed_time_s'], errors='coerce')
+    hr = pd.to_numeric(dfm['avg_hr'], errors='coerce')
+
+    # Build reason column — first match wins (check order matters)
+    reason = pd.Series("", index=dfm.index)
+
+    # 7. No HR (lowest priority — set first, gets overwritten by higher)
+    reason = reason.where(~(hr.isna() | (hr == 0)), "no_hr")
+
+    # 6. Very slow
+    reason = reason.where(~(pace > 10), "very_slow")
+
+    # 5. Cycling segment
+    reason = reason.where(~((pace < 3.0) & (dist > 5)), "cycling_segment")
+
+    # 4. Sub-5min
+    reason = reason.where(~(elapsed < 300), "sub_5min")
+
+    # 3. Sub-1km
+    reason = reason.where(~(dist < 1.0), "sub_1km")
+
+    # 2. No data
+    reason = reason.where(~(dist.isna() | pace.isna()), "no_data")
+
+    # 1. Timestamp duplicate (highest priority)
+    ts_dupe = dfm.duplicated(subset=['date'], keep='first')
+    reason = reason.where(~ts_dupe, "timestamp_duplicate")
+
+    # Apply: any non-empty reason → auto_exclude = 1
+    mask = reason != ""
+    dfm.loc[mask, 'auto_exclude'] = 1
+    dfm.loc[mask, 'auto_exclude_reason'] = reason[mask]
+
+    # Nullify fitness/load contributions
+    dfm.loc[mask, 'Factor'] = 0
+    dfm.loc[mask, 'TSS'] = 0
+
+    # Summary
+    counts = reason[mask].value_counts()
+    total = mask.sum()
+    print(f"  Flagged {total} of {len(dfm)} activities:")
+    for r, n in counts.items():
+        print(f"    {r}: {n}")
+    print(f"  Remaining clean: {len(dfm) - total}")
+
+    return dfm
+
+
 def main() -> int:
     args = parse_args()
 
@@ -3577,20 +3649,29 @@ def main() -> int:
         "RFL_sim_Trend",
         # v52: Z5 intensity fraction for TSS boost
         "z5_frac",
+        # v52: Auto-exclude flag for junk/duplicate activities
+        "auto_exclude",
+        "auto_exclude_reason",
     ]
     for c in needed_cols:
         if c not in dfm.columns:
             if c in ("hr_corrected", "RF_window_shifted", "distance_corrected"):
                 dfm[c] = False
-            elif c in ("race_flag", "parkrun"):
+            elif c in ("race_flag", "parkrun", "auto_exclude"):
                 dfm[c] = 0
             elif c in ("surface_adj", "Temp_Adj", "Terrain_Adj", "Elevation_Adj", "Era_Adj", "Total_Adj", "Intensity_Adj", "Duration_Adj"):
                 dfm[c] = 1.0
-            elif c in ("surface",):
+            elif c in ("surface", "auto_exclude_reason"):
                 dfm[c] = ""
             else:
                 dfm[c] = np.nan
     
+    # ─── v52: Auto-exclude junk/duplicate activities ────────────────────────
+    # Sets auto_exclude flag + nullifies Factor and TSS for activities that
+    # should not contribute to fitness metrics or training load.
+    # Runs BEFORE overrides so manual factor=0 overrides are additive.
+    dfm = apply_auto_excludes(dfm)
+
     # v43: Era adjusters calculated after main loop (when RE_avg is fresh)
     era_csv_path = os.path.join(os.path.dirname(args.out), "stryd_era_adjusters.csv")
 
@@ -4186,19 +4267,24 @@ def main() -> int:
         rf_adj = calc_rf_adj(rf_raw, total_adj, None)  # No jump cap in first pass
         dfm.at[i, 'RF_adj'] = float(rf_adj) if np.isfinite(rf_adj) else np.nan
         
-        # Factor (weighting for RF trend)
-        distance_m = pd.to_numeric(row.get('distance_km', np.nan), errors='coerce') * 1000
-        avg_hr = dfm.at[i, 'avg_hr']
-        factor = calc_factor(distance_m, avg_hr, rf_adj)
-        dfm.at[i, 'Factor'] = float(factor) if np.isfinite(factor) else np.nan
-        
-        # TSS (will be refined after RFL is calculated)
-        moving_time_s = pd.to_numeric(row.get('moving_time_s', np.nan), errors='coerce')
-        terrain_adj = dfm.at[i, 'Terrain_Adj']
-        is_race = bool(dfm.at[i, 'race_flag'])
-        # RFL not yet available, use None for initial TSS
-        tss = calc_tss(moving_time_s, avg_hr, None, terrain_adj, distance_m, is_race)
-        dfm.at[i, 'TSS'] = float(tss) if np.isfinite(tss) else np.nan
+        # v52: Skip Factor/TSS for auto-excluded activities (keep them at 0)
+        if dfm.at[i, 'auto_exclude'] == 1:
+            dfm.at[i, 'Factor'] = 0
+            dfm.at[i, 'TSS'] = 0
+        else:
+            # Factor (weighting for RF trend)
+            distance_m = pd.to_numeric(row.get('distance_km', np.nan), errors='coerce') * 1000
+            avg_hr = dfm.at[i, 'avg_hr']
+            factor = calc_factor(distance_m, avg_hr, rf_adj)
+            dfm.at[i, 'Factor'] = float(factor) if np.isfinite(factor) else np.nan
+            
+            # TSS (will be refined after RFL is calculated)
+            moving_time_s = pd.to_numeric(row.get('moving_time_s', np.nan), errors='coerce')
+            terrain_adj = dfm.at[i, 'Terrain_Adj']
+            is_race = bool(dfm.at[i, 'race_flag'])
+            # RFL not yet available, use None for initial TSS
+            tss = calc_tss(moving_time_s, avg_hr, None, terrain_adj, distance_m, is_race)
+            dfm.at[i, 'TSS'] = float(tss) if np.isfinite(tss) else np.nan
 
         updated += 1
         _progress(i, label + " (done)")
@@ -4901,6 +4987,9 @@ def main() -> int:
     print(f"  Recalculating TSS with RFL (using {_tss_rfl_col})...")
     _z5_boost_count = 0
     for i, row in dfm.iterrows():
+        # v52: Skip auto-excluded activities — keep TSS at 0
+        if row.get('auto_exclude', 0) == 1:
+            continue
         rfl = row.get(_tss_rfl_col)
         if pd.notna(rfl) and rfl > 0:
             moving_time_s = pd.to_numeric(row.get('moving_time_s', np.nan), errors='coerce')
@@ -5301,6 +5390,8 @@ def main() -> int:
         "Alert_Mask", "Alert_Text",
         "Alert_1", "Alert_1b", "Alert_2", "Alert_3b",
         "parkrun", "surface",
+        # v52: Auto-exclude flag
+        "auto_exclude", "auto_exclude_reason",
         # Phase 2: GAP RF parallel columns
         "RF_gap_median", "RF_gap_adj", "RF_gap_Trend", "RFL_gap", "RFL_gap_Trend", "PS_gap",
         "RFL_gap_Trend_Delta",

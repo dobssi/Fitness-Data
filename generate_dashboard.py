@@ -58,14 +58,21 @@ def load_and_process_data():
     df['date'] = pd.to_datetime(df['date'])
     df = df.sort_values('date').reset_index(drop=True)
     
-    # Filter out implausible runs (e.g. merged multisport activities like duathlons)
-    # Sub-3:00/km pace over 5km+ is physically impossible for running
-    _pace = pd.to_numeric(df.get('avg_pace_min_per_km'), errors='coerce')
-    _dist = pd.to_numeric(df.get('distance_km'), errors='coerce')
-    _implausible = (_pace < 3.0) & (_dist > 5.0)
-    if _implausible.any():
-        print(f"  Filtered {_implausible.sum()} implausible runs (pace < 3:00/km, dist > 5km)")
-        df = df[~_implausible].reset_index(drop=True)
+    # v52: Filter out auto-excluded activities (junk, duplicates, non-running)
+    # These are flagged by StepB's apply_auto_excludes() with auto_exclude=1
+    if 'auto_exclude' in df.columns:
+        _excluded = df['auto_exclude'] == 1
+        if _excluded.any():
+            print(f"  Filtered {_excluded.sum()} auto-excluded activities")
+            df = df[~_excluded].reset_index(drop=True)
+    else:
+        # Fallback for older masters without auto_exclude column
+        _pace = pd.to_numeric(df.get('avg_pace_min_per_km'), errors='coerce')
+        _dist = pd.to_numeric(df.get('distance_km'), errors='coerce')
+        _implausible = (_pace < 3.0) & (_dist > 5.0)
+        if _implausible.any():
+            print(f"  Filtered {_implausible.sum()} implausible runs (pace < 3:00/km, dist > 5km)")
+            df = df[~_implausible].reset_index(drop=True)
     
     print(f"Loaded {len(df)} runs")
     
