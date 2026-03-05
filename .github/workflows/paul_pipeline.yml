@@ -508,6 +508,37 @@ jobs:
             --strava ${{ env.ATHLETE_DIR }}/data/activities.csv \
             --progress-every 50
 
+      # ─── INITIAL/CLASSIFY_RACES: re-classify with predictions available ───
+      # First StepB pass generates predictions (pred_5k_s etc) in the Master.
+      # Re-run classify_races against Master_FULL_post so the pace-based
+      # no-HR fallback can use those predictions. Then re-run StepB to apply
+      # any newly-discovered race flags.
+      - name: Re-classify races (with predictions)
+        if: ${{ env.PIPELINE_MODE == 'INITIAL' || env.PIPELINE_MODE == 'CLASSIFY_RACES' }}
+        run: |
+          python classify_races.py \
+            --master ${{ env.ATHLETE_DIR }}/output/Master_FULL_post.xlsx \
+            --overrides ${{ env.ATHLETE_DIR }}/activity_overrides.xlsx \
+            --athlete-yml ${{ env.ATHLETE_CONFIG_PATH }} \
+            --from-master
+
+      - name: StepB second pass (apply new race flags)
+        if: ${{ env.PIPELINE_MODE == 'INITIAL' || env.PIPELINE_MODE == 'CLASSIFY_RACES' }}
+        run: |
+          python StepB_PostProcess.py \
+            --master ${{ env.ATHLETE_DIR }}/output/Master_FULL.xlsx \
+            --persec-cache-dir ${{ env.ATHLETE_DIR }}/persec_cache \
+            --out ${{ env.ATHLETE_DIR }}/output/Master_FULL_post.xlsx \
+            --model-json re_model_generic.json \
+            --override-file ${{ env.ATHLETE_DIR }}/activity_overrides.xlsx \
+            --athlete-data ${{ env.ATHLETE_DIR }}/athlete_data.csv \
+            --mass-kg 75 \
+            --tz ${{ env.TZ_LOCAL }} \
+            --runner-dob "1969-05-27" \
+            --runner-gender male \
+            --strava ${{ env.ATHLETE_DIR }}/data/activities.csv \
+            --progress-every 50
+
       - name: Generate dashboard
         env:
           MASTER_FILE:       ${{ env.ATHLETE_DIR }}/output/Master_FULL_post.xlsx
