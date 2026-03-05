@@ -3991,6 +3991,17 @@ def _generate_race_history_html(race_history_data):
     }}
     // Init: populate race selects
     [0,1].forEach(slot=>rhFilterRaces(slot));
+    // Position fixed tooltips inside rh-cards on hover
+    document.getElementById('rh-cards').addEventListener('mouseover', function(e) {{
+        const wsTip = e.target.closest('.ws-tip');
+        if (!wsTip) return;
+        const tip = wsTip.querySelector('.tip');
+        if (!tip) return;
+        const rect = wsTip.getBoundingClientRect();
+        tip.style.left = (rect.left + rect.width / 2) + 'px';
+        tip.style.top = (rect.top - 4) + 'px';
+        tip.style.transform = 'translate(-50%, -100%)';
+    }});
     </script>
     '''
 
@@ -4505,6 +4516,7 @@ def generate_html(stats, rf_data, volume_data, ctl_atl_data, ctl_atl_lookup, rfl
         .rh-dist-select {{ flex: 0 0 auto; min-width: 110px; }}
         .rh-card {{ background: var(--surface2); border-radius: 8px; padding: 14px 16px; transition: all 0.2s; overflow: hidden; }}
         .rh-card.rh-empty {{ border: 1px dashed var(--border); background: transparent; min-height: 50px; display: flex; align-items: center; justify-content: center; padding: 12px; }}
+        .rh-card .ws-tip .tip {{ position: fixed; bottom: auto; left: auto; transform: none; z-index: 9999; }}
         .rh-header {{ margin-bottom: 8px; }}
         .rh-name {{ font-weight: 600; font-size: 0.85rem; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }}
         .rh-surf {{ font-size: 0.58rem; padding: 1px 5px; border-radius: 3px; background: #f59e0b22; color: #f59e0b; font-weight: 600; margin-left: 6px; vertical-align: middle; letter-spacing: 0.03em; }}
