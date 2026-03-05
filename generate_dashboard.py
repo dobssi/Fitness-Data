@@ -1471,6 +1471,8 @@ def get_race_history_data(df, ctl_atl_lookup, zone_data=None):
         temp = round(row['avg_temp_c'], 1) if pd.notna(row.get('avg_temp_c')) else None
         terrain = round(row['Terrain_Adj'], 3) if pd.notna(row.get('Terrain_Adj')) else None
         solar_wm2 = round(row['avg_solar_rad_wm2']) if pd.notna(row.get('avg_solar_rad_wm2')) else None
+        elev_gain = round(row['elev_gain_m']) if pd.notna(row.get('elev_gain_m')) else None
+        undulation = round(row['rf_window_undulation_score'], 1) if pd.notna(row.get('rf_window_undulation_score')) else None
         surface = row.get('surface', 'road')
         surface = str(surface) if pd.notna(surface) else 'road'
         
@@ -1543,6 +1545,8 @@ def get_race_history_data(df, ctl_atl_lookup, zone_data=None):
             'lr_threshold': LR_THRESHOLD_MIN,
             'temp': temp,
             'solar': solar_wm2,
+            'elev_gain': elev_gain,
+            'undulation': undulation,
             'terrain': terrain,
             'surface': surface,
         })
@@ -3862,7 +3866,11 @@ def _generate_race_history_html(race_history_data):
         const sunIcon=r.solar>400?'☀️':r.solar>200?'🌤️':'';
         const tempDisplay=tempEff!==null?(sunIcon+tempEff+'°C'):'-';
         const tempTip=r.temp!==null?(solarBoost>0.5?r.temp+'°C shade + '+solarBoost.toFixed(0)+'°C solar = '+tempEff+'°C effective':r.temp+'°C (low/no solar)'):'No temperature data';
-        const terrStr=r.terrain!==null&&r.terrain!==1.0?(r.terrain<1?'↓'+(((1-r.terrain)*100).toFixed(1))+'%':'↑'+(((r.terrain-1)*100).toFixed(1))+'%'):'flat';
+        const gainKm=(r.elev_gain&&r.dist_km>0)?r.elev_gain/r.dist_km:0;
+        const und=r.undulation||0;
+        const terrStr=gainKm<=5?'flat':gainKm>12?(und>6?'hilly & rolling':'hilly'):(und>6?'rolling':'undulating');
+        const terrDetail=r.elev_gain?r.elev_gain+'m gain ('+gainKm.toFixed(0)+'m/km)'+(und>0?', undulation '+und:''):'';
+        const condTip=tempTip+(terrDetail?' · '+terrDetail:'');
         const tsbCol=r.tsb!==null?(r.tsb>=0?'#4ade80':'#fbbf24'):'var(--text-dim)';
         const rflVal=(typeof currentMode!=='undefined'&&currentMode==='gap'&&r.rfl_gap!==null)?r.rfl_gap:r.rfl;
         card.innerHTML=`
@@ -3888,7 +3896,7 @@ def _generate_race_history_html(race_history_data):
                 <div class="ws-tip rh-metric"><div class="rh-val" style="color:#4ade80">${{rflVal!==null?rflVal+'%':'-'}}</div><div class="rh-label">RFL</div><div class="tip">Relative fitness level coming into the race</div></div>
                 <div class="ws-tip rh-metric"><div class="rh-val">${{r.e14}}<span class="rh-unit">min</span></div><div class="rh-label">Effort 14d</div><div class="tip">Minutes at ${{r.dist_cat}} race effort in 14 days before race</div></div>
                 <div class="ws-tip rh-metric"><div class="rh-val">${{r.e42}}<span class="rh-unit">min</span></div><div class="rh-label">Effort 42d</div><div class="tip">Minutes at ${{r.dist_cat}} race effort in 42 days before race</div></div>
-                <div class="ws-tip rh-metric"><div class="rh-val">${{tempDisplay}}</div><div class="rh-label">${{terrStr}}</div><div class="tip">${{tempTip}} · terrain adjustment</div></div>
+                <div class="ws-tip rh-metric"><div class="rh-val">${{tempDisplay}}</div><div class="rh-label">${{terrStr}}</div><div class="tip">${{condTip}}</div></div>
             </div>
             ${{r.dist_km >= 21.0 ? `<div class="rh-sep"></div>
             <div class="rh-row">
