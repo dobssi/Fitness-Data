@@ -60,11 +60,16 @@ def load_and_process_data():
     
     # v52: Filter out auto-excluded activities (junk, duplicates, non-running)
     # These are flagged by StepB's apply_auto_excludes() with auto_exclude=1
+    # Races are preserved even if auto-excluded (e.g. no HR) — they still
+    # belong in race history, milestones, and age grading.
     if 'auto_exclude' in df.columns:
-        _excluded = df['auto_exclude'] == 1
+        _excluded = (df['auto_exclude'] == 1) & (df.get('race_flag', 0) != 1)
         if _excluded.any():
-            print(f"  Filtered {_excluded.sum()} auto-excluded activities")
-            df = df[~_excluded].reset_index(drop=True)
+            print(f"  Filtered {_excluded.sum()} auto-excluded non-race activities")
+        _excl_races = (df['auto_exclude'] == 1) & (df.get('race_flag', 0) == 1)
+        if _excl_races.any():
+            print(f"  Kept {_excl_races.sum()} auto-excluded race(s) for race history")
+        df = df[~_excluded].reset_index(drop=True)
     else:
         # Fallback for older masters without auto_exclude column
         _pace = pd.to_numeric(df.get('avg_pace_min_per_km'), errors='coerce')

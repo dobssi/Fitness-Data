@@ -411,15 +411,17 @@ jobs:
   # ═══════════════════════════════════════════════════════════════════════════
   stepb_deploy:
     runs-on: ubuntu-latest
-    timeout-minutes: 120  # First persec cache sync; drop to 45 after
+    timeout-minutes: 120
     needs: [rebuild]
 
     # Conditions:
     #  - INITIAL rebuild succeeded  → auto-chain into StepB + deploy
+    #  - CLASSIFY_RACES succeeded   → auto-chain into StepB + deploy
     #  - FROM_STEPB or DASHBOARD    → rebuild job was skipped, run directly
     if: |
       always() && (
         (needs.rebuild.result == 'success' && needs.rebuild.outputs.mode == 'INITIAL') ||
+        (needs.rebuild.result == 'success' && needs.rebuild.outputs.mode == 'CLASSIFY_RACES') ||
         github.event.inputs.mode == 'FROM_STEPB' ||
         github.event.inputs.mode == 'DASHBOARD'
       )

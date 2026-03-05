@@ -3698,6 +3698,9 @@ def main() -> int:
             
             # v43: Surface
             surface_val = str(override.get('surface', '')).strip().upper()
+            # Normalise: classify_races writes "indoor", pipeline uses "INDOOR_TRACK"
+            if surface_val == 'INDOOR':
+                surface_val = 'INDOOR_TRACK'
             if surface_val in VALID_SURFACES:
                 dfm.at[i, 'surface'] = surface_val
             

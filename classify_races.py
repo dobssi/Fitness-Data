@@ -184,12 +184,17 @@ def is_parkrun(name: str, date_val, dist_km: float, start_hour: float = None) ->
 def classify_run(name: str, avg_hr: float, lthr: float, max_hr: float,
                  distance_km: float, duration_min: float,
                  race_type: str,
+                 avg_pace: float = None,
+                 pred_5k_pace: float = None,
                  race_hr_thresholds: dict = None) -> tuple:
     """Classify a single candidate as race/training/uncertain.
     
     Primary signal: HR intensity vs distance-specific threshold.
     Secondary signal: activity name keywords.
+    Fallback (no HR): race keyword + pace at least as fast as predicted 5K.
     
+    avg_pace: average pace in min/km (used as fallback when HR is missing).
+    pred_5k_pace: predicted 5K race pace in min/km (athlete-specific threshold).
     race_hr_thresholds: dict of {distance_label: pct_lthr} from athlete.yml.
     """
     if race_hr_thresholds is None:
@@ -211,6 +216,28 @@ def classify_run(name: str, avg_hr: float, lthr: float, max_hr: float,
     named_hr = min_hr - 0.05
     
     # ── Decision tree ──
+    
+    # 0. No HR data — use pace as proxy for intensity
+    #    If pace is at least as fast as predicted 5K race pace AND distance
+    #    is a recognised race distance (>=3km), it's a race.
+    #    Requires a race keyword to avoid false positives from tempo runs.
+    no_hr = (avg_hr <= 0 or hr_pct == 0)
+    if no_hr:
+        has_fast_race_pace = False
+        pace_str = f'{avg_pace:.2f}/km' if avg_pace and avg_pace > 0 else 'unknown'
+        if (avg_pace is not None and avg_pace > 0 and
+                pred_5k_pace is not None and pred_5k_pace > 0 and
+                distance_km >= 2.9):  # 2.9 to allow GPS undershoot on 3000m
+            has_fast_race_pace = avg_pace <= pred_5k_pace
+            pace_str = f'{avg_pace:.2f}/km vs pred 5K {pred_5k_pace:.2f}/km'
+        
+        if (has_race_name or (has_race_kw and not has_anti_kw)) and has_fast_race_pace:
+            kw_type = 'Named race' if has_race_name else 'Race keyword'
+            return ('race', 'medium', f'{kw_type} + fast pace ({pace_str}), no HR')
+        # No HR, not clearly fast enough or no keywords — can't classify
+        if has_race_kw or has_race_name:
+            return ('training', 'low', f'Race keyword but no HR, pace {pace_str} not fast enough')
+        return ('training', 'low', f'No HR data, no race keywords')
     
     # 1. Specific race name override (VLM, Stockholm Marathon etc)
     #    Race names beat generic anti-keywords (e.g. "Hackney Half...steady")
@@ -370,6 +397,20 @@ def enrich_and_classify(master_path: str, overrides_path: str,
                             ov.at[i, 'race_type'] = label
                             break
     
+    # ── Compute predicted 5K pace for no-HR fallback ──
+    # Use most recent valid prediction from master (athlete-specific threshold)
+    _pred_5k_pace = None
+    for pred_col in ['pred_5k_s_gap', 'pred_5k_s_sim', 'pred_5k_s']:
+        if pred_col in master.columns:
+            valid = master[master[pred_col].notna() & (master[pred_col] > 0)]
+            if len(valid) > 0:
+                pred_5k_s = valid.iloc[-1][pred_col]
+                _pred_5k_pace = (pred_5k_s / 60) / 5.0  # seconds → min/km
+                print(f"  Predicted 5K pace for no-HR fallback: {_pred_5k_pace:.2f} min/km (from {pred_col})")
+                break
+    if _pred_5k_pace is None:
+        print("  No 5K prediction available — no-HR pace fallback disabled")
+
     # ── Classify ──
     print(f"\nClassifying {len(ov)} candidates...")
     enriched_cols = {
@@ -390,6 +431,7 @@ def enrich_and_classify(master_path: str, overrides_path: str,
         hr = m.get('avg_hr', 0) or 0
         elapsed = m.get('elapsed_time_s', 0) or 0
         duration = elapsed / 60
+        pace = m.get('avg_pace_min_per_km', 0) or 0
         race_type = row.get('race_type', '') or ''
         
         enriched_cols['date'].append(
@@ -401,6 +443,8 @@ def enrich_and_classify(master_path: str, overrides_path: str,
         enriched_cols['duration_min'].append(round(duration, 1) if duration else None)
         
         verdict, conf, reason = classify_run(name, hr, lthr, max_hr, dist, duration, race_type,
+                                               avg_pace=pace,
+                                               pred_5k_pace=_pred_5k_pace,
                                                race_hr_thresholds=race_hr_thresholds)
         
         enriched_cols['verdict'].append(f"{verdict} ({conf})")
