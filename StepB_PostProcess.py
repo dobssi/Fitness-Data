@@ -1444,11 +1444,14 @@ def calc_alert_columns(df: pd.DataFrame) -> pd.DataFrame:
                     days_to_race = (race_dt - dates[i]) / np.timedelta64(1, 'D')
                     # Only check within the taper window (or slightly before for early warning)
                     if 0 < days_to_race <= td + 3:
-                        # Project TSB to race day assuming light training (TSS ~20/day)
+                        # Project TSB to race morning assuming light training (TSS ~20/day)
                         light_tss = 20.0
                         proj_ctl = ctl_vals[i]
                         proj_atl = atl_val
-                        for _d in range(int(days_to_race)):
+                        # Use ceil to include race morning decay step
+                        import math as _math
+                        n_steps = _math.ceil(days_to_race)
+                        for _d in range(n_steps):
                             proj_ctl = proj_ctl + (light_tss - proj_ctl) * CTL_ALPHA
                             proj_atl = proj_atl + (light_tss - proj_atl) * ATL_ALPHA
                         proj_tsb = proj_ctl - proj_atl

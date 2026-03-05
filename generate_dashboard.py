@@ -3818,7 +3818,7 @@ def _generate_race_history_html(race_history_data):
             <span class="chart-title">📊 Race History</span>
             <span class="badge" style="font-size:0.68rem">compare any two races</span>
         </div>
-        <div id="rh-cards" style="display:grid;grid-template-columns:1fr;gap:12px;margin-top:8px;max-width:100%;overflow:hidden;">
+        <div id="rh-cards" style="display:grid;grid-template-columns:1fr;gap:12px;margin-top:8px;max-width:100%;">
             <div class="rh-slot" id="rh-slot-0">
                 <div class="rh-picker">
                     <select id="rh-dist-0" class="rh-select rh-dist-select" onchange="rhFilterRaces(0)">
@@ -4477,12 +4477,12 @@ def generate_html(stats, rf_data, volume_data, ctl_atl_data, ctl_atl_lookup, rfl
         #milestoneTimeline::-webkit-scrollbar-thumb {{ background: var(--border); border-radius: 2px; }}
         
         /* Race History */
-        .rh-slot {{ overflow: hidden; }}
+        .rh-slot {{ }}
         .rh-picker {{ display: flex; gap: 6px; margin-bottom: 8px; }}
         .rh-select {{ background: var(--surface2); color: var(--text); border: 1px solid var(--border); border-radius: 6px; padding: 5px 8px; font-size: 0.74rem; font-family: 'DM Sans'; flex: 1; cursor: pointer; min-width: 0; }}
         .rh-select:focus {{ outline: none; border-color: var(--accent); }}
         .rh-dist-select {{ flex: 0 0 auto; min-width: 110px; }}
-        .rh-card {{ background: var(--surface2); border-radius: 8px; padding: 14px 16px; transition: all 0.2s; overflow: hidden; }}
+        .rh-card {{ background: var(--surface2); border-radius: 8px; padding: 14px 16px; transition: all 0.2s; }}
         .rh-card.rh-empty {{ border: 1px dashed var(--border); background: transparent; min-height: 50px; display: flex; align-items: center; justify-content: center; padding: 12px; }}
         .rh-header {{ margin-bottom: 8px; }}
         .rh-name {{ font-weight: 600; font-size: 0.85rem; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }}
@@ -5745,20 +5745,18 @@ function raceAnnotations(dates) {{
         
         function conditionsTooltip(temp, solar, elevGain, undulation, surface, distKm) {{
             const lines = [];
-            // Temperature with solar
+            // Temperature (includes solar boost silently)
             if (temp !== null && temp !== undefined) {{
                 const solarBoost = (solar && solar > 0) ? solar / 200.0 : 0;
                 const tempEff = Math.round(temp + solarBoost);
-                const sunIcon = solar > 400 ? '☀️' : solar > 200 ? '🌤️' : '';
-                if (solarBoost > 0.5) {{
-                    lines.push(sunIcon + ' ' + tempEff + '°C (' + temp + '°C + ' + solarBoost.toFixed(0) + '°C solar)');
-                }} else {{
-                    let tIcon = '';
-                    if (temp >= 25) tIcon = '🥵 ';
-                    else if (temp >= 20) tIcon = '☀️ ';
-                    else if (temp <= 0) tIcon = '🥶 ';
-                    lines.push(tIcon + temp + '°C');
+                const sunIcon = solar > 400 ? '☀️ ' : solar > 200 ? '🌤️ ' : '';
+                let tIcon = sunIcon;
+                if (!tIcon) {{
+                    if (tempEff >= 25) tIcon = '🥵 ';
+                    else if (tempEff >= 20) tIcon = '☀️ ';
+                    else if (tempEff <= 0) tIcon = '🥶 ';
                 }}
+                lines.push(tIcon + tempEff + '°C');
             }}
             // Terrain from VAM + undulation
             const gainKm = (elevGain && distKm > 0) ? elevGain / distKm : 0;
