@@ -1648,11 +1648,23 @@ def get_prediction_trend_data(df):
         # Condition adjustment factors for "adjust for conditions" toggle
         race_temp_adjs = []
         race_surface_adjs = []
+        race_solar = []
+        race_elev = []
+        race_undulation = []
+        race_dists = []
         for _, race_row in dist_match.iterrows():
             ta = race_row.get('Temp_Adj')
             race_temp_adjs.append(round(float(ta), 4) if pd.notna(ta) else 1.0)
             sa = race_row.get('surface_adj')
             race_surface_adjs.append(round(float(sa), 4) if pd.notna(sa) else 1.0)
+            sol = race_row.get('avg_solar_rad_wm2')
+            race_solar.append(round(float(sol)) if pd.notna(sol) else None)
+            eg = race_row.get('elev_gain_m')
+            race_elev.append(round(float(eg)) if pd.notna(eg) else None)
+            und = race_row.get('rf_window_undulation_score')
+            race_undulation.append(round(float(und), 1) if pd.notna(und) else None)
+            dk = race_row.get('distance_km')
+            race_dists.append(round(float(dk), 2) if pd.notna(dk) else None)
         
         is_parkrun = []
         for _, race_row in dist_match.iterrows():
@@ -1670,6 +1682,10 @@ def get_prediction_trend_data(df):
             'surfaces': race_surfaces,
             'temp_adjs': race_temp_adjs,
             'surface_adjs': race_surface_adjs,
+            'solar': race_solar,
+            'elev_gain': race_elev,
+            'undulation': race_undulation,
+            'dists': race_dists,
         }
         
         # Phase 2: GAP and Sim predicted times at each race date
@@ -1806,8 +1822,19 @@ def get_age_grade_data(df):
     # Also return dates as ISO strings for proper time axis
     dates_iso = races['date'].dt.strftime('%Y-%m-%d').tolist()
     
+    # Conditions arrays for chart tooltips
+    ag_temps = [round(float(v), 1) if pd.notna(v) else None for v in races['avg_temp_c'].tolist()] if 'avg_temp_c' in races.columns else [None]*len(races)
+    ag_solar = [round(float(v)) if pd.notna(v) else None for v in races['avg_solar_rad_wm2'].tolist()] if 'avg_solar_rad_wm2' in races.columns else [None]*len(races)
+    ag_elev = [round(float(v)) if pd.notna(v) else None for v in races['elev_gain_m'].tolist()] if 'elev_gain_m' in races.columns else [None]*len(races)
+    ag_undulation = [round(float(v), 1) if pd.notna(v) else None for v in races['rf_window_undulation_score'].tolist()] if 'rf_window_undulation_score' in races.columns else [None]*len(races)
+    ag_surfaces = [str(v) if pd.notna(v) and str(v) != 'nan' else None for v in races['surface'].tolist()] if 'surface' in races.columns else [None]*len(races)
+    ag_dists = [round(float(v), 2) if pd.notna(v) else None for v in races['distance_km'].tolist()] if 'distance_km' in races.columns else [None]*len(races)
+    ag_names = [str(v)[:60] if pd.notna(v) else '' for v in races['activity_name'].tolist()] if 'activity_name' in races.columns else ['']*len(races)
+    
     return {'dates': dates, 'dates_iso': dates_iso, 'values': values, 'dist_labels': dist_labels, 
-            'dist_codes': dist_codes, 'dist_sizes': dist_sizes, 'is_parkrun': is_parkrun, 'rolling_avg': rolling_avg}
+            'dist_codes': dist_codes, 'dist_sizes': dist_sizes, 'is_parkrun': is_parkrun, 'rolling_avg': rolling_avg,
+            'temps': ag_temps, 'solar': ag_solar, 'elev_gain': ag_elev, 'undulation': ag_undulation,
+            'surfaces': ag_surfaces, 'dists': ag_dists, 'names': ag_names}
 
 
 # ============================================================================
@@ -5716,6 +5743,38 @@ function raceAnnotations(dates) {{
             return m + ':' + String(s).padStart(2, '0');
         }}
         
+        function conditionsTooltip(temp, solar, elevGain, undulation, surface, distKm) {{
+            const lines = [];
+            // Temperature with solar
+            if (temp !== null && temp !== undefined) {{
+                const solarBoost = (solar && solar > 0) ? solar / 200.0 : 0;
+                const tempEff = Math.round(temp + solarBoost);
+                const sunIcon = solar > 400 ? '☀️' : solar > 200 ? '🌤️' : '';
+                if (solarBoost > 0.5) {{
+                    lines.push(sunIcon + ' ' + tempEff + '°C (' + temp + '°C + ' + solarBoost.toFixed(0) + '°C solar)');
+                }} else {{
+                    let tIcon = '';
+                    if (temp >= 25) tIcon = '🥵 ';
+                    else if (temp >= 20) tIcon = '☀️ ';
+                    else if (temp <= 0) tIcon = '🥶 ';
+                    lines.push(tIcon + temp + '°C');
+                }}
+            }}
+            // Terrain from VAM + undulation
+            const gainKm = (elevGain && distKm > 0) ? elevGain / distKm : 0;
+            if (gainKm > 5) {{
+                const und = undulation || 0;
+                const label = gainKm > 12 ? (und > 6 ? 'hilly & rolling' : 'hilly') : (und > 6 ? 'rolling' : 'undulating');
+                lines.push('⛰️ ' + label + ' (' + elevGain + 'm gain, ' + gainKm.toFixed(0) + 'm/km)');
+            }}
+            // Surface
+            if (surface && surface !== 'road') {{
+                const surfIcons = {{ 'SNOW': '❄️', 'HEAVY_SNOW': '🌨️', 'TRAIL': '🌲', 'TRACK': '🏟️', 'INDOOR_TRACK': '🏟️' }};
+                lines.push((surfIcons[surface] || '') + ' ' + surface);
+            }}
+            return lines;
+        }}
+        
         const predCtx = document.getElementById('predChart');
         let predChart = null;
         
@@ -5743,6 +5802,10 @@ function raceAnnotations(dates) {{
             const isParkrun = indices.map(i => d.is_parkrun[i]);
             const tempAdjs = indices.map(i => (d.temp_adjs || [])[i] || 1.0);
             const surfaceAdjs = indices.map(i => (d.surface_adjs || [])[i] || 1.0);
+            const predSolar = indices.map(i => (d.solar || [])[i]);
+            const predElev = indices.map(i => (d.elev_gain || [])[i]);
+            const predUnd = indices.map(i => (d.undulation || [])[i]);
+            const predDists = indices.map(i => (d.dists || [])[i]);
             
             // Apply conditions adjustment to predictions if toggled
             let displayPredicted = predicted;
@@ -5908,21 +5971,9 @@ function raceAnnotations(dates) {{
                                         }}
                                         if (parts.length > 0) lines.push('Adj: ' + parts.join(', '));
                                     }}
-                                    // Temperature
-                                    if (temps[i] !== null) {{
-                                        const t = temps[i];
-                                        let icon = '';
-                                        if (t >= 25) icon = ' 🥵';
-                                        else if (t >= 20) icon = ' ☀️';
-                                        else if (t <= 0) icon = ' 🥶';
-                                        lines.push('Temp: ' + t + '°C' + icon);
-                                    }}
-                                    // Surface
-                                    if (surfaces[i]) {{
-                                        const surfaceIcons = {{ 'SNOW': '❄️', 'HEAVY_SNOW': '🌨️', 'TRAIL': '🌲', 'TRACK': '🏟️', 'INDOOR_TRACK': '🏟️' }};
-                                        const icon = surfaceIcons[surfaces[i]] || '';
-                                        lines.push(icon + ' ' + surfaces[i]);
-                                    }}
+                                    // Conditions (temp with solar, terrain, surface)
+                                    const cond = conditionsTooltip(temps[i], predSolar[i], predElev[i], predUnd[i], surfaces[i], predDists[i]);
+                                    lines.push(...cond);
                                     // Pre-race morning training load (reverse Banister)
                                     if (_preRaceTSB && isoDate && _preRaceTSB[isoDate]) {{
                                         const pr = _preRaceTSB[isoDate];
@@ -5988,12 +6039,19 @@ function raceAnnotations(dates) {{
         const agAllSizes = {json.dumps(ag_data['dist_sizes'] if ag_data else [])};
         const agAllParkrun = {json.dumps(ag_data['is_parkrun'] if ag_data else [])};
         const agAllRolling = {json.dumps(ag_data['rolling_avg'] if ag_data else [])};
+        const agAllTemps = {json.dumps(ag_data.get('temps', []))};
+        const agAllSolar = {json.dumps(ag_data.get('solar', []))};
+        const agAllElev = {json.dumps(ag_data.get('elev_gain', []))};
+        const agAllUndulation = {json.dumps(ag_data.get('undulation', []))};
+        const agAllSurfaces = {json.dumps(ag_data.get('surfaces', []))};
+        const agAllDists = {json.dumps(ag_data.get('dists', []))};
+        const agAllNames = {json.dumps(ag_data.get('names', []))};
         
         const agCtx = document.getElementById('agChart');
         let agChart = null;
         
         function getAgSlice(days) {{
-            if (days >= 99999) return {{ datesISO: agAllDatesISO, dates: agAllDates, values: agAllValues, labels: agAllLabels, colors: agAllColors, sizes: agAllSizes, parkrun: agAllParkrun, rolling: agAllRolling }};
+            if (days >= 99999) return {{ datesISO: agAllDatesISO, dates: agAllDates, values: agAllValues, labels: agAllLabels, colors: agAllColors, sizes: agAllSizes, parkrun: agAllParkrun, rolling: agAllRolling, temps: agAllTemps, solar: agAllSolar, elev_gain: agAllElev, undulation: agAllUndulation, surfaces: agAllSurfaces, dists: agAllDists, names: agAllNames }};
             const cutoff = new Date();
             cutoff.setDate(cutoff.getDate() - days);
             const indices = [];
@@ -6008,7 +6066,14 @@ function raceAnnotations(dates) {{
                 colors: indices.map(i => agAllColors[i]),
                 sizes: indices.map(i => agAllSizes[i]),
                 parkrun: indices.map(i => agAllParkrun[i]),
-                rolling: indices.map(i => agAllRolling[i])
+                rolling: indices.map(i => agAllRolling[i]),
+                temps: indices.map(i => agAllTemps[i]),
+                solar: indices.map(i => agAllSolar[i]),
+                elev_gain: indices.map(i => agAllElev[i]),
+                undulation: indices.map(i => agAllUndulation[i]),
+                surfaces: indices.map(i => agAllSurfaces[i]),
+                dists: indices.map(i => agAllDists[i]),
+                names: indices.map(i => agAllNames[i])
             }};
         }}
         
@@ -6055,7 +6120,9 @@ function raceAnnotations(dates) {{
                                 title: function(ctx) {{ 
                                     if (!ctx.length || ctx[0].datasetIndex !== 1) return '';
                                     const i = ctx[0].dataIndex;
-                                    return (i >= 0 && i < d.dates.length) ? d.dates[i] : '';
+                                    if (i < 0 || i >= d.dates.length) return '';
+                                    const name = d.names && d.names[i] ? d.names[i] : '';
+                                    return d.dates[i] + (name ? ' — ' + name : '');
                                 }},
                                 label: function(ctx) {{ 
                                     if (ctx.datasetIndex !== 1) return null;
@@ -6068,12 +6135,17 @@ function raceAnnotations(dates) {{
                                     if (!ctx.length || ctx[0].datasetIndex !== 1) return [];
                                     const i = ctx[0].dataIndex;
                                     const isoDate = d.datesISO[i];
+                                    const lines = [];
+                                    // Conditions
+                                    const cond = conditionsTooltip(d.temps?d.temps[i]:null, d.solar?d.solar[i]:null, d.elev_gain?d.elev_gain[i]:null, d.undulation?d.undulation[i]:null, d.surfaces?d.surfaces[i]:null, d.dists?d.dists[i]:null);
+                                    lines.push(...cond);
+                                    // Training load
                                     if (_preRaceTSB && isoDate && _preRaceTSB[isoDate]) {{
                                         const pr = _preRaceTSB[isoDate];
                                         const sign = pr.tsb_pre >= 0 ? '+' : '';
-                                        return ['CTL ' + pr.ctl_pre.toFixed(0) + ' · ATL ' + pr.atl_pre.toFixed(0) + ' · TSB ' + sign + pr.tsb_pre.toFixed(1)];
+                                        lines.push('CTL ' + pr.ctl_pre.toFixed(0) + ' · ATL ' + pr.atl_pre.toFixed(0) + ' · TSB ' + sign + pr.tsb_pre.toFixed(1));
                                     }}
-                                    return [];
+                                    return lines;
                                 }}
                             }}
                         }}
