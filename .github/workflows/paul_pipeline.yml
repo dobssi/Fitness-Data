@@ -131,7 +131,7 @@ jobs:
 
       - name: Check for new activities
         id: fetch
-        if: ${{ github.event.inputs.sync != 'false' }}
+        if: ${{ github.event.inputs.sync != 'false' && env.PIPELINE_MODE != 'INITIAL' }}
         run: |
           python fetch_fit_files.py \
             --fit-dir ${{ env.ATHLETE_DIR }}/data/FIT_downloads \
