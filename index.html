@@ -70,6 +70,8 @@
             padding: 10px;
             text-align: center;
         }
+        .stat-card.ws-tip { cursor: help; }
+        .stat-card.ws-tip:hover { border-color: var(--accent-dim, rgba(129,140,248,0.3)); }
         
         .stat-value {
             font-size: 1.45em;
@@ -491,7 +493,7 @@ function raceAnnotations(dates) {
 }catch(e){console.warn('Chart.js not loaded:',e);}
 </script>
     <h1>🏃 Paul Collyer</h1>
-    <div class="dash-sub">Friday 06 March 2026, 12:51</div>
+    <div class="dash-sub">Friday 06 March 2026, 16:19</div>
     
     <!-- Phase 2: Mode Toggle -->
     <div class="mode-toggle" style="display:flex;gap:6px;margin:10px 0 8px;align-items:center;">
@@ -542,40 +544,46 @@ function raceAnnotations(dates) {
     
     <!-- Stats Cards -->
     <div class="stats-grid">
-        <div class="stat-card">
+        <div class="stat-card ws-tip">
             <div class="stat-value" id="ctl-value">69.9</div>
             <div class="stat-label">CTL</div>
             <div class="stat-sub">fitness</div>
+            <div class="tip">Chronic Training Load — your rolling 42-day fitness. Higher = fitter. Built from consistent training over weeks.</div>
         </div>
-        <div class="stat-card">
+        <div class="stat-card ws-tip">
             <div class="stat-value" id="atl-value">77.5</div>
             <div class="stat-label">ATL</div>
             <div class="stat-sub">fatigue</div>
+            <div class="tip">Acute Training Load — your rolling 7-day fatigue. Spikes after hard training, drops with rest.</div>
         </div>
-        <div class="stat-card">
+        <div class="stat-card ws-tip">
             <div class="stat-value" id="tsb-value">-7.6</div>
             <div class="stat-label">TSB</div>
             <div class="stat-sub">form</div>
+            <div class="tip">Training Stress Balance (CTL − ATL). Positive = fresh and rested. Negative = carrying fatigue. Best race form is slightly positive.</div>
         </div>
-        <div class="stat-card">
+        <div class="stat-card ws-tip">
             <div class="stat-value">75.8kg</div>
             <div class="stat-label">Weight</div>
             <div class="stat-sub">7d average</div>
+            <div class="tip">Your 7-day smoothed weight from the most recent data available.</div>
         </div>
     </div>
     
     <div class="stats-grid">
-        <div class="stat-card">
+        <div class="stat-card ws-tip">
             <div class="stat-value" id="rfl-value">88.2%</div>
             <div class="stat-label" id="rfl-label">RFL Trend</div>
             <div class="stat-sub">vs peak</div>
+            <div class="tip">Relative Fitness Level — your current running fitness as a percentage of your all-time peak. 100% = best ever.</div>
         </div>
-        <div class="stat-card">
+        <div class="stat-card ws-tip">
             <div class="stat-value" id="rfl-delta">-1.3%</div>
             <div class="stat-label">RFL 14d</div>
             <div class="stat-sub">change</div>
+            <div class="tip">Change in RFL over the last 14 days. Positive = fitness improving. Negative = fitness declining.</div>
         </div>
-        <div class="stat-card">
+        <div class="stat-card ws-tip">
             <div class="stat-value" id="easy-rf-gap-value"
                  data-stryd="-1.4%"
                  data-gap="-2.9%"
@@ -583,57 +591,67 @@ function raceAnnotations(dates) {
             >-1.4%</div>
             <div class="stat-label">Easy RF Gap</div>
             <div class="stat-sub">vs trend</div>
+            <div class="tip">How your easy runs compare to the overall fitness trend. Negative = easy runs feel harder than expected (possible fatigue or illness).</div>
         </div>
-        <div class="stat-card">
+        <div class="stat-card ws-tip">
             <div class="stat-value" id="ag-value">76.6%</div>
             <div class="stat-label">Age Grade</div>
             <div class="stat-sub">5k estimate</div>
+            <div class="tip">Age-graded performance — compares your estimated 5K to the world record for your age and sex. 60%+ is good club level, 70%+ is competitive.</div>
         </div>
     </div>
     
     <div class="stats-grid">
-        <div class="stat-card">
+        <div class="stat-card ws-tip">
             <div class="stat-value" id="pred-5k">19:59</div>
             <div class="stat-label">5k</div>
             <div class="stat-sub">predicted</div>
+            <div class="tip">Predicted 5K race time based on your current fitness trend and critical power.</div>
         </div>
-        <div class="stat-card">
+        <div class="stat-card ws-tip">
             <div class="stat-value" id="pred-10k">41:58</div>
             <div class="stat-label">10k</div>
             <div class="stat-sub">predicted</div>
+            <div class="tip">Predicted 10K race time based on your current fitness trend and critical power.</div>
         </div>
-        <div class="stat-card">
+        <div class="stat-card ws-tip">
             <div class="stat-value" id="pred-hm">1:33:13</div>
             <div class="stat-label">Half</div>
             <div class="stat-sub">predicted</div>
+            <div class="tip">Predicted half marathon time based on your current fitness trend and critical power.</div>
         </div>
-        <div class="stat-card">
+        <div class="stat-card ws-tip">
             <div class="stat-value" id="pred-mara">3:18:59</div>
             <div class="stat-label">Marathon</div>
             <div class="stat-sub">predicted</div>
+            <div class="tip">Predicted marathon time based on your current fitness trend and critical power.</div>
         </div>
     </div>
     
     <div class="stats-grid">
-        <div class="stat-card">
-            <div class="stat-value">65.3</div>
+        <div class="stat-card ws-tip">
+            <div class="stat-value">58.3</div>
             <div class="stat-label">Last 7 Days</div>
             <div class="stat-sub">km</div>
+            <div class="tip">Total running distance in the last 7 days.</div>
         </div>
-        <div class="stat-card">
-            <div class="stat-value">229.9</div>
+        <div class="stat-card ws-tip">
+            <div class="stat-value">219.7</div>
             <div class="stat-label">Last 30 Days</div>
             <div class="stat-sub">km</div>
+            <div class="tip">Total running distance in the last 30 days.</div>
         </div>
-        <div class="stat-card">
+        <div class="stat-card ws-tip">
             <div class="stat-value">2,466</div>
             <div class="stat-label">Last 12 Months</div>
             <div class="stat-sub">km</div>
+            <div class="tip">Total running distance in the last 12 months.</div>
         </div>
-        <div class="stat-card">
+        <div class="stat-card ws-tip">
             <div class="stat-value">3,107</div>
             <div class="stat-label">Total Runs</div>
             <div class="stat-sub">since 2013</div>
+            <div class="tip">Total number of runs in your training history.</div>
         </div>
     </div>
     
@@ -1273,7 +1291,7 @@ function raceAnnotations(dates) {
     
     
     <div class="footer">
-        Updated: 2026-03-06 12:51<br>
+        Updated: 2026-03-06 16:19<br>
         Data through: 2026-03-06
     </div>
     
