@@ -478,6 +478,17 @@ athlete:
   lthr: {cfg['lthr']}
   max_hr: {cfg['max_hr']}
 
+  # Race HR thresholds (% of LTHR). Used by classify_races.py to identify race efforts.
+  # These defaults work well for most runners. Uncomment and adjust if needed.
+  # race_hr_thresholds_pct:
+  #   3K: 0.98
+  #   5K: 0.98
+  #   10K: 0.97
+  #   10M: 0.95
+  #   HM: 0.94
+  #   30K: 0.90
+  #   Marathon: 0.88
+
 planned_races:
 {races_yaml}
 

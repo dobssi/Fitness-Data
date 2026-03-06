@@ -18,6 +18,17 @@ athlete:
   lthr: 165                   # Lactate Threshold Heart Rate
   max_hr: 185                 # Maximum Heart Rate
 
+  # Race HR thresholds (% of LTHR). Used by classify_races.py to identify race efforts.
+  # These defaults work well for most runners. Uncomment and adjust if needed.
+  # race_hr_thresholds_pct:
+  #   3K: 0.98
+  #   5K: 0.98
+  #   10K: 0.97
+  #   10M: 0.95
+  #   HM: 0.94
+  #   30K: 0.90
+  #   Marathon: 0.88
+
 # Planned races (optional — for dashboard race readiness section)
 # Priority: A = goal race, B = important, C = training race
 # Surface: road, trail, undulating_trail, track, indoor_track

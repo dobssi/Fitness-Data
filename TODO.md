@@ -41,8 +41,6 @@ Onboarding form: add planned sessions (date, type, duration). `athlete.yml`: `pl
 
 ### Onboarding
 
-**AG sanity check** — flag suspect AG (Ian's 94.4% mile likely GPS/timing error) compare to top percentile for the runner?
-
 **HR zones** — auto-generate from LTHR/max HR in onboarding form, display for manual adjustment. Store as explicit zone boundaries in `athlete.yml`. Pipeline prefers explicit, falls back to auto-calc.
 
 **Strava activities.csv upload** - allow this to be uploaded alongside Garmin or intervals.icu FIT import
@@ -55,10 +53,6 @@ Onboarding form: add planned sessions (date, type, duration). `athlete.yml`: `pl
 
 **classify_races.py doesn't seem to pick up races of less than 3km** Missing 2x track mile, 1x track 1500, 1x road mile, 1x road 1000m in Paul Test.
 
-**Race HR thresholds** — make (3K:0.98, 5K:0.98, 10K:0.97, 10M:0.95, HM:0.94, 30K:0.90, Marathon:0.88) the defaults in `classify_races.py` and `onboard_athlete.py` template
-
-**GAP equiv time** — `gap_equiv_time_s` from Minetti integral
-
 **Rename nAG%** — cleaner column name
 
 **Stryd outlier auto-flag** — RE z < −2.5σ vs speed → set factor=0, use GAP RF instead
@@ -70,6 +64,8 @@ Onboarding form: add planned sessions (date, type, duration). `athlete.yml`: `pl
 ### Low priority / backlog
 
 **PS Floor bias** — still ~0.7% generous. 64%→~40% of races trigger floor. Not urgent.
+
+**GAP equiv time** — `gap_equiv_time_s` from Minetti integral
 
 **Simulation power 3-4% too low** in pre-Stryd/v1_late eras. Mitigated by GAP era overrides.
 
