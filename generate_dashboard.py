@@ -4755,7 +4755,7 @@ function raceAnnotations(dates) {{
             <div class="stat-value" id="tsb-value">{stats['tsb'] if stats['tsb'] else '-'}</div>
             <div class="stat-label">TSB</div>
             <div class="stat-sub">form</div>
-            <div class="tip">Training Stress Balance (CTL − ATL). Positive = fresh and rested. Negative = carrying fatigue. Best race form is slightly positive.</div>
+            <div class="tip">Training Stress Balance (CTL − ATL). Positive = fresh, negative = fatigued. Race-ready form is typically 5–25% of your CTL depending on distance and priority.</div>
         </div>
         <div class="stat-card ws-tip">
             <div class="stat-value">{f"{stats['weight']}kg" if stats['weight'] else '-'}</div>
