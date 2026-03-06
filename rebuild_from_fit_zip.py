@@ -2223,15 +2223,20 @@ def summarize_fit(fit_path: str, tz_out: str, weight_kg: float, gps_outlier_spee
                     cache_path,
                     run_id=fit_filename_no_ext,  # Original name (may contain &)
                     fit_filename=fit_basename,    # v41.1: Full FIT filename with extension
-                    ts=df['ts'].values.astype(float),
-                    t=df['t'].values.astype(float),
-                    speed_mps=df['speed'].values.astype(float),
-                    dist_m=df['dist_m'].values.astype(float),
-                    elev_m_clean=df['elev_m_clean'].values.astype(float) if 'elev_m_clean' in df.columns else df['elev_m'].values.astype(float),
-                    grade=df['grade'].values.astype(float) if 'grade' in df.columns else np.full(len(df), np.nan),
-                    heading_deg=df['heading_deg'].values.astype(float) if 'heading_deg' in df.columns else np.full(len(df), np.nan),
-                    hr_bpm=df['hr'].values.astype(float),
-                    power_w=df['power_w'].values.astype(float) if 'power_w' in df.columns else np.full(len(df), np.nan),
+                    # v52: Optimised dtypes — saves ~30% cache size.
+                    # StepB's _ensure_1d auto-upcasts to float64 for calculations.
+                    ts=df['ts'].values.astype(np.float64),  # epoch needs float64 precision
+                    t=df['t'].values.astype(np.float32),
+                    speed_mps=df['speed'].values.astype(np.float32),
+                    dist_m=df['dist_m'].values.astype(np.float32),
+                    elev_m_clean=(df['elev_m_clean'].values if 'elev_m_clean' in df.columns else df['elev_m'].values).astype(np.float32),
+                    grade=(df['grade'].values if 'grade' in df.columns else np.full(len(df), np.nan)).astype(np.float32),
+                    heading_deg=(df['heading_deg'].values if 'heading_deg' in df.columns else np.full(len(df), np.nan)).astype(np.float32),
+                    hr_bpm=np.nan_to_num(df['hr'].values, nan=0).astype(np.uint8),  # 0-255 bpm, 0=missing
+                    power_w=(df['power_w'].values if 'power_w' in df.columns else np.full(len(df), np.nan)).astype(np.float32),
+                    # v52: GPS coordinates for route maps and track detection
+                    lat=df['lat'].values.astype(np.float32) if 'lat' in df.columns else np.full(len(df), np.nan, dtype=np.float32),
+                    lon=df['lon'].values.astype(np.float32) if 'lon' in df.columns else np.full(len(df), np.nan, dtype=np.float32),
                     # NOTE: use .iloc[0] (not [0]) because the DataFrame index is not guaranteed
                     # to be 0..N-1 after upstream processing.
                     alt_quality=str(df['alt_quality'].iloc[0]) if ('alt_quality' in df.columns and len(df)) else '',
@@ -2346,6 +2351,18 @@ def summarize_fit(fit_path: str, tz_out: str, weight_kg: float, gps_outlier_spee
     # Representative location for weather: median of valid GPS trackpoints
     lat_med = float(np.nanmedian(df.loc[df['gps_valid'], 'lat'])) if df['gps_valid'].any() else np.nan
     lon_med = float(np.nanmedian(df.loc[df['gps_valid'], 'lon'])) if df['gps_valid'].any() else np.nan
+
+    # v52: GPS bounding box area in m² — for track detection and route compactness
+    # A 400m track ≈ 8,000 m²; a road 5K ≈ 500,000+ m²
+    if df['gps_valid'].any():
+        _gps_lats = df.loc[df['gps_valid'], 'lat'].to_numpy(dtype=float)
+        _gps_lons = df.loc[df['gps_valid'], 'lon'].to_numpy(dtype=float)
+        _lat_range_m = (np.nanmax(_gps_lats) - np.nanmin(_gps_lats)) * 111_000
+        _lon_range_m = (np.nanmax(_gps_lons) - np.nanmin(_gps_lons)) * 111_000 * np.cos(np.radians(lat_med))
+        gps_bbox_m2 = round(_lat_range_m * _lon_range_m, 0)
+    else:
+        gps_bbox_m2 = np.nan
+
     # gps_ratio computed above; do not overwrite (needed for GPS sanity + adjusters)
 
     pw_mov = df.loc[moving, "power_w"] if np.any(moving) else None
@@ -2584,6 +2601,7 @@ def summarize_fit(fit_path: str, tz_out: str, weight_kg: float, gps_outlier_spee
     # Ensure GPS medians are carried into the per-run row (used for weather stage)
     out["gps_lat_med"] = lat_med
     out["gps_lon_med"] = lon_med
+    out["gps_bbox_m2"] = gps_bbox_m2
     # Ensure weather columns exist (filled in Weather stage)
     for _c in WEATHER_COLS:
         if _c not in out:

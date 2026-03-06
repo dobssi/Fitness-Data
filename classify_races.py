@@ -512,6 +512,43 @@ def enrich_and_classify(master_path: str, overrides_path: str,
             ov.at[i, 'surface'] = detected
             surface_count += 1
     
+    # ── Detect track races from GPS bounding box ──
+    # A race on a 400m outdoor track has a GPS footprint of ~8,000 m².
+    # A 200m indoor track is ~1,800 m². Road races are 100,000+ m².
+    # For flagged races at track distances (3K/5K/10K) with no surface set:
+    #   - No GPS data (NaN bbox)    → INDOOR_TRACK (indoors = no GPS signal)
+    #   - bbox < 5,000 m²           → INDOOR_TRACK (200m oval)
+    #   - bbox < 50,000 m²          → TRACK (400m oval)
+    INDOOR_BBOX_THRESHOLD_M2 = 5_000
+    TRACK_BBOX_THRESHOLD_M2 = 50_000
+    TRACK_RACE_DISTANCES = {'3K', '5K', '10K'}
+    bbox_track_count = 0
+    bbox_indoor_count = 0
+    for i, row in ov.iterrows():
+        if pd.notna(row.get('surface')) and row['surface']:
+            continue  # Surface already set (by name or manual override)
+        if row.get('race_flag', 0) != 1:
+            continue  # Only check flagged races
+        race_type = row.get('race_type', '')
+        if race_type not in TRACK_RACE_DISTANCES:
+            continue  # Only track-plausible distances
+        fname = row['file']
+        m = master_lookup.get(fname, {})
+        bbox = m.get('gps_bbox_m2')
+        if bbox is None or pd.isna(bbox) or bbox == 0:
+            # No GPS data — indoor venue (GPS doesn't work indoors)
+            ov.at[i, 'surface'] = 'indoor'
+            bbox_indoor_count += 1
+        elif bbox < INDOOR_BBOX_THRESHOLD_M2:
+            ov.at[i, 'surface'] = 'indoor'
+            bbox_indoor_count += 1
+        elif bbox < TRACK_BBOX_THRESHOLD_M2:
+            ov.at[i, 'surface'] = 'track'
+            bbox_track_count += 1
+    if bbox_track_count or bbox_indoor_count:
+        surface_count += bbox_track_count + bbox_indoor_count
+        print(f"  Track detected from GPS bbox: {bbox_track_count} outdoor, {bbox_indoor_count} indoor")
+    
     # ── Sort by date ──
     ov.sort_values('date', inplace=True)
     

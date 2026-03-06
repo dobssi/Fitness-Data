@@ -1,5 +1,5 @@
 # Pipeline TODO — v52
-## Updated: 2026-03-04
+## Updated: 2026-03-06 by Paul
 
 ---
 
@@ -42,13 +42,15 @@ Onboarding form: add planned sessions (date, type, duration). `athlete.yml`: `pl
 
 ### Onboarding
 
-**PB entry page** — times, distances, optional dates → override `elapsed_time_s` in matching races
-
-**AG sanity check** — flag AG >85% for non-elite review (Ian's 94.4% mile likely GPS/timing error)
+**AG sanity check** — flag suspect AG (Ian's 94.4% mile likely GPS/timing error) compare to top percentile for the runner?
 
 **HR zones** — auto-generate from LTHR/max HR in onboarding form, display for manual adjustment. Store as explicit zone boundaries in `athlete.yml`. Pipeline prefers explicit, falls back to auto-calc.
 
+**Strava activities.csv upload** - allow this to be uploaded alongside Garmin or intervals.icu FIT import
+
 **Strava activities.csv re-upload** — add to return visit page so athletes can update their export periodically
+
+**Weight csv history upload** - allow athlete to add historical weight records to be merged into athlete_data
 
 ### Pipeline / data quality
 
@@ -62,15 +64,13 @@ Onboarding form: add planned sessions (date, type, duration). `athlete.yml`: `pl
 
 **Athlete folder refactor** — rename all athlete folders/paths to numeric IDs (A001–A004) across Dropbox, workflows, GH Pages, cache keys
 
-**Recovery operations** — run `--refresh-weather-solar` for Ian (A002), Nadi (A003), Steve (A004)
-
-### Low priority / backlog
+**Check detection of shorter races and their surface in classify_races.py**
 
 **Surface-specific trail specificity** — race readiness long run metrics: count only hilly runs (undulation_score > threshold) for trail race cards
 
-**PS Floor bias** — still ~0.7% generous. 64%→~40% of races trigger floor. Not urgent.
+### Low priority / backlog
 
-**Bannister mile surface override** — tagged TRACK, was road. Fix in `activity_overrides.yml`.
+**PS Floor bias** — still ~0.7% generous. 64%→~40% of races trigger floor. Not urgent.
 
 **Simulation power 3-4% too low** in pre-Stryd/v1_late eras. Mitigated by GAP era overrides.
 
