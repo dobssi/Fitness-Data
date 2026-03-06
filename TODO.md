@@ -41,13 +41,13 @@ Onboarding form: add planned sessions (date, type, duration). `athlete.yml`: `pl
 
 ### Onboarding
 
-**HR zones** — auto-generate from LTHR/max HR in onboarding form, display for manual adjustment. Store as explicit zone boundaries in `athlete.yml`. Pipeline prefers explicit, falls back to auto-calc.
+~~**HR zones** — auto-generate from LTHR/max HR in onboarding form, display for manual adjustment. Store as explicit zone boundaries in `athlete.yml`. Pipeline prefers explicit, falls back to auto-calc.~~ **DONE** — live zone preview panel in onboard.html, editable boundaries, exports to `zones.hr_zones` in YAML/JSON config when customised.
 
-**Strava activities.csv upload** - allow this to be uploaded alongside Garmin or intervals.icu FIT import
+~~**Strava activities.csv upload** - allow this to be uploaded alongside Garmin or intervals.icu FIT import~~ **DONE** — export instructions updated to explain any combination of files works. Pipeline auto-detects.
 
-**Strava activities.csv re-upload** — add to return visit page so athletes can update their export periodically
+~~**Strava activities.csv re-upload** — add to return visit page so athletes can update their export periodically~~ **DONE** — returning users see "Upload new data" panel with Dropbox link.
 
-**Weight csv history upload** - allow athlete to add historical weight records to be merged into athlete_data
+~~**Weight csv history upload** - allow athlete to add historical weight records to be merged into athlete_data~~ **DONE** — weight CSV format guide added to onboard.html. Upload via same Dropbox link.
 
 ### Pipeline / data quality
 
@@ -71,7 +71,14 @@ Onboarding form: add planned sessions (date, type, duration). `athlete.yml`: `pl
 
 ---
 
-## Recently completed (this session — 2026-03-04)
+## Recently completed (this session — 2026-03-06)
+
+- **Stat card tooltips** — all 16 dashboard stat cards (CTL/ATL/TSB/Weight, RFL/RFL14d/EasyRF/AG, predictions, volume) have hover tooltips explaining each metric. Uses existing `.ws-tip` pattern.
+- **Onboarding: HR zone preview** — live zone preview panel in Heart Rate section of `onboard.html`. Auto-calculates from LTHR (same formula as dashboard), editable boundaries, exports `zones.hr_zones` when customised.
+- **Onboarding: Strava/weight/data uploads** — updated export instructions (any file combination works), weight CSV format guide, return visit "Upload new data" panel.
+- **Race HR thresholds in templates** — commented-out `race_hr_thresholds_pct` block added to `onboard_athlete.py` generated YAML and `athlete_template.yml`. `classify_races.py` already had correct defaults.
+
+## Recently completed (2026-03-04)
 
 - **Race History comparison section** — stacked card layout, distance-filtered race select, full training context per card:
   - Row 1: Time, Pace, HR, nAG (normalised)

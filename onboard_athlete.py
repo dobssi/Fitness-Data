@@ -445,7 +445,7 @@ def generate_athlete_yml(cfg: dict) -> str:
     mode = cfg.get("power_mode", "gap")
     stryd_fallback_comment = ""
     if cfg.get("_stryd_declared") and mode == "gap":
-        stryd_fallback_comment = "  # NOTE: User has Stryd but no power data in export. Change to 'stryd' when power data appears.\n"
+        stryd_fallback_comment = "  # NOTE: User has Stryd but insufficient power data in export (<10 runs).\n  # Change mode to 'stryd' when you have 10+ runs with Stryd power data.\n"
     peak_cp = cfg.get("peak_cp_watts", 300)
     
     # Intervals section
@@ -1289,11 +1289,31 @@ def main():
                 # Power meter detection
                 power_info = detect_power_meter(runs)
                 print(f"\n  ⚡ Power: {power_info['note']}")
-                if cfg.get("power_mode") == "stryd" and not power_info["has_power"]:
-                    print(f"  ⚠ User declared Stryd but no power data found in FIT files")
-                    print(f"  ⚠ Setting power_mode to 'gap' — will auto-switch when power data appears")
-                    cfg["power_mode"] = "gap"
-                    cfg["_stryd_declared"] = True  # Remember for athlete.yml comment
+                
+                n_power = power_info.get("n_power", 0)
+                user_declared_stryd = cfg.get("power_mode") == "stryd"
+                
+                if user_declared_stryd:
+                    if n_power >= 50:
+                        # Plenty of Stryd data — honour the declaration
+                        print(f"  ⚡ User declared Stryd, {n_power} runs with power → Stryd mode")
+                        cfg["power_mode"] = "stryd"
+                    elif n_power >= 10:
+                        # Some Stryd data — honour, but note it'll improve
+                        print(f"  ⚡ User declared Stryd, {n_power} runs with power → Stryd mode (will improve as data grows)")
+                        cfg["power_mode"] = "stryd"
+                    elif n_power > 0:
+                        # Very few power runs — start in GAP, switch later
+                        print(f"  ⚠ User declared Stryd but only {n_power} runs with power data")
+                        print(f"  ⚠ Starting in GAP mode — switch to 'stryd' in athlete.yml when more power data accumulates")
+                        cfg["power_mode"] = "gap"
+                        cfg["_stryd_declared"] = True
+                    else:
+                        # No power data at all
+                        print(f"  ⚠ User declared Stryd but no power data found in FIT files")
+                        print(f"  ⚠ Starting in GAP mode — switch to 'stryd' in athlete.yml when power data appears")
+                        cfg["power_mode"] = "gap"
+                        cfg["_stryd_declared"] = True
                 elif cfg.get("power_mode"):
                     print(f"  ⚡ User declared power_mode: {cfg['power_mode']} (keeping)")
                 else:
