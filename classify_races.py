@@ -431,7 +431,8 @@ def enrich_and_classify(master_path: str, overrides_path: str,
         date = m.get('date')
         name = str(m.get('activity_name', '') or '')
         dist = m.get('distance_km', 0) or 0
-        hr = m.get('avg_hr', 0) or 0
+        hr_raw = m.get('avg_hr', 0)
+        hr = 0 if (hr_raw is None or (isinstance(hr_raw, float) and pd.isna(hr_raw))) else hr_raw
         elapsed = m.get('elapsed_time_s', 0) or 0
         duration = elapsed / 60
         pace = m.get('avg_pace_min_per_km', 0) or 0
