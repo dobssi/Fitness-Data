@@ -50,6 +50,13 @@
             display: none;
         }
         .returning-banner.show { display: flex; align-items: center; gap: 0.5rem; }
+        .returning-update {
+            background: var(--accent-bg);
+            border: 1px solid var(--accent-border);
+            border-radius: 8px;
+            padding: 0.75rem 1rem;
+            margin-top: 0.75rem;
+        }
 
         /* Sections */
         .section {
@@ -216,6 +223,48 @@
 
         /* Pace display */
         .pace-hint { font-size: 0.72rem; color: var(--accent); font-family: var(--mono); margin-top: 0.15rem; }
+
+        /* Zone preview */
+        .zone-preview {
+            margin-top: 1rem; padding: 1rem 1.25rem;
+            background: var(--bg); border-radius: 8px; border: 1px solid var(--border);
+        }
+        .zone-preview-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 0.25rem; }
+        .zone-preview-title { font-size: 0.82rem; font-weight: 600; }
+        .zone-preview-desc { font-size: 0.72rem; color: var(--text-muted); margin-bottom: 0.75rem; }
+        .btn-sm { font-size: 0.72rem; padding: 0.2rem 0.5rem; border-radius: 4px; }
+
+        .zone-bar { display: flex; height: 10px; border-radius: 5px; overflow: hidden; margin-bottom: 0.75rem; gap: 2px; }
+        .zone-bar-seg { transition: flex 0.3s ease; }
+
+        .zone-table { font-size: 0.78rem; }
+        .zone-row { display: grid; grid-template-columns: 54px 90px 1fr 64px; align-items: center; padding: 0.3rem 0; border-bottom: 1px solid rgba(255,255,255,0.03); }
+        .zone-row:last-child { border-bottom: none; }
+        .zone-row-header { font-size: 0.68rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.04em; padding-bottom: 0.4rem; border-bottom: 1px solid var(--border); }
+        @media (max-width: 500px) {
+            .zone-row { grid-template-columns: 1fr auto 56px; gap: 0.15rem; }
+            .zc-label { display: none; }
+            .zc-label-header { display: none; }
+            .zone-table { font-size: 0.74rem; }
+            .zc-range { font-size: 0.74rem; text-align: right; }
+            .zc-pct { font-size: 0.68rem; }
+            .zone-input { width: 44px; font-size: 0.74rem; }
+            .zone-preview { padding: 0.75rem 0.9rem; }
+            .zone-preview-desc { font-size: 0.68rem; }
+        }
+        .zone-cell { white-space: nowrap; }
+        .zc-range { font-family: var(--mono); font-size: 0.76rem; }
+        .zc-pct { font-family: var(--mono); font-size: 0.72rem; color: var(--text-muted); text-align: right; }
+        .zone-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 4px; vertical-align: middle; }
+
+        .zone-input {
+            width: 52px; text-align: left; font-family: var(--mono); font-size: 0.76rem;
+            background: transparent; border: 1px solid transparent; border-radius: 3px;
+            color: var(--text); padding: 0.1rem 0.2rem 0.1rem 0; transition: border-color 0.15s;
+        }
+        .zone-input:hover { border-color: var(--border); }
+        .zone-input:focus { border-color: var(--accent); outline: none; background: rgba(129,140,248,0.06); }
+        .zone-input.modified { color: var(--accent); }
     </style>
 </head>
 <body>
@@ -225,6 +274,16 @@
         <p class="tagline">Set up your profile or update your details. Changes are saved automatically.</p>
         <div class="returning-banner" id="returningBanner">
             ✅ <span>Welcome back, <strong id="returningName"></strong>. Your previous entries are loaded — just update what's changed.</span>
+        </div>
+        <div class="returning-update" id="returningUpdate" style="display:none;">
+            <div style="font-size: 0.82rem; font-weight: 600; margin-bottom: 0.5rem;">📤 Upload new data</div>
+            <p style="font-size: 0.78rem; color: var(--text-muted); margin-bottom: 0.75rem;">
+                You can upload updated exports, new FIT files, a fresh <code style="font-family: var(--mono); background: rgba(255,255,255,0.05); padding: 0.1rem 0.3rem; border-radius: 3px;">activities.csv</code>, 
+                or a weight CSV at any time — we'll merge it with your existing data.
+            </p>
+            <a href="https://www.dropbox.com/request/UWGoW1kajiL1H9FacteU" target="_blank" class="btn btn-primary" style="text-decoration: none; font-size: 0.82rem;">
+                Upload to Dropbox →
+            </a>
         </div>
     </div>
 
@@ -299,6 +358,54 @@
                     If unsure, tick "Estimate" and we'll calculate it from your training data.
                 </div>
             </div>
+
+            <!-- HR Zone preview -->
+            <div id="zonePreview" class="zone-preview" style="display:none;">
+                <div class="zone-preview-header">
+                    <span class="zone-preview-title">Training Zones</span>
+                    <button class="btn-ghost btn-sm" id="zoneResetBtn" onclick="resetZones()" style="display:none;" title="Reset to calculated defaults">↺ Reset</button>
+                </div>
+                <p class="zone-preview-desc">Auto-calculated from your LTHR. Click any boundary to adjust.</p>
+                <div class="zone-bar" id="zoneBar"></div>
+                <div class="zone-table">
+                    <div class="zone-row zone-row-header">
+                        <span class="zone-cell zc-zone">Zone</span>
+                        <span class="zone-cell zc-label zc-label-header">Label</span>
+                        <span class="zone-cell zc-range">HR range</span>
+                        <span class="zone-cell zc-pct">% LTHR</span>
+                    </div>
+                    <div class="zone-row" data-zone="1">
+                        <span class="zone-cell zc-zone"><span class="zone-dot" style="background:#3b82f6"></span>Z1</span>
+                        <span class="zone-cell zc-label">Recovery</span>
+                        <span class="zone-cell zc-range">&lt; <input type="number" class="zone-input" id="zb-12" onchange="onZoneBoundChange()" title="Z1/Z2 boundary"></span>
+                        <span class="zone-cell zc-pct" id="zp-12"></span>
+                    </div>
+                    <div class="zone-row" data-zone="2">
+                        <span class="zone-cell zc-zone"><span class="zone-dot" style="background:#22c55e"></span>Z2</span>
+                        <span class="zone-cell zc-label">Easy aerobic</span>
+                        <span class="zone-cell zc-range"><span id="zr-2lo"></span> – <input type="number" class="zone-input" id="zb-23" onchange="onZoneBoundChange()" title="Z2/Z3 boundary"></span>
+                        <span class="zone-cell zc-pct" id="zp-23"></span>
+                    </div>
+                    <div class="zone-row" data-zone="3">
+                        <span class="zone-cell zc-zone"><span class="zone-dot" style="background:#eab308"></span>Z3</span>
+                        <span class="zone-cell zc-label">Tempo</span>
+                        <span class="zone-cell zc-range"><span id="zr-3lo"></span> – <input type="number" class="zone-input" id="zb-34" onchange="onZoneBoundChange()" title="Z3/Z4 boundary"></span>
+                        <span class="zone-cell zc-pct" id="zp-34"></span>
+                    </div>
+                    <div class="zone-row" data-zone="4">
+                        <span class="zone-cell zc-zone"><span class="zone-dot" style="background:#f97316"></span>Z4</span>
+                        <span class="zone-cell zc-label">Threshold</span>
+                        <span class="zone-cell zc-range"><span id="zr-4lo"></span> – <input type="number" class="zone-input" id="zb-45" onchange="onZoneBoundChange()" title="Z4/Z5 boundary"></span>
+                        <span class="zone-cell zc-pct" id="zp-45"></span>
+                    </div>
+                    <div class="zone-row" data-zone="5">
+                        <span class="zone-cell zc-zone"><span class="zone-dot" style="background:#ef4444"></span>Z5</span>
+                        <span class="zone-cell zc-label">VO₂max</span>
+                        <span class="zone-cell zc-range">≥ <span id="zr-5lo"></span></span>
+                        <span class="zone-cell zc-pct" id="zp-5"></span>
+                    </div>
+                </div>
+            </div>
         </div>
 
         <!-- 3. YOUR DATA -->
@@ -328,7 +435,27 @@
                     <strong>Garmin Connect:</strong> Log in at connect.garmin.com → ⚙️ → Account Settings →
                     Download Your Data → Export Your Data. You'll get an email with a zip file.<br><br>
                     <strong>Strava:</strong> Log in at strava.com → Settings → My Account →
-                    Download or Delete Your Account → Request Your Archive. Takes a few hours.
+                    Download or Delete Your Account → Request Your Archive. Takes a few hours.<br><br>
+                    Upload the whole zip — we'll extract what we need. Strava exports include an <code>activities.csv</code> 
+                    with your activity names and metadata, which we'll use automatically. You can also upload 
+                    individual FIT files, an <code>activities.csv</code> on its own, a mix of files, or updated exports at any time.
+                </div>
+            </div>
+
+            <!-- Weight history (optional) -->
+            <div class="collapsible-toggle" onclick="toggleCollapsible(this)">
+                <span class="arrow">▶</span> Weight history (optional)
+            </div>
+            <div class="collapsible-content">
+                <div class="help-text">
+                    If you have historical weight data, upload a CSV file via the same Dropbox link. 
+                    Name it <code>YourName_weight.csv</code>. Format:<br><br>
+                    <code>date,weight_kg</code><br>
+                    <code>2025-01-15,76.2</code><br>
+                    <code>2025-02-01,75.8</code><br><br>
+                    Most date formats work (e.g. <code>2025-01-15</code>, <code>15/01/2025</code>, <code>Jan 15 2025</code>). 
+                    One row per weigh-in — doesn't need to be daily.
+                    Upload alongside your data export, or separately at any time.
                 </div>
             </div>
 
@@ -469,6 +596,8 @@ function gatherFormData() {
         lthr_estimate: el('f-lthr-est').checked,
         intervals_id: v('f-int-id'), intervals_key: v('f-int-key'),
         has_stryd: el('f-stryd').checked,
+        hr_zones: getZoneBounds(),
+        hr_zones_customised: zonesCustomised,
         pbs: gatherPbs(), upcoming: gatherUpcoming(),
         last_saved: new Date().toISOString()
     };
@@ -517,6 +646,22 @@ function populateForm(data) {
     setV('f-int-id', data.intervals_id); setV('f-int-key', data.intervals_key);
     updateIntervalsStatus();
     if (data.has_stryd) el('f-stryd').checked = true;
+
+    // Restore HR zones
+    updateZonePreview();  // calculate defaults first
+    if (data.hr_zones_customised && data.hr_zones) {
+        zonesCustomised = true;
+        if (data.hr_zones.z12) el('zb-12').value = data.hr_zones.z12;
+        if (data.hr_zones.z23) el('zb-23').value = data.hr_zones.z23;
+        if (data.hr_zones.z34) el('zb-34').value = data.hr_zones.z34;
+        if (data.hr_zones.z45) el('zb-45').value = data.hr_zones.z45;
+        const lthr = parseInt(data.lthr) || parseInt(v('f-lthr'));
+        const maxHr = parseInt(data.max_hr) || parseInt(v('f-maxhr'));
+        if (lthr) {
+            const effectiveMax = (maxHr && maxHr > lthr) ? maxHr : Math.round(lthr * 1.08);
+            renderZoneDisplay(lthr, effectiveMax);
+        }
+    }
 
     if (data.pbs) data.pbs.forEach(pb => {
         addPbRow(pb.dist_km, pb.label || distLabel(pb.dist_km));
@@ -691,6 +836,15 @@ function buildEmailBody(d) {
     b += `Power meter: ${d.has_stryd ? 'Stryd' : 'None (GAP mode)'}\n`;
     b += `Max HR: ${d.max_hr}\nLTHR: ${d.lthr}\n`;
 
+    if (d.hr_zones) {
+        b += `\nHR ZONES (customised)\n${'-'.repeat(30)}\n`;
+        b += `  Z1: < ${d.hr_zones.z12}\n`;
+        b += `  Z2: ${d.hr_zones.z12} – ${d.hr_zones.z23}\n`;
+        b += `  Z3: ${d.hr_zones.z23} – ${d.hr_zones.z34}\n`;
+        b += `  Z4: ${d.hr_zones.z34} – ${d.hr_zones.z45}\n`;
+        b += `  Z5: > ${d.hr_zones.z45}\n`;
+    }
+
     if (d.intervals_id) b += `\nintervals.icu ID: ${d.intervals_id}\nintervals.icu API Key: ${d.intervals_key || '(not provided)'}\n`;
 
     if (d.pbs.length > 0) {
@@ -717,6 +871,10 @@ function buildEmailBody(d) {
     b += `  power_mode: "${d.has_stryd ? 'stryd' : 'gap'}"\n`;
     if (d.max_hr !== 'estimate') b += `  max_hr: ${d.max_hr}\n`;
     if (d.lthr !== 'estimate') b += `  lthr: ${d.lthr}\n`;
+
+    if (d.hr_zones) {
+        b += `\nzones:\n  hr_zones: [${d.hr_zones.z12}, ${d.hr_zones.z23}, ${d.hr_zones.z34}, ${d.hr_zones.z45}]\n`;
+    }
 
     if (d.intervals_id) {
         b += `\ndata:\n  source: "intervals"\n  intervals:\n    athlete_id: "${d.intervals_id}"\n    api_key: "${d.intervals_key || ''}"\n`;
@@ -749,9 +907,10 @@ function buildEmailBody(d) {
         power_mode: d.has_stryd ? 'stryd' : 'gap',
         max_hr: d.max_hr === 'estimate' ? null : (parseInt(d.max_hr) || null),
         lthr: d.lthr === 'estimate' ? null : (parseInt(d.lthr) || null),
-        data_source: d.intervals_id ? 'intervals' : 'strava_export',
+        data_source: d.intervals_id ? 'intervals' : 'fit_folder',
         intervals_id: d.intervals_id || null,
         intervals_key: d.intervals_key || null,
+        hr_zones: d.hr_zones || null,
         planned_races: d.upcoming.map(r => ({
             name: r.name, date: r.date,
             distance_km: parseFloat(r.dist_km), priority: r.priority, surface: 'road'
@@ -766,6 +925,116 @@ function buildEmailBody(d) {
     b += `\n--- CONFIG JSON END ---\n`;
 
     return b;
+}
+
+// ─── HR Zone calculation ─────────────────────────────────────
+const ZONE_COLORS = ['#3b82f6', '#22c55e', '#eab308', '#f97316', '#ef4444'];
+let defaultZoneBounds = null;  // {z12, z23, z34, z45} from formula
+let zonesCustomised = false;
+
+function calcDefaultZones(lthr, maxHr) {
+    // Same formula as generate_dashboard.py
+    return {
+        z12: Math.round(lthr * 0.81),
+        z23: Math.round(lthr * 0.90),
+        z34: Math.round(lthr * 0.955),
+        z45: lthr
+    };
+}
+
+function updateZonePreview() {
+    const lthrEst = el('f-lthr-est').checked;
+    const maxHrEst = el('f-maxhr-est').checked;
+    const lthr = parseInt(v('f-lthr'));
+    const maxHr = parseInt(v('f-maxhr'));
+    const panel = el('zonePreview');
+
+    // Need at least LTHR to show zones
+    if (lthrEst || !lthr || lthr < 100) {
+        panel.style.display = 'none';
+        return;
+    }
+    panel.style.display = 'block';
+
+    const effectiveMax = (!maxHrEst && maxHr && maxHr > lthr) ? maxHr : Math.round(lthr * 1.08);
+    defaultZoneBounds = calcDefaultZones(lthr, effectiveMax);
+
+    // If not customised, apply defaults to inputs
+    if (!zonesCustomised) {
+        el('zb-12').value = defaultZoneBounds.z12;
+        el('zb-23').value = defaultZoneBounds.z23;
+        el('zb-34').value = defaultZoneBounds.z34;
+        el('zb-45').value = defaultZoneBounds.z45;
+    }
+
+    renderZoneDisplay(lthr, effectiveMax);
+}
+
+function renderZoneDisplay(lthr, maxHr) {
+    const z12 = parseInt(el('zb-12').value) || 0;
+    const z23 = parseInt(el('zb-23').value) || 0;
+    const z34 = parseInt(el('zb-34').value) || 0;
+    const z45 = parseInt(el('zb-45').value) || 0;
+
+    // Update range labels
+    el('zr-2lo').textContent = z12;
+    el('zr-3lo').textContent = z23;
+    el('zr-4lo').textContent = z34;
+    el('zr-5lo').textContent = z45;
+
+    // Update %LTHR column
+    el('zp-12').textContent = `<${Math.round(z12/lthr*100)}%`;
+    el('zp-23').textContent = `${Math.round(z12/lthr*100)}–${Math.round(z23/lthr*100)}%`;
+    el('zp-34').textContent = `${Math.round(z23/lthr*100)}–${Math.round(z34/lthr*100)}%`;
+    el('zp-45').textContent = `${Math.round(z34/lthr*100)}–${Math.round(z45/lthr*100)}%`;
+    el('zp-5').textContent = `≥${Math.round(z45/lthr*100)}%`;
+
+    // Zone bar (proportional widths)
+    const lo = Math.max(80, z12 - 40);  // visual floor
+    const widths = [z12 - lo, z23 - z12, z34 - z23, z45 - z34, maxHr - z45];
+    const total = widths.reduce((a, b) => a + Math.max(b, 1), 0);
+    el('zoneBar').innerHTML = widths.map((w, i) =>
+        `<div class="zone-bar-seg" style="flex:${Math.max(w,1)};background:${ZONE_COLORS[i]}"></div>`
+    ).join('');
+
+    // Highlight modified inputs
+    if (defaultZoneBounds) {
+        const defs = [defaultZoneBounds.z12, defaultZoneBounds.z23, defaultZoneBounds.z34, defaultZoneBounds.z45];
+        ['zb-12','zb-23','zb-34','zb-45'].forEach((id, i) => {
+            el(id).classList.toggle('modified', parseInt(el(id).value) !== defs[i]);
+        });
+    }
+
+    // Show/hide reset button
+    el('zoneResetBtn').style.display = zonesCustomised ? '' : 'none';
+}
+
+function onZoneBoundChange() {
+    zonesCustomised = true;
+    const lthr = parseInt(v('f-lthr'));
+    const maxHr = parseInt(v('f-maxhr'));
+    const effectiveMax = (maxHr && maxHr > lthr) ? maxHr : Math.round(lthr * 1.08);
+    renderZoneDisplay(lthr, effectiveMax);
+    autoSave();
+}
+
+function resetZones() {
+    zonesCustomised = false;
+    updateZonePreview();
+    autoSave();
+}
+
+function getZoneBounds() {
+    // Returns {z12, z23, z34, z45} or null if not shown / not customised
+    if (el('zonePreview').style.display === 'none') return null;
+    const bounds = {
+        z12: parseInt(el('zb-12').value),
+        z23: parseInt(el('zb-23').value),
+        z34: parseInt(el('zb-34').value),
+        z45: parseInt(el('zb-45').value)
+    };
+    if (!zonesCustomised) return null;  // using defaults, no need to store
+    return bounds;
 }
 
 // ─── Helpers ─────────────────────────────────────────────────
@@ -826,13 +1095,24 @@ document.querySelectorAll('input, select, textarea').forEach(el => {
 el('f-int-id').addEventListener('change', updateIntervalsStatus);
 el('f-int-key').addEventListener('change', updateIntervalsStatus);
 
+// HR zone live update
+['f-maxhr', 'f-lthr'].forEach(id => {
+    el(id).addEventListener('input', updateZonePreview);
+    el(id).addEventListener('change', updateZonePreview);
+});
+['f-maxhr-est', 'f-lthr-est'].forEach(id => {
+    el(id).addEventListener('change', updateZonePreview);
+});
+
 // ─── Init ────────────────────────────────────────────────────
 const saved = loadProfile();
 if (saved && saved.name) {
     populateForm(saved);
     el('returningName').textContent = saved.name;
     el('returningBanner').classList.add('show');
+    el('returningUpdate').style.display = 'block';
 }
+updateZonePreview();
 </script>
 </body>
 </html>

@@ -4289,6 +4289,8 @@ def generate_html(stats, rf_data, volume_data, ctl_atl_data, ctl_atl_lookup, rfl
             padding: 10px;
             text-align: center;
         }}
+        .stat-card.ws-tip {{ cursor: help; }}
+        .stat-card.ws-tip:hover {{ border-color: var(--accent-dim, rgba(129,140,248,0.3)); }}
         
         .stat-value {{
             font-size: 1.45em;
@@ -4737,40 +4739,46 @@ function raceAnnotations(dates) {{
     
     <!-- Stats Cards -->
     <div class="stats-grid">
-        <div class="stat-card">
+        <div class="stat-card ws-tip">
             <div class="stat-value" id="ctl-value">{stats['ctl'] if stats['ctl'] else '-'}</div>
             <div class="stat-label">CTL</div>
             <div class="stat-sub">fitness</div>
+            <div class="tip">Chronic Training Load — your rolling 42-day fitness. Higher = fitter. Built from consistent training over weeks.</div>
         </div>
-        <div class="stat-card">
+        <div class="stat-card ws-tip">
             <div class="stat-value" id="atl-value">{stats['atl'] if stats['atl'] else '-'}</div>
             <div class="stat-label">ATL</div>
             <div class="stat-sub">fatigue</div>
+            <div class="tip">Acute Training Load — your rolling 7-day fatigue. Spikes after hard training, drops with rest.</div>
         </div>
-        <div class="stat-card">
+        <div class="stat-card ws-tip">
             <div class="stat-value" id="tsb-value">{stats['tsb'] if stats['tsb'] else '-'}</div>
             <div class="stat-label">TSB</div>
             <div class="stat-sub">form</div>
+            <div class="tip">Training Stress Balance (CTL − ATL). Positive = fresh and rested. Negative = carrying fatigue. Best race form is slightly positive.</div>
         </div>
-        <div class="stat-card">
+        <div class="stat-card ws-tip">
             <div class="stat-value">{f"{stats['weight']}kg" if stats['weight'] else '-'}</div>
             <div class="stat-label">Weight</div>
             <div class="stat-sub">7d average</div>
+            <div class="tip">Your 7-day smoothed weight from the most recent data available.</div>
         </div>
     </div>
     
     <div class="stats-grid">
-        <div class="stat-card">
+        <div class="stat-card ws-tip">
             <div class="stat-value" id="rfl-value">{_init_rfl}%</div>
             <div class="stat-label" id="rfl-label">{_init_rfl_label}</div>
             <div class="stat-sub">vs peak</div>
+            <div class="tip">Relative Fitness Level — your current running fitness as a percentage of your all-time peak. 100% = best ever.</div>
         </div>
-        <div class="stat-card">
+        <div class="stat-card ws-tip">
             <div class="stat-value" id="rfl-delta">{f"{'+' if _init_delta > 0 else ''}{_init_delta}%" if _init_delta is not None else '-'}</div>
             <div class="stat-label">RFL 14d</div>
             <div class="stat-sub">change</div>
+            <div class="tip">Change in RFL over the last 14 days. Positive = fitness improving. Negative = fitness declining.</div>
         </div>
-        <div class="stat-card">
+        <div class="stat-card ws-tip">
             <div class="stat-value" id="easy-rf-gap-value"
                  data-stryd="{f"{'+' if stats['easy_rfl_gap'] > 0 else ''}{stats['easy_rfl_gap']}%" if stats['easy_rfl_gap'] is not None else '-'}"
                  data-gap="{f"{'+' if stats['easy_rfl_gap_gap'] > 0 else ''}{stats['easy_rfl_gap_gap']}%" if stats['easy_rfl_gap_gap'] is not None else '-'}"
@@ -4778,57 +4786,67 @@ function raceAnnotations(dates) {{
             >{f"{'+' if _init_easy > 0 else ''}{_init_easy}%" if _init_easy is not None else '-'}</div>
             <div class="stat-label">Easy RF Gap</div>
             <div class="stat-sub">vs trend</div>
+            <div class="tip">How your easy runs compare to the overall fitness trend. Negative = easy runs feel harder than expected (possible fatigue or illness).</div>
         </div>
-        <div class="stat-card">
+        <div class="stat-card ws-tip">
             <div class="stat-value" id="ag-value">{_init_ag if _init_ag else '-'}%</div>
             <div class="stat-label">Age Grade</div>
             <div class="stat-sub">5k estimate</div>
+            <div class="tip">Age-graded performance — compares your estimated 5K to the world record for your age and sex. 60%+ is good club level, 70%+ is competitive.</div>
         </div>
     </div>
     
     <div class="stats-grid">
-        <div class="stat-card">
+        <div class="stat-card ws-tip">
             <div class="stat-value" id="pred-5k">{format_race_time(_init_preds.get('5k', '-'))}</div>
             <div class="stat-label">5k</div>
             <div class="stat-sub">predicted</div>
+            <div class="tip">Predicted 5K race time based on your current fitness trend and critical power.</div>
         </div>
-        <div class="stat-card">
+        <div class="stat-card ws-tip">
             <div class="stat-value" id="pred-10k">{format_race_time(_init_preds.get('10k', '-'))}</div>
             <div class="stat-label">10k</div>
             <div class="stat-sub">predicted</div>
+            <div class="tip">Predicted 10K race time based on your current fitness trend and critical power.</div>
         </div>
-        <div class="stat-card">
+        <div class="stat-card ws-tip">
             <div class="stat-value" id="pred-hm">{format_race_time(_init_preds.get('Half Marathon', '-'))}</div>
             <div class="stat-label">Half</div>
             <div class="stat-sub">predicted</div>
+            <div class="tip">Predicted half marathon time based on your current fitness trend and critical power.</div>
         </div>
-        <div class="stat-card">
+        <div class="stat-card ws-tip">
             <div class="stat-value" id="pred-mara">{format_race_time(_init_preds.get('Marathon', '-'))}</div>
             <div class="stat-label">Marathon</div>
             <div class="stat-sub">predicted</div>
+            <div class="tip">Predicted marathon time based on your current fitness trend and critical power.</div>
         </div>
     </div>
     
     <div class="stats-grid">
-        <div class="stat-card">
+        <div class="stat-card ws-tip">
             <div class="stat-value">{stats['week_km']}</div>
             <div class="stat-label">Last 7 Days</div>
             <div class="stat-sub">km</div>
+            <div class="tip">Total running distance in the last 7 days.</div>
         </div>
-        <div class="stat-card">
+        <div class="stat-card ws-tip">
             <div class="stat-value">{stats['month_km']}</div>
             <div class="stat-label">Last 30 Days</div>
             <div class="stat-sub">km</div>
+            <div class="tip">Total running distance in the last 30 days.</div>
         </div>
-        <div class="stat-card">
+        <div class="stat-card ws-tip">
             <div class="stat-value">{int(stats['year_km']):,}</div>
             <div class="stat-label">Last 12 Months</div>
             <div class="stat-sub">km</div>
+            <div class="tip">Total running distance in the last 12 months.</div>
         </div>
-        <div class="stat-card">
+        <div class="stat-card ws-tip">
             <div class="stat-value">{stats['total_runs']:,}</div>
             <div class="stat-label">Total Runs</div>
             <div class="stat-sub">since {stats['first_year']}</div>
+            <div class="tip">Total number of runs in your training history.</div>
         </div>
     </div>
     

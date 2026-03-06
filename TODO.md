@@ -28,8 +28,7 @@ Two stacked card slots with distance-filtered search/select. Cards match Race Re
 **Race History — move effort/tail to StepB** *(performance + mode toggle)*
 Currently effort mins and long run tail are computed at dashboard build time by loading NPZ files for every race's 42d window (~2 min for 328 races). Move to StepB: pre-compute per-run columns (`effort_14d_pw`, `effort_42d_pw`, `effort_14d_hr`, `lr_tail_14d`, `lr_z3_tail_14d` etc.). Dashboard reads master columns instead of scanning NPZ. Enables JS mode toggle to switch power vs HR effort client-side. Also eliminates 2-min dashboard build overhead.
 
-**Race History — predicted-at-the-time** *(Phase 2)*
-Show "predicted X, ran Y" on race cards. Prediction columns already exist per row in master — just need to extract and display.
+**Race History - 3km section should be "<=3km" to include shorter races eg 1500m**
 
 **Activity search + override editor** *(own session)*
 In-dashboard search of activity log, edit modal for overrides, connects to existing GitHub Actions override dispatch. Replaces spreadsheet editing for athletes.
@@ -54,6 +53,8 @@ Onboarding form: add planned sessions (date, type, duration). `athlete.yml`: `pl
 
 ### Pipeline / data quality
 
+**classify_races.py doesn't seem to pick up races of less than 3km** Missing 2x track mile, 1x track 1500, 1x road mile, 1x road 1000m in Paul Test.
+
 **Race HR thresholds** — make (3K:0.98, 5K:0.98, 10K:0.97, 10M:0.95, HM:0.94, 30K:0.90, Marathon:0.88) the defaults in `classify_races.py` and `onboard_athlete.py` template
 
 **GAP equiv time** — `gap_equiv_time_s` from Minetti integral
@@ -63,8 +64,6 @@ Onboarding form: add planned sessions (date, type, duration). `athlete.yml`: `pl
 **Stryd outlier auto-flag** — RE z < −2.5σ vs speed → set factor=0, use GAP RF instead
 
 **Athlete folder refactor** — rename all athlete folders/paths to numeric IDs (A001–A004) across Dropbox, workflows, GH Pages, cache keys
-
-**Check detection of shorter races and their surface in classify_races.py**
 
 **Surface-specific trail specificity** — race readiness long run metrics: count only hilly runs (undulation_score > threshold) for trail race cards
 
