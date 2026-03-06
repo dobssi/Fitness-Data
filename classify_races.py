@@ -480,6 +480,27 @@ def enrich_and_classify(master_path: str, overrides_path: str,
             ov.at[i, 'race_flag'] = 0
             ov.at[i, 'notes'] = f"REVIEW: {row['reason']}"
     
+    # ── Demote races with large elapsed/moving ratio ──
+    # If elapsed_time >> moving_time, the activity is a session containing
+    # a fast effort (e.g. track TT within a training session), not a
+    # standalone race. The moving_time may yield a valid AG but the
+    # activity as a whole is not a race.
+    ELAPSED_MOVING_MAX_RATIO = 1.5
+    demoted_count = 0
+    for i, row in ov.iterrows():
+        if row.get('race_flag', 0) != 1:
+            continue
+        fname = row['file']
+        m = master_lookup.get(fname, {})
+        elapsed = m.get('elapsed_time_s', 0) or 0
+        moving = m.get('moving_time_s', 0) or 0
+        if moving > 0 and elapsed / moving > ELAPSED_MOVING_MAX_RATIO:
+            ov.at[i, 'race_flag'] = 0
+            ov.at[i, 'notes'] = f"REVIEW: elapsed/moving ratio {elapsed/moving:.1f}x — session, not race"
+            demoted_count += 1
+    if demoted_count:
+        print(f"  Demoted {demoted_count} race(s) with elapsed/moving > {ELAPSED_MOVING_MAX_RATIO}x")
+    
     # ── Detect parkruns ──
     # parkrun=1 marks the event (always set if it's a parkrun).
     # race_flag is set independently by the HR-based classification above.
