@@ -292,11 +292,11 @@ def pack_cache(cache_dir: str, archive_path: str):
         print(f"  ⚠ Cache directory not found: {cache_dir}")
         return False
     
-    npz_files = list(Path(cache_dir).glob("*.npz"))
-    print(f"  Packing {len(npz_files)} .npz files from {cache_dir}...")
+    cache_files = [f for f in Path(cache_dir).iterdir() if f.suffix in (".npz", ".json")]
+    print(f"  Packing {len(cache_files)} cache files from {cache_dir}...")
     
     with tarfile.open(archive_path, "w:gz") as tar:
-        for f in npz_files:
+        for f in cache_files:
             tar.add(f, arcname=f.name)
     
     size = os.path.getsize(archive_path)
