@@ -92,7 +92,7 @@ RACE_DISTANCES = [
     (2.8, 3.2, 3.0, "3K"),
     (4.8, 5.5, 5.0, "5K"),
     (9.5, 10.8, 10.0, "10K"),
-    (14.5, 16.5, 15.534, "10M"),
+    (14.5, 16.5, 16.0934, "10M"),
     (20.5, 22.0, 21.097, "HM"),
     (29.5, 31.5, 30.0, "30K"),
     (41.0, 43.5, 42.195, "Marathon"),
@@ -575,6 +575,18 @@ def enrich_and_classify(master_path: str, overrides_path: str,
         surface_count += bbox_track_count + bbox_indoor_count
         print(f"  Track detected from GPS bbox: {bbox_track_count} outdoor, {bbox_indoor_count} indoor")
     
+    # ── Clear official_distance_km for non-races ──
+    # Candidates at race distances get official_distance_km during detection,
+    # but only actual races (race_flag=1) should keep it. Without this,
+    # StepB applies distance corrections to training runs, distorting speed/RE/RF.
+    non_race_dist_cleared = 0
+    for i, row in ov.iterrows():
+        if row.get('race_flag', 0) != 1 and pd.notna(row.get('official_distance_km')):
+            ov.at[i, 'official_distance_km'] = None
+            non_race_dist_cleared += 1
+    if non_race_dist_cleared:
+        print(f"  Cleared official_distance_km from {non_race_dist_cleared} non-race rows")
+
     # ── Sort by date ──
     ov.sort_values('date', inplace=True)
     

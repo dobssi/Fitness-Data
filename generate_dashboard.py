@@ -1928,11 +1928,11 @@ def _distance_km_to_key(km):
     return 'Mara'
 
 if _cfg_races is not None:
-    PLANNED_RACES_DASH = [
+    PLANNED_RACES_DASH = sorted([
         {'name': r['name'], 'date': r['date'], 'distance_key': _distance_km_to_key(r['distance_km']),
          'distance_km': r['distance_km'], 'priority': r.get('priority', 'B'), 'surface': r.get('surface', 'road')}
         for r in _cfg_races
-    ]
+    ], key=lambda r: r['date'])
 else:
     PLANNED_RACES_DASH = [
         {'name': '5K London', 'date': '2026-02-27', 'distance_key': '5K', 'distance_km': 5.0, 'priority': 'A', 'surface': 'road'},
@@ -2886,15 +2886,20 @@ def _generate_zone_html(zone_data, stats=None):
         band = round(pw * 0.03)
         
         # For standard road distances, use StepB predictions (matches stats grid exactly)
+        # For bespoke distances (e.g. 16.2km), use power-duration model instead
         # Use mode-appropriate predictions: GAP mode → _mode_gap, Sim → _mode_sim
         _stepb_key_map = {'5K': '5k_raw', '10K': '10k_raw', 'HM': 'hm_raw', 'Mara': 'marathon_raw'}
+        _stepb_std_km = {'5K': 5.0, '10K': 10.0, 'HM': 21.097, 'Mara': 42.195}
+        _is_standard_dist = abs(dist_km - _stepb_std_km.get(key, 0)) < 0.1
         _rp = stats.get('race_predictions', {}) if stats else {}
-        # Pick mode-appropriate prediction source
-        if _cfg_power_mode in ('gap', 'sim'):
-            _mode_preds = _rp.get(f'_mode_{_cfg_power_mode}', {})
-            _stepb_raw = _mode_preds.get(_stepb_key_map.get(key, ''), 0) if surface == 'road' else 0
-        else:
-            _stepb_raw = _rp.get(_stepb_key_map.get(key, ''), 0) if surface == 'road' else 0
+        _stepb_raw = 0
+        if _is_standard_dist and surface == 'road':
+            # Pick mode-appropriate prediction source
+            if _cfg_power_mode in ('gap', 'sim'):
+                _mode_preds = _rp.get(f'_mode_{_cfg_power_mode}', {})
+                _stepb_raw = _mode_preds.get(_stepb_key_map.get(key, ''), 0)
+            else:
+                _stepb_raw = _rp.get(_stepb_key_map.get(key, ''), 0)
         if _stepb_raw and _stepb_raw > 0:
             t = _stepb_raw
         else:
@@ -2975,10 +2980,18 @@ def _generate_zone_html(zone_data, stats=None):
         else:
             _specificity_html = ''
 
+        # Distance label — show for all races
+        _standard_dists = {'5K': 5.0, '10K': 10.0, 'HM': 21.097, 'Mara': 42.195}
+        _std_km = _standard_dists.get(key)
+        if _std_km and abs(dist_km - _std_km) < 0.1:
+            _dist_label = key
+        else:
+            _dist_label = f"{dist_km:.1f}km"
+
         race_cards += f'''<div class="rc">
             <div class="rh">
                 <span class="rn">{race['name']} <span style="font-size:0.65rem;padding:2px 6px;border-radius:4px;background:{p_color}22;color:{p_color};font-weight:600;margin-left:6px;vertical-align:middle">{p_label}</span>{f' <span style="font-size:0.65rem;color:var(--text-dim)">{s_label}</span>' if surface != 'road' else ''}</span>
-                <span class="rd">{race['date']} · {days_str}</span>
+                <span class="rd">{race['date']} · {_dist_label} · {days_str}</span>
             </div>
             <div class="rs">
                 <div class="power-only ws-tip"><div class="rv" style="color:var(--accent)" id="race-pw-{race_idx}">{pw}W</div><div class="rl">Target</div><div class="rx">±{band}W</div><div class="tip">Target power for this race distance and surface · ±3% band shown</div></div>

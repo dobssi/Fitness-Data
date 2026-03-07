@@ -14,9 +14,13 @@ Master_*.xlsx
 !master_template.xlsx
 re_model_s4_*.json
 stryd_serial_map.json
+activity_overrides.xlsx
+athlete_data.csv
+pending_activities.csv
 
 # Cache directories
 persec_cache*/
+*.tar.gz
 _weather_cache_openmeteo/
 *.sqlite
 
@@ -42,7 +46,12 @@ activities.csv
 athletes/*/data/
 athletes/*/output/
 athletes/*/persec_cache/
+athletes/*/cache/
 athletes/*/strava_data/
+athletes/*/activity_overrides.xlsx
+athletes/*/athlete_data.csv
+athletes/*/pending_activities.csv
+athletes/*/fit_sync_state.json
 
 # =============================================================================
 # Generated output
