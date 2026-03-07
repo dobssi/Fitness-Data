@@ -2270,38 +2270,30 @@ def get_zone_data(df):
     
     # Inject planned sessions as future "decided" entries so the taper solver
     # uses them instead of its template when they fall in the taper window
-    if _daily_lookup:
-        _today_str = pd.Timestamp.now().strftime('%Y-%m-%d')
-        for _dstr, _dval in _daily_lookup.items():
-            if _dstr > _today_str and _dstr not in _day_agg:
-                # Check Daily sheet for planned session
-                # We need Planned_Description from the daily sheet
-                pass  # We'll read from daily_df below
-        
-        try:
-            _daily_full = pd.read_excel(MASTER_FILE, sheet_name=1)  # Daily sheet
-            _daily_full['Date'] = pd.to_datetime(_daily_full['Date'])
-            _has_planned_col = 'Planned_Description' in _daily_full.columns
-            if _has_planned_col:
-                _future_planned = _daily_full[
-                    (_daily_full['Date'] > pd.Timestamp.now()) &
-                    (_daily_full['Planned_Description'].notna()) &
-                    (_daily_full['Planned_Description'] != '')
-                ]
-                for _, _fp in _future_planned.iterrows():
-                    _fp_dstr = _fp['Date'].strftime('%Y-%m-%d')
-                    if _fp_dstr not in _day_agg:
-                        _rw_recent_tss.append({
-                            'date': _fp_dstr,
-                            'name': str(_fp['Planned_Description']),
-                            'tss': round(float(_fp.get('TSS_Running', 0))),
-                            'race': str(_fp.get('Planned_Source', '')) == 'race',
-                            'planned': True  # Flag for taper solver display
-                        })
-                if len(_future_planned) > 0:
-                    print(f"  Injected {len(_future_planned)} planned sessions into taper data")
-        except Exception as _e:
-            pass  # Daily sheet may not have planned columns yet
+    try:
+        _daily_full = pd.read_excel(MASTER_FILE, sheet_name=1)  # Daily sheet
+        _daily_full['Date'] = pd.to_datetime(_daily_full['Date'])
+        _has_planned_col = 'Planned_Description' in _daily_full.columns
+        if _has_planned_col:
+            _future_planned = _daily_full[
+                (_daily_full['Date'] > pd.Timestamp.now()) &
+                (_daily_full['Planned_Description'].notna()) &
+                (_daily_full['Planned_Description'] != '')
+            ]
+            for _, _fp in _future_planned.iterrows():
+                _fp_dstr = _fp['Date'].strftime('%Y-%m-%d')
+                if _fp_dstr not in _day_agg:
+                    _rw_recent_tss.append({
+                        'date': _fp_dstr,
+                        'name': str(_fp['Planned_Description']),
+                        'tss': round(float(_fp.get('TSS_Running', 0))),
+                        'race': str(_fp.get('Planned_Source', '')) == 'race',
+                        'planned': True  # Flag for taper solver display
+                    })
+            if len(_future_planned) > 0:
+                print(f"  Injected {len(_future_planned)} planned sessions into taper data")
+    except Exception as _e:
+        pass  # Daily sheet may not have planned columns yet
     
     # Current CTL/ATL for taper solver starting point
     # Use YESTERDAY's end-of-day CTL/ATL from Daily sheet, not today's.
