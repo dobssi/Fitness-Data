@@ -74,6 +74,12 @@ def main():
     # --- Resolve date ---
     if args.date:
         date_str = args.date.strip()
+        # Normalise DD/MM/YYYY or D/M/YYYY to YYYY-MM-DD
+        import re
+        _dmy = re.match(r'^(\d{1,2})[/\-.](\d{1,2})[/\-.](\d{4})$', date_str)
+        if _dmy:
+            date_str = f"{_dmy.group(3)}-{int(_dmy.group(2)):02d}-{int(_dmy.group(1)):02d}"
+            print(f"[run-metadata] Normalised date to {date_str}")
     else:
         # Default to today in Stockholm time
         try:

@@ -1694,36 +1694,21 @@ def calc_ctl_atl(df: pd.DataFrame, athlete_data_path: str = None) -> tuple:
     _planned_tss = {}
     _DAY_MAP = {'mon': 0, 'tue': 1, 'wed': 2, 'thu': 3, 'fri': 4, 'sat': 5, 'sun': 6}
     
+    _template_end = today + pd.Timedelta(days=14)  # default: 14 days if no planned sessions
+    
     if PLANNED_SESSIONS:
-        # Find the first planned race date to limit how far templates repeat
-        _first_race_date = None
-        for _pr in PLANNED_RACES:
-            _rd = pd.Timestamp(_pr['date'])
-            if _rd > today:
-                if _first_race_date is None or _rd < _first_race_date:
-                    _first_race_date = _rd
-        
-        # Determine taper start: templates stop before taper window
-        # A-race = 14d taper, B-race = 7d, C-race = 0d
-        _taper_days_map = {'A': 14, 'B': 7, 'C': 0}
-        _template_end = today + pd.Timedelta(days=120)  # max 120 days of templates
-        for _pr in PLANNED_RACES:
-            _rd = pd.Timestamp(_pr['date'])
-            if _rd > today:
-                _taper_start = _rd - pd.Timedelta(days=_taper_days_map.get(_pr.get('priority', 'B'), 7))
-                if _taper_start < _template_end:
-                    _template_end = _taper_start
-        
-        # Lay out weekly templates from tomorrow until template_end
+        # Template covers 1-2 weeks from tomorrow, played once (not repeating)
         _num_weeks = len(PLANNED_SESSIONS)  # 1 or 2
+        _template_end = today + pd.Timedelta(days=_num_weeks * 7)
+        
+        # Lay out weekly templates from tomorrow for 1-2 weeks
         _day = today + pd.Timedelta(days=1)
-        _week_counter = 0
         _week_start = _day - pd.Timedelta(days=_day.weekday())  # Monday of current week
         
         while _day <= _template_end:
-            # Determine which week template to use (alternating)
+            # Determine which week template to use (week 1 then week 2)
             _weeks_since_start = ((_day - _week_start).days) // 7
-            _week_idx = _weeks_since_start % _num_weeks
+            _week_idx = min(_weeks_since_start, _num_weeks - 1)
             _week_template = PLANNED_SESSIONS[_week_idx]
             
             _day_name = _day.day_name()[:3].lower()
@@ -1738,13 +1723,14 @@ def calc_ctl_atl(df: pd.DataFrame, athlete_data_path: str = None) -> tuple:
             _day += pd.Timedelta(days=1)
         
         _n_planned = len(_planned_tss)
-        print(f"  Planned sessions: {_n_planned} days mapped from {len(PLANNED_SESSIONS)} week template(s)")
+        print(f"  Planned sessions: {_n_planned} days mapped from {_num_weeks} week template(s), ending {_template_end.strftime('%Y-%m-%d')}")
     
-    # Overlay planned races (overrides any template session on that day)
+    # Overlay planned races that fall within the template window
+    # (races beyond template_end are handled by the taper solver separately)
     _race_tss_by_dist = {}  # Cache: distance_bucket -> median TSS from history
     for _pr in PLANNED_RACES:
         _rd = pd.Timestamp(_pr['date'])
-        if _rd > today:
+        if _rd > today and _rd <= _template_end:
             _dstr = _rd.strftime('%Y-%m-%d')
             # Auto-estimate race TSS from historical races at similar distance
             _dist = _pr['distance_km']
@@ -1768,10 +1754,9 @@ def calc_ctl_atl(df: pd.DataFrame, athlete_data_path: str = None) -> tuple:
             }
             print(f"  Race {_pr['name']} ({_dstr}): estimated TSS={_est_tss:.0f}")
     
-    # Determine projection end: last planned day + 1, or 30 days, whichever is further
+    # Projection ends at template end + 1 day (the "morning after" readout)
     if _planned_tss:
-        _last_planned = max(pd.Timestamp(d) for d in _planned_tss.keys())
-        projection_end = max(_last_planned + pd.Timedelta(days=1), today + pd.Timedelta(days=30))
+        projection_end = max(_template_end + pd.Timedelta(days=1), today + pd.Timedelta(days=30))
     else:
         projection_end = today + pd.Timedelta(days=30)
     
@@ -3520,6 +3505,7 @@ def refresh_activity_names(dfm: pd.DataFrame, strava_path: str, tz_local: str) -
         # Determine key column — 'file' (filename or date-based key) or 'date'
         import re as _re
         _date_seq_pat = _re.compile(r'^(\d{4}-\d{2}-\d{2})\s*(?:#(\d+))?$')
+        _date_dmy_pat = _re.compile(r'^(\d{1,2})/(\d{1,2})/(\d{4})\s*(?:#(\d+))?$')  # DD/MM/YYYY fallback
         
         key_col = 'file' if 'file' in pend.columns else ('date' if 'date' in pend.columns else None)
         
@@ -3543,8 +3529,17 @@ def refresh_activity_names(dfm: pd.DataFrame, strava_path: str, tz_local: str) -
                         pend_by_date[d] = []
                     pend_by_date[d].append((seq, name))
                 else:
-                    # Exact filename key
-                    pend_by_file[key] = name
+                    # Try DD/MM/YYYY fallback
+                    m_dmy = _date_dmy_pat.match(key)
+                    if m_dmy:
+                        d = f"{m_dmy.group(3)}-{int(m_dmy.group(2)):02d}-{int(m_dmy.group(1)):02d}"
+                        seq = int(m_dmy.group(4)) if m_dmy.group(4) else None
+                        if d not in pend_by_date:
+                            pend_by_date[d] = []
+                        pend_by_date[d].append((seq, name))
+                    else:
+                        # Exact filename key
+                        pend_by_file[key] = name
             
             # Build per-day run lists for #N sequence resolution
             day_runs = {}  # date_str -> [fit_file, ...]  (sorted chronologically)
