@@ -421,7 +421,7 @@ jobs:
   # ═══════════════════════════════════════════════════════════════════════════
   stepb_deploy:
     runs-on: ubuntu-latest
-    timeout-minutes: 120
+    timeout-minutes: 350
     needs: [rebuild]
 
     # Conditions:

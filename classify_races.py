@@ -540,32 +540,37 @@ def enrich_and_classify(master_path: str, overrides_path: str,
     #   - No GPS data (NaN bbox)    → INDOOR_TRACK (indoors = no GPS signal)
     #   - bbox < 5,000 m²           → INDOOR_TRACK (200m oval)
     #   - bbox < 50,000 m²          → TRACK (400m oval)
+    # Skip entirely if gps_bbox_m2 is not in the Master (e.g. GAP-mode athletes).
     INDOOR_BBOX_THRESHOLD_M2 = 5_000
     TRACK_BBOX_THRESHOLD_M2 = 50_000
     TRACK_RACE_DISTANCES = {'3K', '5K', '10K'}
     bbox_track_count = 0
     bbox_indoor_count = 0
-    for i, row in ov.iterrows():
-        if pd.notna(row.get('surface')) and row['surface']:
-            continue  # Surface already set (by name or manual override)
-        if row.get('race_flag', 0) != 1:
-            continue  # Only check flagged races
-        race_type = row.get('race_type', '')
-        if race_type not in TRACK_RACE_DISTANCES:
-            continue  # Only track-plausible distances
-        fname = row['file']
-        m = master_lookup.get(fname, {})
-        bbox = m.get('gps_bbox_m2')
-        if bbox is None or pd.isna(bbox) or bbox == 0:
-            # No GPS data — indoor venue (GPS doesn't work indoors)
-            ov.at[i, 'surface'] = 'indoor'
-            bbox_indoor_count += 1
-        elif bbox < INDOOR_BBOX_THRESHOLD_M2:
-            ov.at[i, 'surface'] = 'indoor'
-            bbox_indoor_count += 1
-        elif bbox < TRACK_BBOX_THRESHOLD_M2:
-            ov.at[i, 'surface'] = 'track'
-            bbox_track_count += 1
+    has_bbox = 'gps_bbox_m2' in master.columns if master is not None else False
+    if not has_bbox:
+        print("  GPS bbox detection skipped — gps_bbox_m2 not in Master")
+    else:
+        for i, row in ov.iterrows():
+            if pd.notna(row.get('surface')) and row['surface']:
+                continue  # Surface already set (by name or manual override)
+            if row.get('race_flag', 0) != 1:
+                continue  # Only check flagged races
+            race_type = row.get('race_type', '')
+            if race_type not in TRACK_RACE_DISTANCES:
+                continue  # Only track-plausible distances
+            fname = row['file']
+            m = master_lookup.get(fname, {})
+            bbox = m.get('gps_bbox_m2')
+            if bbox is None or pd.isna(bbox) or bbox == 0:
+                # No GPS data — indoor venue (GPS doesn't work indoors)
+                ov.at[i, 'surface'] = 'indoor'
+                bbox_indoor_count += 1
+            elif bbox < INDOOR_BBOX_THRESHOLD_M2:
+                ov.at[i, 'surface'] = 'indoor'
+                bbox_indoor_count += 1
+            elif bbox < TRACK_BBOX_THRESHOLD_M2:
+                ov.at[i, 'surface'] = 'track'
+                bbox_track_count += 1
     if bbox_track_count or bbox_indoor_count:
         surface_count += bbox_track_count + bbox_indoor_count
         print(f"  Track detected from GPS bbox: {bbox_track_count} outdoor, {bbox_indoor_count} indoor")

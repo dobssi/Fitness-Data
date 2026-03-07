@@ -2985,7 +2985,7 @@ def write_master(template_xlsx: str, out_xlsx: str, df: pd.DataFrame, df_fail: p
     for h in base_headers:
         out_cols.append(h)
         if h == "distance_km":
-            out_cols.extend(["gps_distance_km","gps_coverage","gps_distance_ratio","gps_max_seg_m","gps_p99_speed_mps","gps_outlier_frac","speed_source"])
+            out_cols.extend(["gps_distance_km","gps_coverage","gps_distance_ratio","gps_max_seg_m","gps_p99_speed_mps","gps_outlier_frac","gps_bbox_m2","speed_source"])
         if h == "RE_normalised":
             out_cols.extend(["calibration_era_id","power_adjuster_to_S4"])
 
