@@ -4530,7 +4530,7 @@ def generate_html(stats, rf_data, volume_data, ctl_atl_data, ctl_atl_lookup, rfl
         .dt-d {{ background: rgba(74,222,128,0.15); color: #4ade80; }}
         .dt-p {{ background: rgba(129,140,248,0.12); color: var(--accent); }}
         .dt-t {{ background: rgba(251,191,36,0.15); color: #fbbf24; }}
-        .dt-r {{ background: rgba(74,222,128,0.2); color: #4ade80; }}
+        .dt-r {{ background: rgba(251,191,36,0.18); color: #fbbf24; }}
         .dv {{ text-align: right; font-family: 'JetBrains Mono'; font-size: 0.73rem; }}
         .dv-t {{ color: #fbbf24; }}
         .dv-c {{ color: #3b82f6; }}
