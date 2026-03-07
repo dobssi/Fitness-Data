@@ -139,7 +139,8 @@ jobs:
                     pending_activities.csv \
                     TotalHistory.zip \
                     _weather_cache_openmeteo/openmeteo_cache.sqlite \
-            --cache-dir persec_cache_FULL
+            --cache-dir persec_cache_FULL \
+            --cache-full
         continue-on-error: true
       
       # ─── Apply run metadata from dispatch inputs ────────────
@@ -242,8 +243,7 @@ jobs:
                     _weather_cache_openmeteo/openmeteo_cache.sqlite \
                     TotalHistory.zip \
                     fit_sync_state.json \
-                    pending_activities.csv \
-            --cache-dir persec_cache_FULL
+                    pending_activities.csv
       
       # ─── Deploy dashboard to GitHub Pages ──────────────────
       - name: Prepare dashboard for Pages
