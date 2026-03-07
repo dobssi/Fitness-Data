@@ -2282,6 +2282,10 @@ def get_zone_data(df):
             ]
             for _, _fp in _future_planned.iterrows():
                 _fp_dstr = _fp['Date'].strftime('%Y-%m-%d')
+                _fp_source = str(_fp.get('Planned_Source', ''))
+                # Skip race entries — the taper solver handles race day specially (TSS=0, morning TSB)
+                if _fp_source == 'race':
+                    continue
                 if _fp_dstr not in _day_agg:
                     _rw_recent_tss.append({
                         'date': _fp_dstr,
