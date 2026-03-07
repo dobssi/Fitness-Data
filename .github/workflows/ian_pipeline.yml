@@ -170,7 +170,8 @@ jobs:
                     output/Master_FULL.xlsx \
                     output/Master_FULL_post.xlsx \
                     output/_weather_cache_openmeteo/openmeteo_cache.sqlite \
-            --cache-dir ${{ env.ATHLETE_DIR }}/persec_cache
+            --cache-dir ${{ env.ATHLETE_DIR }}/persec_cache \
+            --cache-full
         continue-on-error: true
 
       - name: Sync athlete data from intervals.icu
@@ -286,8 +287,7 @@ jobs:
                     output/Master_FULL.xlsx \
                     output/Master_FULL_post.xlsx \
                     output/dashboard/index.html \
-                    output/_weather_cache_openmeteo/openmeteo_cache.sqlite \
-            --cache-dir ${{ env.ATHLETE_DIR }}/persec_cache
+                    output/_weather_cache_openmeteo/openmeteo_cache.sqlite
 
       - name: Prepare dashboard for Pages
         if: ${{ steps.gate.outputs.continue == 'true' }}

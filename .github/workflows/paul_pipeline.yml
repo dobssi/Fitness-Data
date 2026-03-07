@@ -187,7 +187,7 @@ jobs:
         run: |
           CACHE_FLAG=""
           if [ "${{ env.PIPELINE_MODE }}" != "INITIAL" ]; then
-            CACHE_FLAG="--cache-dir ${{ env.ATHLETE_DIR }}/persec_cache"
+            CACHE_FLAG="--cache-dir ${{ env.ATHLETE_DIR }}/persec_cache --cache-full"
           fi
           python ci/dropbox_sync.py download \
             --dropbox-base "${{ env.DB_BASE }}" \
@@ -348,10 +348,6 @@ jobs:
       - name: Upload results to Dropbox (UPDATE / FULL / INITIAL / CLASSIFY_RACES)
         if: ${{ steps.gate.outputs.continue == 'true' && (env.PIPELINE_MODE == 'UPDATE' || env.PIPELINE_MODE == 'FULL' || env.PIPELINE_MODE == 'INITIAL' || env.PIPELINE_MODE == 'CLASSIFY_RACES') }}
         run: |
-          CACHE_UPLOAD=""
-          if [ "${{ env.PIPELINE_MODE }}" != "INITIAL" ]; then
-            CACHE_UPLOAD="--cache-dir ${{ env.ATHLETE_DIR }}/persec_cache"
-          fi
           python ci/dropbox_sync.py upload \
             --dropbox-base "${{ env.DB_BASE }}" \
             --local-prefix "${{ env.ATHLETE_DIR }}" \
@@ -363,8 +359,7 @@ jobs:
                     output/Master_FULL.xlsx \
                     output/Master_FULL_post.xlsx \
                     output/dashboard/index.html \
-                    output/_weather_cache_openmeteo/openmeteo_cache.sqlite \
-            $CACHE_UPLOAD
+                    output/_weather_cache_openmeteo/openmeteo_cache.sqlite
 
       - name: Upload persec cache archive (INITIAL only)
         if: ${{ steps.gate.outputs.continue == 'true' && env.PIPELINE_MODE == 'INITIAL' }}
@@ -481,10 +476,6 @@ jobs:
 
       - name: Download data from Dropbox
         run: |
-          CACHE_FLAG="--cache-dir ${{ env.ATHLETE_DIR }}/persec_cache"
-          if [ "${{ env.PIPELINE_MODE }}" = "INITIAL" ]; then
-            CACHE_FLAG="$CACHE_FLAG --cache-full"
-          fi
           python ci/dropbox_sync.py download \
             --dropbox-base "${{ env.DB_BASE }}" \
             --local-prefix "${{ env.ATHLETE_DIR }}" \
@@ -494,7 +485,8 @@ jobs:
                     output/Master_FULL.xlsx \
                     output/Master_FULL_post.xlsx \
                     output/_weather_cache_openmeteo/openmeteo_cache.sqlite \
-            $CACHE_FLAG
+            --cache-dir ${{ env.ATHLETE_DIR }}/persec_cache \
+            --cache-full
         continue-on-error: true
 
       - name: Sync athlete data from intervals.icu
@@ -564,10 +556,6 @@ jobs:
 
       - name: Upload results to Dropbox
         run: |
-          CACHE_FLAG=""
-          if [ "${{ env.PIPELINE_MODE }}" != "INITIAL" ]; then
-            CACHE_FLAG="--cache-dir ${{ env.ATHLETE_DIR }}/persec_cache"
-          fi
           python ci/dropbox_sync.py upload \
             --dropbox-base "${{ env.DB_BASE }}" \
             --local-prefix "${{ env.ATHLETE_DIR }}" \
@@ -576,8 +564,7 @@ jobs:
                     data/activities.csv \
                     output/Master_FULL_post.xlsx \
                     output/dashboard/index.html \
-                    output/_weather_cache_openmeteo/openmeteo_cache.sqlite \
-            $CACHE_FLAG
+                    output/_weather_cache_openmeteo/openmeteo_cache.sqlite
 
       - name: Prepare dashboard for Pages
         run: |
