@@ -310,7 +310,9 @@ from config import (PEAK_CP_WATTS, POWER_SCORE_RIEGEL_K, POWER_SCORE_REFERENCE_D
                     # Phase 2: GAP mode
                     GAP_RE_CONSTANT, POWER_MODE,
                     # Athlete parameters
-                    ATHLETE_MASS_KG, ATHLETE_LTHR, ATHLETE_MAX_HR)
+                    ATHLETE_MASS_KG, ATHLETE_LTHR, ATHLETE_MAX_HR,
+                    # Planned training
+                    PLANNED_SESSIONS, PLANNED_RACES)
 
 RF_CONSTANTS = {
     # Rolling periods
@@ -1683,11 +1685,97 @@ def calc_ctl_atl(df: pd.DataFrame, athlete_data_path: str = None) -> tuple:
         except Exception as e:
             print(f"  WARNING: Could not load non-running TSS from {athlete_data_path}: {e}")
     
-    # Create full date range as strings (extend to today + 30 days for CTL/ATL projection)
+    # Create full date range as strings (extend to today + N days for CTL/ATL projection)
     from datetime import datetime
     today = pd.Timestamp(datetime.now().date())
-    projection_days = 30
-    end_date = max(max_date, today) + pd.Timedelta(days=projection_days)
+    
+    # ── Build planned session TSS map for future days ──
+    # Maps date_str -> {'tss': float, 'description': str, 'source': str}
+    _planned_tss = {}
+    _DAY_MAP = {'mon': 0, 'tue': 1, 'wed': 2, 'thu': 3, 'fri': 4, 'sat': 5, 'sun': 6}
+    
+    if PLANNED_SESSIONS:
+        # Find the first planned race date to limit how far templates repeat
+        _first_race_date = None
+        for _pr in PLANNED_RACES:
+            _rd = pd.Timestamp(_pr['date'])
+            if _rd > today:
+                if _first_race_date is None or _rd < _first_race_date:
+                    _first_race_date = _rd
+        
+        # Determine taper start: templates stop before taper window
+        # A-race = 14d taper, B-race = 7d, C-race = 0d
+        _taper_days_map = {'A': 14, 'B': 7, 'C': 0}
+        _template_end = today + pd.Timedelta(days=120)  # max 120 days of templates
+        for _pr in PLANNED_RACES:
+            _rd = pd.Timestamp(_pr['date'])
+            if _rd > today:
+                _taper_start = _rd - pd.Timedelta(days=_taper_days_map.get(_pr.get('priority', 'B'), 7))
+                if _taper_start < _template_end:
+                    _template_end = _taper_start
+        
+        # Lay out weekly templates from tomorrow until template_end
+        _num_weeks = len(PLANNED_SESSIONS)  # 1 or 2
+        _day = today + pd.Timedelta(days=1)
+        _week_counter = 0
+        _week_start = _day - pd.Timedelta(days=_day.weekday())  # Monday of current week
+        
+        while _day <= _template_end:
+            # Determine which week template to use (alternating)
+            _weeks_since_start = ((_day - _week_start).days) // 7
+            _week_idx = _weeks_since_start % _num_weeks
+            _week_template = PLANNED_SESSIONS[_week_idx]
+            
+            _day_name = _day.day_name()[:3].lower()
+            for _sess in _week_template:
+                if _sess['day'] == _day_name:
+                    _dstr = _day.strftime('%Y-%m-%d')
+                    _planned_tss[_dstr] = {
+                        'tss': _sess['tss'],
+                        'description': _sess['description'],
+                        'source': 'planned'
+                    }
+            _day += pd.Timedelta(days=1)
+        
+        _n_planned = len(_planned_tss)
+        print(f"  Planned sessions: {_n_planned} days mapped from {len(PLANNED_SESSIONS)} week template(s)")
+    
+    # Overlay planned races (overrides any template session on that day)
+    _race_tss_by_dist = {}  # Cache: distance_bucket -> median TSS from history
+    for _pr in PLANNED_RACES:
+        _rd = pd.Timestamp(_pr['date'])
+        if _rd > today:
+            _dstr = _rd.strftime('%Y-%m-%d')
+            # Auto-estimate race TSS from historical races at similar distance
+            _dist = _pr['distance_km']
+            _dist_bucket = round(_dist)  # nearest km for bucketing
+            if _dist_bucket not in _race_tss_by_dist:
+                # Find past races within ±20% of this distance
+                _lo, _hi = _dist * 0.8, _dist * 1.2
+                _hist = df[(df['race_flag'] == 1) & 
+                          (df['distance_km'] >= _lo) & 
+                          (df['distance_km'] <= _hi)]
+                if len(_hist) > 0:
+                    _race_tss_by_dist[_dist_bucket] = _hist['TSS'].median()
+                else:
+                    # Rough estimate: ~25 TSS per km for race effort
+                    _race_tss_by_dist[_dist_bucket] = _dist * 25
+            _est_tss = _race_tss_by_dist[_dist_bucket]
+            _planned_tss[_dstr] = {
+                'tss': round(_est_tss),
+                'description': _pr['name'],
+                'source': 'race'
+            }
+            print(f"  Race {_pr['name']} ({_dstr}): estimated TSS={_est_tss:.0f}")
+    
+    # Determine projection end: last planned day + 1, or 30 days, whichever is further
+    if _planned_tss:
+        _last_planned = max(pd.Timestamp(d) for d in _planned_tss.keys())
+        projection_end = max(_last_planned + pd.Timedelta(days=1), today + pd.Timedelta(days=30))
+    else:
+        projection_end = today + pd.Timedelta(days=30)
+    
+    end_date = max(max_date, projection_end)
     
     date_range = pd.date_range(start=min_date, end=end_date, freq='D')
     daily_df = pd.DataFrame({
@@ -1709,6 +1797,20 @@ def calc_ctl_atl(df: pd.DataFrame, athlete_data_path: str = None) -> tuple:
     # Add non-running TSS
     daily_df['tss_other'] = daily_df['date_str'].map(non_running_tss).fillna(0)
     daily_df['tss_total'] = daily_df['tss_running'] + daily_df['tss_other']
+    
+    # Inject planned session TSS into future days (where no actual activity exists)
+    daily_df['planned_description'] = ''
+    daily_df['planned_source'] = ''
+    if _planned_tss:
+        for idx, row in daily_df.iterrows():
+            dstr = row['date_str']
+            if dstr in _planned_tss and row['date'] > today and row['tss_running'] == 0:
+                _pt = _planned_tss[dstr]
+                daily_df.at[idx, 'tss_running'] = _pt['tss']
+                daily_df.at[idx, 'tss_total'] = _pt['tss'] + row['tss_other']
+                daily_df.at[idx, 'planned_description'] = _pt['description']
+                daily_df.at[idx, 'planned_source'] = _pt['source']
+    
     
     # Add weight (sparse — only days with measurements, forward-filled for continuity)
     daily_df['weight_kg'] = daily_df['date_str'].map(weight_by_date)
@@ -1760,9 +1862,11 @@ def calc_ctl_atl(df: pd.DataFrame, athlete_data_path: str = None) -> tuple:
     
     # Clean up daily_df for output
     _out_cols = ['date', 'distance_km', 'tss_running', 'tss_other', 'tss_total', 
-                          'CTL', 'ATL', 'TSB', 'RF_Trend', 'RFL_Trend', 'weight_kg']
+                          'CTL', 'ATL', 'TSB', 'RF_Trend', 'RFL_Trend', 'weight_kg',
+                          'planned_description', 'planned_source']
     _out_names = ['Date', 'Distance_km', 'TSS_Running', 'TSS_Other', 'TSS_Total',
-                        'CTL', 'ATL', 'TSB', 'RF_Trend', 'RFL_Trend', 'Weight_kg']
+                        'CTL', 'ATL', 'TSB', 'RF_Trend', 'RFL_Trend', 'Weight_kg',
+                        'Planned_Description', 'Planned_Source']
     if 'RFL_gap_Trend' in daily_df.columns:
         _out_cols.append('RFL_gap_Trend')
         _out_names.append('RFL_gap_Trend')

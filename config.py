@@ -75,6 +75,12 @@ PLANNED_RACES = [
     for r in _ATHLETE_CONFIG.planned_races
 ]
 
+# Planned training sessions — list of week templates, each a list of {day, description, tss}
+PLANNED_SESSIONS = [
+    [{'day': s.day, 'description': s.description, 'tss': s.tss} for s in week]
+    for week in _ATHLETE_CONFIG.planned_sessions
+]
+
 # Stryd mass correction history
 # Convert to pipeline format: list of (start, end, kg) tuples
 STRYD_MASS_HISTORY = [

@@ -208,6 +208,26 @@ class PlannedRace:
 
 
 @dataclass
+class PlannedSession:
+    """A planned training session within a weekly template."""
+    day: str        # mon, tue, wed, thu, fri, sat, sun
+    description: str
+    tss: float
+    
+    @classmethod
+    def from_dict(cls, d: Dict[str, Any]) -> 'PlannedSession':
+        day = str(d["day"]).lower().strip()[:3]
+        valid_days = ('mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun')
+        if day not in valid_days:
+            raise ValueError(f"Invalid day '{day}', must be one of {valid_days}")
+        return cls(
+            day=day,
+            description=str(d.get("description", "")),
+            tss=float(d["tss"])
+        )
+
+
+@dataclass
 class AthleteConfig:
     """Complete athlete configuration."""
     name: str
@@ -222,6 +242,7 @@ class AthleteConfig:
     max_hr: int = 0    # Required in YAML — no sensible generic default
     athlete_id: str = ""  # e.g. "A001", "A002" — used in Excel sheet names
     planned_races: List[PlannedRace] = field(default_factory=list)
+    planned_sessions: List[List[PlannedSession]] = field(default_factory=list)  # [week_1, week_2] lists
     
     # Convenience properties
     @property
@@ -300,6 +321,14 @@ class AthleteConfig:
         raw_races = data.get("planned_races", [])
         planned_races = [PlannedRace.from_dict(r) for r in raw_races] if raw_races else []
         
+        # Parse planned sessions (up to 2 weekly templates)
+        raw_sessions = data.get("planned_sessions", {})
+        planned_sessions = []
+        for week_key in ("week_1", "week_2"):
+            week_data = raw_sessions.get(week_key, [])
+            if week_data:
+                planned_sessions.append([PlannedSession.from_dict(s) for s in week_data])
+        
         # Validate required athlete fields
         _required = {"mass_kg": "body mass in kg", "lthr": "lactate threshold HR", "max_hr": "maximum HR"}
         for field_name, desc in _required.items():
@@ -319,6 +348,7 @@ class AthleteConfig:
             max_hr=int(athlete_data["max_hr"]),
             athlete_id=str(athlete_data.get("athlete_id", "")),
             planned_races=planned_races,
+            planned_sessions=planned_sessions,
         )
 
 

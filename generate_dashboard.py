@@ -575,16 +575,26 @@ def get_ctl_atl_trend(df, days=90):
         df_hist = df_hist[df_hist['CTL'].notna()]
         df_hist = df_hist.sort_values('Date')
         
-        # Future projection data (after today, up to 14 days ahead for display)
-        projection_days = 14
-        future_end = today + timedelta(days=projection_days)
+        # Future projection data — extend to last planned session day + 1
+        # Read Planned_Source column to find extent of planned sessions
+        has_planned = 'Planned_Source' in daily_df.columns
+        if has_planned:
+            planned_future = daily_df[(daily_df['Date'] > today) & (daily_df['Planned_Source'] != '')]
+            if len(planned_future) > 0:
+                last_planned = planned_future['Date'].max()
+                future_end = last_planned + timedelta(days=1)
+            else:
+                future_end = today + timedelta(days=14)
+        else:
+            future_end = today + timedelta(days=14)
+        
         df_future = daily_df[(daily_df['Date'] > today) & (daily_df['Date'] <= future_end)].copy()
         df_future = df_future[df_future['CTL'].notna()]
         df_future = df_future.sort_values('Date')
         
         if len(df_hist) == 0:
             print("  Warning: No CTL/ATL data found in date range")
-            return [], [], [], [], [], []
+            return [], [], [], [], [], [], []
         
         # Historical series
         dates = df_hist['Date'].dt.strftime('%d %b %y').tolist()
@@ -596,6 +606,20 @@ def get_ctl_atl_trend(df, days=90):
             proj_dates = df_future['Date'].dt.strftime('%d %b %y').tolist()
             proj_ctl = [round(v, 1) if pd.notna(v) else None for v in df_future['CTL'].tolist()]
             proj_atl = [round(v, 1) if pd.notna(v) else None for v in df_future['ATL'].tolist()]
+            proj_tsb = [round(v, 1) if pd.notna(v) else None for v in df_future['TSB'].tolist()]
+            
+            # Planned session markers (description + source for tooltips)
+            proj_planned = []
+            if has_planned:
+                for _, row in df_future.iterrows():
+                    desc = row.get('Planned_Description', '')
+                    source = row.get('Planned_Source', '')
+                    if desc:
+                        proj_planned.append({'desc': str(desc), 'source': str(source)})
+                    else:
+                        proj_planned.append(None)
+            else:
+                proj_planned = [None] * len(proj_dates)
             
             # Combine dates for x-axis
             all_dates = dates + proj_dates
@@ -607,16 +631,21 @@ def get_ctl_atl_trend(df, days=90):
             # Projection values: null for historical except last point, then projection
             ctl_proj_line = [None] * (len(dates) - 1) + [ctl_values[-1]] + proj_ctl
             atl_proj_line = [None] * (len(dates) - 1) + [atl_values[-1]] + proj_atl
+            tsb_proj_line = [None] * (len(dates) - 1) + [round(ctl_values[-1] - atl_values[-1], 1) if ctl_values[-1] and atl_values[-1] else None] + proj_tsb
+            planned_markers = [None] * len(dates) + proj_planned
             
             print(f"  Loaded {len(dates)} days of CTL/ATL data + {len(proj_dates)} days projection")
-            return all_dates, ctl_with_nulls, atl_with_nulls, ctl_proj_line, atl_proj_line
+            n_planned = sum(1 for p in proj_planned if p is not None)
+            if n_planned > 0:
+                print(f"  Projection includes {n_planned} planned sessions")
+            return all_dates, ctl_with_nulls, atl_with_nulls, ctl_proj_line, atl_proj_line, tsb_proj_line, planned_markers
         else:
             print(f"  Loaded {len(dates)} days of CTL/ATL data (no projection available)")
-            return dates, ctl_values, atl_values, [], []
+            return dates, ctl_values, atl_values, [], [], [], []
         
     except Exception as e:
         print(f"  Warning: Could not load CTL/ATL trend: {e}")
-        return [], [], [], [], []
+        return [], [], [], [], [], [], []
 
 
 def get_daily_rfl_trend(master_file, days=14, rfl_col='RFL_Trend'):
@@ -2239,6 +2268,41 @@ def get_zone_data(df):
                 _day_agg[_dstr] = {'date': _dstr, 'name': _rname, 'tss': _rtss, 'race': _rrace}
         _rw_recent_tss = list(_day_agg.values())
     
+    # Inject planned sessions as future "decided" entries so the taper solver
+    # uses them instead of its template when they fall in the taper window
+    if _daily_lookup:
+        _today_str = pd.Timestamp.now().strftime('%Y-%m-%d')
+        for _dstr, _dval in _daily_lookup.items():
+            if _dstr > _today_str and _dstr not in _day_agg:
+                # Check Daily sheet for planned session
+                # We need Planned_Description from the daily sheet
+                pass  # We'll read from daily_df below
+        
+        try:
+            _daily_full = pd.read_excel(MASTER_FILE, sheet_name=1)  # Daily sheet
+            _daily_full['Date'] = pd.to_datetime(_daily_full['Date'])
+            _has_planned_col = 'Planned_Description' in _daily_full.columns
+            if _has_planned_col:
+                _future_planned = _daily_full[
+                    (_daily_full['Date'] > pd.Timestamp.now()) &
+                    (_daily_full['Planned_Description'].notna()) &
+                    (_daily_full['Planned_Description'] != '')
+                ]
+                for _, _fp in _future_planned.iterrows():
+                    _fp_dstr = _fp['Date'].strftime('%Y-%m-%d')
+                    if _fp_dstr not in _day_agg:
+                        _rw_recent_tss.append({
+                            'date': _fp_dstr,
+                            'name': str(_fp['Planned_Description']),
+                            'tss': round(float(_fp.get('TSS_Running', 0))),
+                            'race': str(_fp.get('Planned_Source', '')) == 'race',
+                            'planned': True  # Flag for taper solver display
+                        })
+                if len(_future_planned) > 0:
+                    print(f"  Injected {len(_future_planned)} planned sessions into taper data")
+        except Exception as _e:
+            pass  # Daily sheet may not have planned columns yet
+    
     # Current CTL/ATL for taper solver starting point
     # Use YESTERDAY's end-of-day CTL/ATL from Daily sheet, not today's.
     # The solver's forward loop starts at day 0 (today) and applies today's
@@ -2304,6 +2368,7 @@ def get_zone_data(df):
         'recent_tss': _rw_recent_tss,
         'current_ctl': _rw_ctl, 'current_atl': _rw_atl,
         'pre_race_tsb': _pre_race_tsb,
+        'daily_lookup': _daily_lookup,
     }
 
 
@@ -2557,6 +2622,7 @@ def _generate_zone_html(zone_data, stats=None):
     
     cp = zone_data['current_cp']
     re_p90 = zone_data['re_p90']
+    _daily_lookup = zone_data.get('daily_lookup', {})
     gap_paces = zone_data.get('gap_target_paces', {})
     # Default paces if not available (sec/km)
     pace_5k = gap_paces.get('5k', 240)
@@ -2947,6 +3013,24 @@ def _generate_zone_html(zone_data, stats=None):
         _surface_labels = {'indoor_track': '🏟️ Indoor', 'track': '🏟️ Track', 'road': '🛣️ Road', 'trail': '🌲 Trail', 'undulating_trail': '⛰️ Trail'}
         s_label = _surface_labels.get(surface, '')
         
+        # Projected arrival CTL/TSB from Daily sheet (includes planned sessions)
+        _arrival_html = ''
+        if days_to > 0 and _daily_lookup:
+            # Race morning = previous day's values decayed one step
+            import math as _arr_math
+            _arr_alpha_c = 1 - _arr_math.exp(-1.0 / 42)
+            _arr_alpha_a = 1 - _arr_math.exp(-1.0 / 7)
+            _prev_date_str = (_race_dt - timedelta(days=1)).strftime('%Y-%m-%d')
+            _prev_daily = _daily_lookup.get(_prev_date_str)
+            if _prev_daily and all(pd.notna(v) for v in [_prev_daily['ctl'], _prev_daily['atl']]):
+                _arr_ctl = _prev_daily['ctl'] * (1 - _arr_alpha_c)
+                _arr_atl = _prev_daily['atl'] * (1 - _arr_alpha_a)
+                _arr_tsb = _arr_ctl - _arr_atl
+                _arr_pct = (_arr_tsb / _arr_ctl * 100) if _arr_ctl > 0 else 0
+                _tsb_sign = '+' if _arr_tsb >= 0 else ''
+                _tsb_color = '#4ade80' if _arr_tsb >= 0 else '#fbbf24'
+                _arrival_html = f'<div style="margin-top:4px;font-size:0.72rem;color:var(--text-dim)">📊 Projected arrival: CTL <b style="color:var(--accent)">{_arr_ctl:.0f}</b> · TSB <b style="color:{_tsb_color}">{_tsb_sign}{_arr_tsb:.0f}</b> ({_tsb_sign}{_arr_pct:.0f}% of CTL)</div>'
+        
         # Build training specificity HTML (HM+ races only)
         # Build training specificity HTML (HM+ races only)
         _lrd = _lr_data.get(race_idx)
@@ -3001,7 +3085,7 @@ def _generate_zone_html(zone_data, stats=None):
                 <div class="ws-tip"><div class="rv" id="spec28_{race_idx}">{_spec_values.get(race_idx, (0, 0))[1]}<span style="font-size:0.75rem;color:var(--text-dim)">min</span></div><div class="rl">42d at effort</div><div class="tip">Minutes at race-specific effort (pace or power zone) in the last 42 days</div></div>
                 {_specificity_html}
             </div>
-            <div style="margin-top:6px">{taper_html}</div>\n'''
+            <div style="margin-top:6px">{taper_html}{_arrival_html}</div>\n'''
         
         # ── Race Week Plan (≤7 days, A or B priority) ──
         _rwp_html = ''
@@ -4155,19 +4239,21 @@ def generate_html(stats, rf_data, volume_data, ctl_atl_data, ctl_atl_lookup, rfl
     
     # Helper to safely unpack (handles both old 3-tuple and new 5-tuple format)
     def unpack_ctl_atl(data):
-        if len(data) == 5:
-            return data  # dates, ctl, atl, ctl_proj, atl_proj
+        if len(data) == 7:
+            return data  # dates, ctl, atl, ctl_proj, atl_proj, tsb_proj, planned_markers
+        elif len(data) == 5:
+            return data[0], data[1], data[2], data[3], data[4], [], []  # legacy 5-element
         elif len(data) == 3:
-            return data[0], data[1], data[2], [], []  # dates, ctl, atl, empty proj
+            return data[0], data[1], data[2], [], [], [], []  # dates, ctl, atl, empty proj
         else:
-            return [], [], [], [], []
+            return [], [], [], [], [], [], []
     
-    ctl_atl_dates_90, ctl_values_90, atl_values_90, ctl_proj_90, atl_proj_90 = unpack_ctl_atl(ctl_atl_90)
-    ctl_atl_dates_180, ctl_values_180, atl_values_180, ctl_proj_180, atl_proj_180 = unpack_ctl_atl(ctl_atl_180)
-    ctl_atl_dates_365, ctl_values_365, atl_values_365, ctl_proj_365, atl_proj_365 = unpack_ctl_atl(ctl_atl_365)
-    ctl_atl_dates_730, ctl_values_730, atl_values_730, ctl_proj_730, atl_proj_730 = unpack_ctl_atl(ctl_atl_730)
-    ctl_atl_dates_1095, ctl_values_1095, atl_values_1095, ctl_proj_1095, atl_proj_1095 = unpack_ctl_atl(ctl_atl_1095)
-    ctl_atl_dates_1825, ctl_values_1825, atl_values_1825, ctl_proj_1825, atl_proj_1825 = unpack_ctl_atl(ctl_atl_1825)
+    ctl_atl_dates_90, ctl_values_90, atl_values_90, ctl_proj_90, atl_proj_90, tsb_proj_90, planned_90 = unpack_ctl_atl(ctl_atl_90)
+    ctl_atl_dates_180, ctl_values_180, atl_values_180, ctl_proj_180, atl_proj_180, tsb_proj_180, planned_180 = unpack_ctl_atl(ctl_atl_180)
+    ctl_atl_dates_365, ctl_values_365, atl_values_365, ctl_proj_365, atl_proj_365, tsb_proj_365, planned_365 = unpack_ctl_atl(ctl_atl_365)
+    ctl_atl_dates_730, ctl_values_730, atl_values_730, ctl_proj_730, atl_proj_730, tsb_proj_730, planned_730 = unpack_ctl_atl(ctl_atl_730)
+    ctl_atl_dates_1095, ctl_values_1095, atl_values_1095, ctl_proj_1095, atl_proj_1095, tsb_proj_1095, planned_1095 = unpack_ctl_atl(ctl_atl_1095)
+    ctl_atl_dates_1825, ctl_values_1825, atl_values_1825, ctl_proj_1825, atl_proj_1825, tsb_proj_1825, planned_1825 = unpack_ctl_atl(ctl_atl_1825)
     
     # Build planned races JSON for JS injection (outside f-string to avoid dict/brace conflicts)
     _planned_races_json = json.dumps([
@@ -4913,7 +4999,7 @@ function raceAnnotations(dates) {{
                 <button data-range="1825">5yr</button>
             </div>
         </div>
-        <div class="chart-desc">CTL (blue) = fitness. ATL (red) = fatigue. Dashed lines show 14-day projection if no training.</div>
+        <div class="chart-desc">CTL (blue) = fitness. ATL (red) = fatigue. Dashed lines show projection based on planned training sessions.</div>
         <div class="chart-wrapper">
             <canvas id="ctlAtlChart"></canvas>
         </div>
@@ -5439,12 +5525,12 @@ function raceAnnotations(dates) {{
         
         // CTL/ATL Training Load Chart - with toggle
         const ctlAtlData = {{
-            '90': {{ dates: {json.dumps(ctl_atl_dates_90)}, ctl: {json.dumps(ctl_values_90)}, atl: {json.dumps(atl_values_90)}, ctlProj: {json.dumps(ctl_proj_90)}, atlProj: {json.dumps(atl_proj_90)} }},
-            '180': {{ dates: {json.dumps(ctl_atl_dates_180)}, ctl: {json.dumps(ctl_values_180)}, atl: {json.dumps(atl_values_180)}, ctlProj: {json.dumps(ctl_proj_180)}, atlProj: {json.dumps(atl_proj_180)} }},
-            '365': {{ dates: {json.dumps(ctl_atl_dates_365)}, ctl: {json.dumps(ctl_values_365)}, atl: {json.dumps(atl_values_365)}, ctlProj: {json.dumps(ctl_proj_365)}, atlProj: {json.dumps(atl_proj_365)} }},
-            '730': {{ dates: {json.dumps(ctl_atl_dates_730)}, ctl: {json.dumps(ctl_values_730)}, atl: {json.dumps(atl_values_730)}, ctlProj: {json.dumps(ctl_proj_730)}, atlProj: {json.dumps(atl_proj_730)} }},
-            '1095': {{ dates: {json.dumps(ctl_atl_dates_1095)}, ctl: {json.dumps(ctl_values_1095)}, atl: {json.dumps(atl_values_1095)}, ctlProj: {json.dumps(ctl_proj_1095)}, atlProj: {json.dumps(atl_proj_1095)} }},
-            '1825': {{ dates: {json.dumps(ctl_atl_dates_1825)}, ctl: {json.dumps(ctl_values_1825)}, atl: {json.dumps(atl_values_1825)}, ctlProj: {json.dumps(ctl_proj_1825)}, atlProj: {json.dumps(atl_proj_1825)} }}
+            '90': {{ dates: {json.dumps(ctl_atl_dates_90)}, ctl: {json.dumps(ctl_values_90)}, atl: {json.dumps(atl_values_90)}, ctlProj: {json.dumps(ctl_proj_90)}, atlProj: {json.dumps(atl_proj_90)}, tsbProj: {json.dumps(tsb_proj_90)}, planned: {json.dumps(planned_90)} }},
+            '180': {{ dates: {json.dumps(ctl_atl_dates_180)}, ctl: {json.dumps(ctl_values_180)}, atl: {json.dumps(atl_values_180)}, ctlProj: {json.dumps(ctl_proj_180)}, atlProj: {json.dumps(atl_proj_180)}, tsbProj: {json.dumps(tsb_proj_180)}, planned: {json.dumps(planned_180)} }},
+            '365': {{ dates: {json.dumps(ctl_atl_dates_365)}, ctl: {json.dumps(ctl_values_365)}, atl: {json.dumps(atl_values_365)}, ctlProj: {json.dumps(ctl_proj_365)}, atlProj: {json.dumps(atl_proj_365)}, tsbProj: {json.dumps(tsb_proj_365)}, planned: {json.dumps(planned_365)} }},
+            '730': {{ dates: {json.dumps(ctl_atl_dates_730)}, ctl: {json.dumps(ctl_values_730)}, atl: {json.dumps(atl_values_730)}, ctlProj: {json.dumps(ctl_proj_730)}, atlProj: {json.dumps(atl_proj_730)}, tsbProj: {json.dumps(tsb_proj_730)}, planned: {json.dumps(planned_730)} }},
+            '1095': {{ dates: {json.dumps(ctl_atl_dates_1095)}, ctl: {json.dumps(ctl_values_1095)}, atl: {json.dumps(atl_values_1095)}, ctlProj: {json.dumps(ctl_proj_1095)}, atlProj: {json.dumps(atl_proj_1095)}, tsbProj: {json.dumps(tsb_proj_1095)}, planned: {json.dumps(planned_1095)} }},
+            '1825': {{ dates: {json.dumps(ctl_atl_dates_1825)}, ctl: {json.dumps(ctl_values_1825)}, atl: {json.dumps(atl_values_1825)}, ctlProj: {json.dumps(ctl_proj_1825)}, atlProj: {json.dumps(atl_proj_1825)}, tsbProj: {json.dumps(tsb_proj_1825)}, planned: {json.dumps(planned_1825)} }}
         }};
         
         const ctlAtlCtx = document.getElementById('ctlAtlChart').getContext('2d');
