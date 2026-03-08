@@ -534,6 +534,7 @@ def enrich_and_classify(master_path: str, overrides_path: str,
     # ── Build per-run predicted 5K pace lookup ──
     # Used for: (a) no-HR fallback, (b) named race pace override (HR ramp-up in short races)
     # Prefer per-run predictions from Master_FULL_post (shift(1) values = prediction at race time)
+    # Per-row fallback: try gap → sim → stryd columns for each row (handles NaN from shift(1))
     _pred_5k_by_file = {}
     _pred_source_df = master  # default
     _post_path = master_path.replace('Master_FULL.xlsx', 'Master_FULL_post.xlsx')
@@ -544,19 +545,21 @@ def enrich_and_classify(master_path: str, overrides_path: str,
                 _pred_source_df = _post_df
         except Exception:
             pass
-    _pred_col_used = None
-    for pred_col in ['pred_5k_s_gap', 'pred_5k_s_sim', 'pred_5k_s']:
-        if pred_col in _pred_source_df.columns:
-            _pred_col_used = pred_col
-            break
-    if _pred_col_used:
+    _pred_cols = [c for c in ['pred_5k_s_gap', 'pred_5k_s_sim', 'pred_5k_s']
+                  if c in _pred_source_df.columns]
+    if _pred_cols:
         for _, _pr in _pred_source_df.iterrows():
             _pf = str(_pr.get('file', ''))
-            _pv = _pr.get(_pred_col_used)
-            if _pf and pd.notna(_pv) and _pv > 0:
-                _pred_5k_by_file[_pf] = (_pv / 60) / 5.0  # seconds → min/km
+            if not _pf:
+                continue
+            # Per-row fallback: take first non-NaN prediction column
+            for _pc in _pred_cols:
+                _pv = _pr.get(_pc)
+                if pd.notna(_pv) and _pv > 0:
+                    _pred_5k_by_file[_pf] = (_pv / 60) / 5.0  # seconds → min/km
+                    break
         _src_name = 'Master_FULL_post' if _pred_source_df is not master else 'Master_FULL'
-        print(f"  5K pace lookup: {len(_pred_5k_by_file)} runs with predictions (from {_pred_col_used} in {_src_name})")
+        print(f"  5K pace lookup: {len(_pred_5k_by_file)} runs with predictions ({', '.join(_pred_cols)} in {_src_name})")
     else:
         print("  No 5K prediction column available — pace-based classification disabled")
 
