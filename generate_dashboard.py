@@ -238,22 +238,62 @@ def format_race_time(time_str):
 def get_daily_ctl_atl_lookup(master_file):
     """Get daily CTL/ATL/TSB lookup dict for JavaScript to pick the right day.
     Returns dict: date_str -> {ctl, atl, tsb}
-    Includes projected future days (with TSS=0 decay)."""
+
+    Only includes actual training days from the Daily sheet. For future days
+    (after the last actual activity), projects zero-TSS decay so the headline
+    stats show real fitness/fatigue, not planned session projections.
+    """
     try:
         df = pd.read_excel(master_file, sheet_name=1)  # Daily sheet
         df['Date'] = pd.to_datetime(df['Date'])
-        
-        # Build lookup dict
+
+        # Separate actual days from planned/projected days
+        # Planned_Source is non-null for projected planned session rows
+        has_planned_col = 'Planned_Source' in df.columns
+        if has_planned_col:
+            actual = df[df['Planned_Source'].isna() | (df['Planned_Source'] == '')]
+        else:
+            actual = df
+
+        # Build lookup from actual days only
         lookup = {}
-        for _, row in df.iterrows():
+        last_ctl = None
+        last_atl = None
+        for _, row in actual.iterrows():
             date_str = row['Date'].strftime('%Y-%m-%d')
-            lookup[date_str] = {
-                'ctl': round(row['CTL'], 1) if pd.notna(row.get('CTL')) else None,
-                'atl': round(row['ATL'], 1) if pd.notna(row.get('ATL')) else None,
-                'tsb': round(row['TSB'], 1) if pd.notna(row.get('TSB')) else None,
-            }
-        
-        print(f"  Loaded {len(lookup)} days of CTL/ATL lookup data")
+            ctl = round(row['CTL'], 1) if pd.notna(row.get('CTL')) else None
+            atl = round(row['ATL'], 1) if pd.notna(row.get('ATL')) else None
+            tsb_val = round(row['TSB'], 1) if pd.notna(row.get('TSB')) else None
+            lookup[date_str] = {'ctl': ctl, 'atl': atl, 'tsb': tsb_val}
+            if ctl is not None:
+                last_ctl = ctl
+            if atl is not None:
+                last_atl = atl
+
+        # Project zero-TSS decay for up to 30 days beyond the last actual day
+        # so the headline always shows current fitness when viewed days later
+        if last_ctl is not None and last_atl is not None and len(actual) > 0:
+            last_actual_date = actual['Date'].max()
+            decay_c = 1 - 1/42  # CTL decay constant
+            decay_a = 1 - 1/7   # ATL decay constant
+            ctl_proj = last_ctl
+            atl_proj = last_atl
+            for d in range(1, 31):
+                proj_date = last_actual_date + pd.Timedelta(days=d)
+                proj_str = proj_date.strftime('%Y-%m-%d')
+                if proj_str in lookup:
+                    continue  # don't overwrite actual data
+                ctl_proj *= decay_c
+                atl_proj *= decay_a
+                lookup[proj_str] = {
+                    'ctl': round(ctl_proj, 1),
+                    'atl': round(atl_proj, 1),
+                    'tsb': round(ctl_proj - atl_proj, 1),
+                }
+
+        actual_count = len(actual)
+        projected_count = len(lookup) - actual_count
+        print(f"  Loaded {actual_count} actual days + {projected_count} projected decay days for CTL/ATL lookup")
         return lookup
     except Exception as e:
         print(f"  Warning: Could not load daily CTL/ATL lookup: {e}")
