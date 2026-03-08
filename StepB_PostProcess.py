@@ -1,5 +1,12 @@
 #!/usr/bin/env python3
-# File: StepB_PostProcess_v52.py
+# File: StepB_PostProcess_v53.py
+#
+# Changelist v53 (2026-03-08):
+#   - Factor boost: replaced flat 50% PS boost (PS > 310 threshold) with
+#     exponential (PS/CP)^25 boost, gated on PS > current CP.
+#     Only above-CP efforts (genuine race-quality output) get amplified.
+#     Training runs unchanged. Naturally discriminates by how exceptional
+#     the effort was — a 6% above-CP race gets ~4× boost.
 #
 # Changelist v52 (2026-03-01):
 #   - Version bump from v51. See v51 changelog below for accumulated changes.
@@ -432,9 +439,10 @@ RF_CONSTANTS = {
     'days_off_gap_threshold': 7,  # Days without activity before penalty applies
     'days_off_penalty_rate': 2,   # Extra effective days added per day beyond threshold
     
-    # Power Score threshold (v44.5: PS sets floor on RF_adj and boosts Factor)
+    # Power Score threshold (v44.5: PS sets floor on RF_adj)
+    # v53: Factor boost now uses (PS/CP)^25 gated on PS > current CP (not this threshold)
     # Other PS params in config.py: POWER_SCORE_RIEGEL_K, POWER_SCORE_REFERENCE_DIST_KM, etc.
-    'power_score_threshold': 310,  # Only runs above this get Factor boost
+    'power_score_threshold': 310,  # Legacy: was used for flat Factor boost, now only for reference
     
     # Factor reduction for RF below trend
     'factor_reduction_gap_days': 7,  # Don't reduce factor if gap since last run > this
@@ -4664,8 +4672,7 @@ def main() -> int:
     ps_riegel_k = POWER_SCORE_RIEGEL_K
     ps_reference_dist_km = POWER_SCORE_REFERENCE_DIST_KM
     ps_rf_divisor = POWER_SCORE_RF_DIVISOR  # RF_adj floor = Power_Score / this
-    ps_factor_threshold = RF_CONSTANTS['power_score_threshold']  # Only boost Factor above this
-    ps_factor_boost = POWER_SCORE_FACTOR_BOOST  # Factor multiplier for high Power Score runs
+    ps_factor_exponent = 25  # v53: Factor *= (PS/CP)^25 when PS > current CP
     
     for i, row in dfm.iterrows():
         current_date = row['date']
@@ -4829,10 +4836,13 @@ def main() -> int:
             avg_hr = pd.to_numeric(row.get('avg_hr', np.nan), errors='coerce')
             factor = calc_factor(distance_m, avg_hr, rf_adj, prev_rf_trend, days_since_last_run)
             
-            # v44.5: Boost Factor for high Power Score runs
-            # Good races get more weight in RF_Trend
-            if pd.notna(power_score) and power_score > ps_factor_threshold:
-                factor = factor * (1 + ps_factor_boost)
+            # v53: Exponential Factor boost for above-CP efforts
+            # PS > current CP means genuine race-quality output; boost by (PS/CP)^25
+            # This naturally weights hard races proportional to how exceptional they were
+            if pd.notna(power_score) and pd.notna(prev_rf_trend) and peak_rf_trend > 0:
+                current_cp = PEAK_CP_WATTS * (prev_rf_trend / peak_rf_trend)
+                if current_cp > 0 and power_score > current_cp:
+                    factor = factor * (power_score / current_cp) ** ps_factor_exponent
             
             if np.isfinite(factor):
                 dfm.at[i, 'Factor'] = float(factor)
