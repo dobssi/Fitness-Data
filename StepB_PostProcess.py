@@ -3,10 +3,11 @@
 #
 # Changelist v53 (2026-03-08):
 #   - Factor boost: replaced flat 50% PS boost (PS > 310 threshold) with
-#     exponential (PS/CP)^25 boost, gated on PS > current CP.
+#     exponential min((PS/CP)^25, 8) boost, gated on PS > current CP.
 #     Only above-CP efforts (genuine race-quality output) get amplified.
-#     Training runs unchanged. Naturally discriminates by how exceptional
-#     the effort was — a 6% above-CP race gets ~4× boost.
+#     Training runs unchanged. Cap of 8x prevents HM/marathon distance
+#     from creating outsized factors. A 5K at 6% above CP gets ~4x;
+#     a HM at 20% above CP gets capped at 8x instead of 95x.
 #
 # Changelist v52 (2026-03-01):
 #   - Version bump from v51. See v51 changelog below for accumulated changes.
@@ -4673,6 +4674,7 @@ def main() -> int:
     ps_reference_dist_km = POWER_SCORE_REFERENCE_DIST_KM
     ps_rf_divisor = POWER_SCORE_RF_DIVISOR  # RF_adj floor = Power_Score / this
     ps_factor_exponent = 25  # v53: Factor *= (PS/CP)^25 when PS > current CP
+    ps_factor_max_mult = 8   # v53: Cap the multiplier to prevent HM/marathon dominance
     
     for i, row in dfm.iterrows():
         current_date = row['date']
@@ -4837,12 +4839,13 @@ def main() -> int:
             factor = calc_factor(distance_m, avg_hr, rf_adj, prev_rf_trend, days_since_last_run)
             
             # v53: Exponential Factor boost for above-CP efforts
-            # PS > current CP means genuine race-quality output; boost by (PS/CP)^25
-            # This naturally weights hard races proportional to how exceptional they were
+            # PS > current CP means genuine race-quality output; boost by min((PS/CP)^25, 8)
+            # Cap prevents HM/marathon distance from creating outsized factors
             if pd.notna(power_score) and pd.notna(prev_rf_trend) and peak_rf_trend > 0:
                 current_cp = PEAK_CP_WATTS * (prev_rf_trend / peak_rf_trend)
                 if current_cp > 0 and power_score > current_cp:
-                    factor = factor * (power_score / current_cp) ** ps_factor_exponent
+                    mult = min((power_score / current_cp) ** ps_factor_exponent, ps_factor_max_mult)
+                    factor = factor * mult
             
             if np.isfinite(factor):
                 dfm.at[i, 'Factor'] = float(factor)
