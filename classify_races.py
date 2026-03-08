@@ -296,6 +296,13 @@ def classify_run(name: str, avg_hr: float, lthr: float, max_hr: float,
     # 1. Specific race name override (VLM, Stockholm Marathon etc)
     #    Race names beat generic anti-keywords (e.g. "Hackney Half...steady")
     #    UNLESS a decisive training pattern is present (e.g. "VLM week 9")
+    #    Pace faster than predicted 5K overrides HR threshold — handles HR ramp-up
+    #    in short races (mile, 1500m) where avg HR is dragged down.
+    _has_fast_pace = (avg_pace is not None and avg_pace > 0 and
+                      pred_5k_pace is not None and pred_5k_pace > 0 and
+                      avg_pace < pred_5k_pace)
+    _pace_str = (f'pace {avg_pace:.2f} < pred 5K {pred_5k_pace:.2f}/km'
+                 if _has_fast_pace else '')
     if has_race_name:
         is_training_context = bool(re.search(
             r'week\s*\d|sandwich|calibrat|shakeout|pre.?match|preamble|'
@@ -306,6 +313,8 @@ def classify_run(name: str, avg_hr: float, lthr: float, max_hr: float,
             pass
         elif hr_pct >= named_hr:
             return ('race', 'high', f'Named race + HR {hr_pct*100:.0f}%LTHR')
+        elif _has_fast_pace:
+            return ('race', 'high', f'Named race + {_pace_str}')
         else:
             return ('training', 'medium', f'Named race but HR {hr_pct*100:.0f}%LTHR below race threshold')
     
@@ -522,19 +531,34 @@ def enrich_and_classify(master_path: str, overrides_path: str,
                             ov.at[i, 'race_type'] = label
                             break
     
-    # ── Compute predicted 5K pace for no-HR fallback ──
-    # Use most recent valid prediction from master (athlete-specific threshold)
-    _pred_5k_pace = None
+    # ── Build per-run predicted 5K pace lookup ──
+    # Used for: (a) no-HR fallback, (b) named race pace override (HR ramp-up in short races)
+    # Prefer per-run predictions from Master_FULL_post (shift(1) values = prediction at race time)
+    _pred_5k_by_file = {}
+    _pred_source_df = master  # default
+    _post_path = master_path.replace('Master_FULL.xlsx', 'Master_FULL_post.xlsx')
+    if Path(_post_path).exists() and _post_path != master_path:
+        try:
+            _post_df = pd.read_excel(_post_path, sheet_name=0)
+            if any(c in _post_df.columns for c in ['pred_5k_s_gap', 'pred_5k_s_sim', 'pred_5k_s']):
+                _pred_source_df = _post_df
+        except Exception:
+            pass
+    _pred_col_used = None
     for pred_col in ['pred_5k_s_gap', 'pred_5k_s_sim', 'pred_5k_s']:
-        if pred_col in master.columns:
-            valid = master[master[pred_col].notna() & (master[pred_col] > 0)]
-            if len(valid) > 0:
-                pred_5k_s = valid.iloc[-1][pred_col]
-                _pred_5k_pace = (pred_5k_s / 60) / 5.0  # seconds → min/km
-                print(f"  Predicted 5K pace for no-HR fallback: {_pred_5k_pace:.2f} min/km (from {pred_col})")
-                break
-    if _pred_5k_pace is None:
-        print("  No 5K prediction available — no-HR pace fallback disabled")
+        if pred_col in _pred_source_df.columns:
+            _pred_col_used = pred_col
+            break
+    if _pred_col_used:
+        for _, _pr in _pred_source_df.iterrows():
+            _pf = str(_pr.get('file', ''))
+            _pv = _pr.get(_pred_col_used)
+            if _pf and pd.notna(_pv) and _pv > 0:
+                _pred_5k_by_file[_pf] = (_pv / 60) / 5.0  # seconds → min/km
+        _src_name = 'Master_FULL_post' if _pred_source_df is not master else 'Master_FULL'
+        print(f"  5K pace lookup: {len(_pred_5k_by_file)} runs with predictions (from {_pred_col_used} in {_src_name})")
+    else:
+        print("  No 5K prediction column available — pace-based classification disabled")
 
     # ── Classify ──
     print(f"\nClassifying {len(ov)} candidates...")
@@ -570,7 +594,7 @@ def enrich_and_classify(master_path: str, overrides_path: str,
         
         verdict, conf, reason = classify_run(name, hr, lthr, max_hr, dist, duration, race_type,
                                                avg_pace=pace,
-                                               pred_5k_pace=_pred_5k_pace,
+                                               pred_5k_pace=_pred_5k_by_file.get(fname),
                                                race_hr_thresholds=race_hr_thresholds)
         
         enriched_cols['verdict'].append(f"{verdict} ({conf})")

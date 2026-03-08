@@ -1487,21 +1487,21 @@ def get_race_history_data(df, ctl_atl_lookup, zone_data=None):
         if dist_km <= 0:
             continue
         
-        # Distance category
-        if dist_km <= 3.5:
-            dist_cat = '3K'
-        elif dist_km <= 5.5:
-            dist_cat = '5K'
-        elif dist_km <= 12:
-            dist_cat = '10K'
-        elif dist_km <= 17:
-            dist_cat = '10M'
-        elif dist_km <= 25:
-            dist_cat = 'HM'
-        elif dist_km <= 35:
-            dist_cat = '30K'
+        # Distance category — standard distances get their label,
+        # bespoke distances (not close to any standard) get 'Other'
+        _std_dists = [(1.5, 1.8, '1500m'), (1.609, 1.8, 'Mile'),
+                      (3.0, 0.5, '3K'), (5.0, 0.5, '5K'), (10.0, 1.0, '10K'),
+                      (16.0934, 1.0, '10M'), (21.097, 1.5, 'HM'),
+                      (30.0, 2.0, '30K'), (42.195, 2.0, 'Marathon')]
+        _matched_cat = None
+        for _sd, _tol, _lbl in _std_dists:
+            if abs(dist_km - _sd) <= _tol:
+                _matched_cat = _lbl
+                break
+        if _matched_cat:
+            dist_cat = _matched_cat
         else:
-            dist_cat = 'Marathon'
+            dist_cat = 'Other'
         
         # Time — prefer elapsed for races
         elapsed_s = row.get(elapsed_col)
@@ -4034,7 +4034,7 @@ def _generate_race_history_html(race_history_data):
     
     # Build distance options from actual race data
     dist_cats = sorted(set(r['dist_cat'] for r in race_history_data),
-                       key=lambda x: {'3K':0,'5K':1,'10K':2,'10M':3,'HM':4,'30K':5,'Marathon':6}.get(x, 99))
+                       key=lambda x: {'1500m':0,'Mile':1,'3K':2,'5K':3,'10K':4,'10M':5,'HM':6,'30K':7,'Marathon':8,'Other':9}.get(x, 99))
     
     _rh_json = _json.dumps(race_history_data)
     
@@ -4093,7 +4093,8 @@ def _generate_race_history_html(race_history_data):
             const idx=RH_RACES.indexOf(r);
             const opt=document.createElement('option');
             opt.value=idx;
-            opt.textContent=r.date_display+' · '+r.name+(r.name?' · ':'')+r.dist_cat+' · '+r.time;
+            const dLabel=r.dist_cat==='Other'?(r.dist_km?r.dist_km.toFixed(1)+'km':'Other'):r.dist_cat;
+            opt.textContent=r.date_display+' · '+r.name+(r.name?' · ':'')+dLabel+' · '+r.time;
             raceSel.appendChild(opt);
         }});
         // Clear card
