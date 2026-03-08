@@ -95,9 +95,9 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: ${{ env.ATHLETE_DIR }}/persec_cache
-          key: nadi_jahangiri-persec-${{ github.run_number }}
+          key: nadi-persec-${{ github.run_number }}
           restore-keys: |
-            nadi_jahangiri-persec-
+            nadi-persec-
 
       - name: Download data from Dropbox
         
@@ -214,7 +214,7 @@ jobs:
         
         with:
           path: ${{ env.ATHLETE_DIR }}/persec_cache
-          key: nadi_jahangiri-persec-${{ github.run_number }}
+          key: nadi-persec-${{ github.run_number }}
 
       - name: Upload fits.zip to Dropbox
         if: ${{ steps.fetch.outputs.new_runs == 'true' || env.PIPELINE_MODE == 'INITIAL' || env.PIPELINE_MODE == 'FULL' }}
@@ -354,9 +354,9 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: ${{ env.ATHLETE_DIR }}/persec_cache
-          key: nadi_jahangiri-persec-${{ github.run_number }}
+          key: nadi-persec-${{ github.run_number }}
           restore-keys: |
-            nadi_jahangiri-persec-
+            nadi-persec-
 
       - name: Download data from Dropbox
         run: |

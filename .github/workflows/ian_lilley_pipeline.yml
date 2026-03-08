@@ -103,9 +103,9 @@ jobs:
           path: |
             ${{ env.ATHLETE_DIR }}/fit_sync_state.json
             ${{ env.ATHLETE_DIR }}/pending_activities.csv
-          key: ian_lilley-sync-v2-${{ github.run_number }}
+          key: ian-sync-state-${{ github.run_number }}
           restore-keys: |
-            ian_lilley-sync-v2-
+            ian-sync-state-
 
       - name: Download fits.zip for dedup
         if: ${{ github.event.inputs.sync != 'false' }}
@@ -161,7 +161,7 @@ jobs:
           path: |
             ${{ env.ATHLETE_DIR }}/fit_sync_state.json
             ${{ env.ATHLETE_DIR }}/pending_activities.csv
-          key: ian_lilley-sync-v2-${{ github.run_number }}
+          key: ian-sync-state-${{ github.run_number }}
 
       # ── Full pipeline ──────────────────────────────────────────────────────
 
@@ -170,9 +170,9 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: ${{ env.ATHLETE_DIR }}/persec_cache
-          key: ian_lilley-persec-${{ github.run_number }}
+          key: ian-persec-${{ github.run_number }}
           restore-keys: |
-            ian_lilley-persec-
+            ian-persec-
 
       - name: Download data from Dropbox
         if: ${{ steps.gate.outputs.continue == 'true' }}
@@ -312,7 +312,7 @@ jobs:
         if: ${{ steps.gate.outputs.continue == 'true' }}
         with:
           path: ${{ env.ATHLETE_DIR }}/persec_cache
-          key: ian_lilley-persec-${{ github.run_number }}
+          key: ian-persec-${{ github.run_number }}
 
       - name: Upload fits.zip to Dropbox
         if: ${{ steps.gate.outputs.continue == 'true' && steps.fetch.outputs.new_runs == 'true' || env.PIPELINE_MODE == 'INITIAL' || env.PIPELINE_MODE == 'FULL' }}
@@ -454,9 +454,9 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: ${{ env.ATHLETE_DIR }}/persec_cache
-          key: ian_lilley-persec-${{ github.run_number }}
+          key: ian-persec-${{ github.run_number }}
           restore-keys: |
-            ian_lilley-persec-
+            ian-persec-
 
       - name: Download data from Dropbox
         run: |
