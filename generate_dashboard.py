@@ -1237,7 +1237,7 @@ def get_race_history_data(df, ctl_atl_lookup, zone_data=None):
     
     Returns list of race dicts sorted by date descending.
     """
-    import glob, os
+    import glob, os, re as _re_mod
     
     race_col = 'race_flag' if 'race_flag' in df.columns else 'Race'
     races = df[df[race_col] == 1].copy()
@@ -1495,7 +1495,7 @@ def get_race_history_data(df, ctl_atl_lookup, zone_data=None):
                       (3.0, '3K'), (5.0, '5K'), (10.0, '10K'),
                       (16.0934, '10M'), (21.097, 'HM'),
                       (30.0, '30K'), (42.195, 'Marathon')]
-        _is_parkrun = bool(re.search(r'parkrun|park run', str(row.get('activity_name', '')), re.I))
+        _is_parkrun = bool(_re_mod.search(r'parkrun|park run', str(row.get('activity_name', '')), _re_mod.I))
         _max_seg = row.get('gps_max_seg_m', 0) if 'gps_max_seg_m' in row.index else 0
         _outlier = row.get('gps_outlier_frac', 0) if 'gps_outlier_frac' in row.index else 0
         _max_seg = _max_seg if (pd.notna(_max_seg)) else 0
