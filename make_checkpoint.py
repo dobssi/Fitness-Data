@@ -49,6 +49,7 @@ PIPELINE_FILES = [
     "strava_ingest.py",
     "scan_races.py",
     "classify_races.py",
+    "detect_eras.py",
     "onboard_athlete.py",
     "onboard_new_athlete.bat",
     "pb_corrections.html",
@@ -173,7 +174,7 @@ def main():
         return
 
     date_str = datetime.now().strftime("%Y%m%d_%H%M")
-    zip_name = "checkpoint_v52_%s_%s.zip" % (args.tag, date_str)
+    zip_name = "checkpoint_v53_%s_%s.zip" % (args.tag, date_str)
     output_dir = args.output or base_dir
     zip_path = os.path.join(output_dir, zip_name)
 
