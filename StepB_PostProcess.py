@@ -309,10 +309,19 @@ from config import (PEAK_CP_WATTS, POWER_SCORE_RIEGEL_K, POWER_SCORE_REFERENCE_D
                     ALERT3B_Z_THRESHOLD,
                     # Phase 2: GAP mode
                     GAP_RE_CONSTANT, POWER_MODE,
+                    # Stryd era config (empty dict = auto-detect)
+                    STRYD_ERA_DATES,
                     # Athlete parameters
                     ATHLETE_MASS_KG, ATHLETE_LTHR, ATHLETE_MAX_HR,
                     # Planned training
                     PLANNED_SESSIONS, PLANNED_RACES)
+
+# v52: Auto era detection for Stryd mode (when athlete.yml has no manual era dates)
+try:
+    from detect_eras import detect_stryd_eras, assign_detected_eras, export_result_json
+    HAS_ERA_DETECTION = True
+except ImportError:
+    HAS_ERA_DETECTION = False
 
 RF_CONSTANTS = {
     # Rolling periods
@@ -4437,16 +4446,39 @@ def main() -> int:
         if c in dfm.columns:
             dfm[c] = pd.to_numeric(dfm[c], errors="coerce").round(0)
 
-    # --- v43: Rolling RF calculations ---
-    # First, calculate era adjusters from fresh RE_avg values
+    # --- v43/v52: Rolling RF calculations ---
+    # First, calculate era adjusters.
+    # Three paths:
+    #   GAP mode       → no era adjusters (Era_Adj = 1.0)
+    #   Stryd + manual eras (athlete.yml has stryd.eras populated) → legacy RE-based adjusters
+    #   Stryd + auto   (stryd.eras empty) → detect eras from Stryd/GAP ratio
+    _use_detected_eras = False
+    _era_detection_result = None
+
     if POWER_MODE == 'gap':
         print("\n=== Skipping era adjusters (GAP mode — no Stryd power) ===")
         era_adjusters = {}
         dfm['Era_Adj'] = 1.0
-    else:
-        print("\n=== v43: Calculating era adjusters from fresh RE_avg ===")
+    elif STRYD_ERA_DATES and len(STRYD_ERA_DATES) > 0:
+        # Legacy path: manual era dates from athlete.yml (A001 etc.)
+        print("\n=== v43: Calculating era adjusters from fresh RE_avg (manual eras) ===")
         era_adjusters = calculate_era_adjusters_from_data(dfm)
         export_era_adjusters_csv(era_adjusters, era_csv_path)
+    else:
+        # Auto-detection path: no manual eras configured
+        if HAS_ERA_DETECTION:
+            print("\n=== v52: Auto-detecting Stryd eras from Stryd/GAP ratio ===")
+            _era_detection_result = detect_stryd_eras(dfm, min_segment=30, verbose=True)
+            dfm = assign_detected_eras(dfm, _era_detection_result)
+            _use_detected_eras = True
+            era_adjusters = {}  # Not used — detected_era_adj column handles it
+            # Export JSON report as diagnostic artifact
+            _out_dir = os.path.dirname(args.out) if args.out else "."
+            export_result_json(_era_detection_result, os.path.join(_out_dir, "detected_eras.json"))
+        else:
+            print("\n=== Warning: detect_eras.py not found, falling back to RE-based adjusters ===")
+            era_adjusters = calculate_era_adjusters_from_data(dfm)
+            export_era_adjusters_csv(era_adjusters, era_csv_path)
     
     # Recalculate adjustment columns with correct era adjusters
     print("  Recalculating adjustment factors...")
@@ -4577,10 +4609,13 @@ def main() -> int:
         # Era adjustment: skip entirely for GAP mode (no Stryd power to calibrate)
         if POWER_MODE == 'gap':
             era_adj = 1.0
+        elif _use_detected_eras:
+            # v52: Auto-detected eras — use detected_era_adj directly
+            _det_adj = pd.to_numeric(row.get('detected_era_adj', np.nan), errors='coerce')
+            era_adj = float(_det_adj) if np.isfinite(_det_adj) else 1.0
+            # Sim power runs (pre-Stryd) have no detected era — adj is NaN → 1.0
         else:
-            # v51.7: GAP-calibrated era adjustments (independent physics cross-check)
-            # Original regression-based values under-corrected older eras by 1-5%
-            # GAP power (physics-only, no hardware) provides independent calibration reference
+            # Legacy path: manual eras with GAP-calibrated overrides (A001 etc.)
             GAP_ERA_OVERRIDES = {'v1': 1.097, 'repl': 1.054, 'air': 1.030, 's4': 1.000, 's5': 0.994}
             _gap_era_override = GAP_ERA_OVERRIDES.get(str(era_id).lower().strip())
             if _gap_era_override is not None:
@@ -5159,7 +5194,7 @@ def main() -> int:
     yearly_df = generate_yearly_summary(dfm)
     
     # ==========================================================================
-    # v43: Calculate CP, Race Predictions, and Age Grades
+    # v43/v52: Calculate CP, Race Predictions, and Age Grades
     # ==========================================================================
     if AGE_GRADE_AVAILABLE:
         print("\n=== v43: Calculating CP, Race Predictions, Age Grades ===")
@@ -5167,13 +5202,41 @@ def main() -> int:
         # v44.5: Use RFL_Trend (Power Score now affects RF_adj directly)
         latest_rfl = dfm['RFL_Trend'].iloc[-1] if 'RFL_Trend' in dfm.columns else np.nan
         
-        # CP = RFL_Trend * peak_CP (370W)
+        # v52: For auto-detected eras (or when PEAK_CP is default 300W placeholder),
+        # bootstrap PEAK_CP from race data instead of using config value.
+        _effective_peak_cp = PEAK_CP_WATTS
+        if _use_detected_eras or PEAK_CP_WATTS <= 300:
+            mass_kg = args.mass_kg
+            stryd_peak_speed, stryd_peak_cp, stryd_n_races, stryd_method = bootstrap_peak_speed(
+                dfm, rfl_col='RFL_Trend', mass_kg=mass_kg,
+                re_generic=GAP_RE_CONSTANT,
+                lthr=RF_CONSTANTS['lthr'],
+                max_hr=RF_CONSTANTS['max_hr'],
+                exclude_parkruns=True
+            )
+            if stryd_peak_cp is not None:
+                _effective_peak_cp = stryd_peak_cp
+                detail = {
+                    'race': f'from {stryd_n_races} flagged races',
+                    'auto': f'from {stryd_n_races} auto-detected races, p75',
+                    'training': 'estimated from training × 0.97'
+                }.get(stryd_method, '')
+                print(f"  Stryd PEAK_CP bootstrap ({stryd_method}): {_effective_peak_cp:.0f}W ({detail})")
+            else:
+                print(f"  Stryd PEAK_CP bootstrap: no data, using config value {PEAK_CP_WATTS}W")
+        
+        # CP = RFL_Trend * peak_CP
         if pd.notna(latest_rfl) and latest_rfl > 0:
-            cp_current = latest_rfl * PEAK_CP_WATTS
+            cp_current = latest_rfl * _effective_peak_cp
             print(f"  Current CP: {cp_current:.0f}W (RFL_Trend={latest_rfl*100:.1f}%)")
             
-            # Get 90th percentile RE from recent s5 era runs
-            recent_re = dfm[dfm['calibration_era_id'] == 's5']['RE_avg'].dropna()
+            # Get 90th percentile RE from recent anchor-era runs
+            # v52: For auto-detected eras, use anchor era; for legacy, use 's5'
+            if _use_detected_eras and _era_detection_result:
+                _anchor_id = _era_detection_result.anchor_era_id
+                recent_re = dfm[dfm.get('detected_era_id', pd.Series(dtype=int)) == _anchor_id]['RE_avg'].dropna()
+            else:
+                recent_re = dfm[dfm['calibration_era_id'] == 's5']['RE_avg'].dropna()
             if len(recent_re) < 10:
                 # Fall back to all recent runs
                 recent_re = dfm.tail(50)['RE_avg'].dropna()
@@ -5182,10 +5245,10 @@ def main() -> int:
             
             # Race predictions (need mass_kg from args)
             mass_kg = args.mass_kg
-            pred_5k = calc_race_prediction(latest_rfl, '5k', re_p90, PEAK_CP_WATTS, mass_kg)
-            pred_10k = calc_race_prediction(latest_rfl, '10k', re_p90, PEAK_CP_WATTS, mass_kg)
-            pred_hm = calc_race_prediction(latest_rfl, 'hm', re_p90, PEAK_CP_WATTS, mass_kg)
-            pred_mara = calc_race_prediction(latest_rfl, 'marathon', re_p90, PEAK_CP_WATTS, mass_kg)
+            pred_5k = calc_race_prediction(latest_rfl, '5k', re_p90, _effective_peak_cp, mass_kg)
+            pred_10k = calc_race_prediction(latest_rfl, '10k', re_p90, _effective_peak_cp, mass_kg)
+            pred_hm = calc_race_prediction(latest_rfl, 'hm', re_p90, _effective_peak_cp, mass_kg)
+            pred_mara = calc_race_prediction(latest_rfl, 'marathon', re_p90, _effective_peak_cp, mass_kg)
             
             print(f"  Race predictions: 5K={format_time(pred_5k)}, 10K={format_time(pred_10k)}, "
                   f"HM={format_time(pred_hm)}, Mar={format_time(pred_mara)}")
@@ -5197,12 +5260,12 @@ def main() -> int:
             # conditions (temperature, PS floor) from contaminating the unadjusted prediction.
             rfl_prev = dfm['RFL_Trend'].shift(1)
             rfl_valid = rfl_prev.notna() & (rfl_prev > 0)
-            dfm.loc[rfl_valid, 'CP'] = (rfl_prev[rfl_valid] * PEAK_CP_WATTS).round(0)
+            dfm.loc[rfl_valid, 'CP'] = (rfl_prev[rfl_valid] * _effective_peak_cp).round(0)
             
             for dist_key, col_name in [('5k', 'pred_5k_s'), ('10k', 'pred_10k_s'), 
                                         ('hm', 'pred_hm_s'), ('marathon', 'pred_marathon_s')]:
                 dfm.loc[rfl_valid, col_name] = rfl_prev[rfl_valid].apply(
-                    lambda rfl: round(calc_race_prediction(rfl, dist_key, re_p90, PEAK_CP_WATTS, mass_kg), 0)
+                    lambda rfl: round(calc_race_prediction(rfl, dist_key, re_p90, _effective_peak_cp, mass_kg), 0)
                 )
             
             n_pred = rfl_valid.sum()
@@ -5230,10 +5293,10 @@ def main() -> int:
                       f"PEAK_CP_gap={gap_peak_cp:.0f}W ({detail})")
             else:
                 # Fallback: use Stryd PEAK_CP (only if no race data AND no training data)
-                gap_peak_cp = PEAK_CP_WATTS
-                gap_peak_speed = PEAK_CP_WATTS * RF_CONSTANTS['gap_re_constant'] / mass_kg
+                gap_peak_cp = _effective_peak_cp
+                gap_peak_speed = _effective_peak_cp * RF_CONSTANTS['gap_re_constant'] / mass_kg
                 gap_method = 'fallback'
-                print(f"  GAP bootstrap: no data, falling back to Stryd PEAK_CP={PEAK_CP_WATTS}W")
+                print(f"  GAP bootstrap: no data, falling back to PEAK_CP={_effective_peak_cp:.0f}W")
             
             RACE_FACTORS_BS = {'5k': 1.05, '10k': 1.0, 'hm': 0.95, 'marathon': 0.89}
             RACE_DISTANCES_BS = {'5k': 5000, '10k': 10000, 'hm': 21097.5, 'marathon': 42195}
@@ -5259,12 +5322,12 @@ def main() -> int:
                         )
                 else:
                     # SIM: uses Stryd PEAK_CP and RE_p90 (same hardware basis)
-                    dfm.loc[rfl_mode_valid, f'CP_{mode}'] = (rfl_prev_mode[rfl_mode_valid] * PEAK_CP_WATTS).round(0)
+                    dfm.loc[rfl_mode_valid, f'CP_{mode}'] = (rfl_prev_mode[rfl_mode_valid] * _effective_peak_cp).round(0)
                     for dist_key, col_suffix in [('5k', 'pred_5k_s'), ('10k', 'pred_10k_s'),
                                                   ('hm', 'pred_hm_s'), ('marathon', 'pred_marathon_s')]:
                         col_name = f'{col_suffix}_{mode}'
                         dfm.loc[rfl_mode_valid, col_name] = rfl_prev_mode[rfl_mode_valid].apply(
-                            lambda rfl: round(calc_race_prediction(rfl, dist_key, re_p90, PEAK_CP_WATTS, mass_kg), 0)
+                            lambda rfl: round(calc_race_prediction(rfl, dist_key, re_p90, _effective_peak_cp, mass_kg), 0)
                         )
                 
                 n_mode = rfl_mode_valid.sum()
@@ -5303,7 +5366,7 @@ def main() -> int:
                         # GAP: use bootstrapped peak_speed (RE-independent)
                         mode_pred_5k = 5000 / (mode_rfl * gap_peak_speed * 1.05)
                     else:
-                        mode_pred_5k = calc_race_prediction(mode_rfl, '5k', re_p90, PEAK_CP_WATTS, mass_kg)
+                        mode_pred_5k = calc_race_prediction(mode_rfl, '5k', re_p90, _effective_peak_cp, mass_kg)
                     mode_ag = calc_age_grade(mode_pred_5k, 5.0, runner_age, runner_gender, 'road')
                     if mode_ag:
                         dfm.at[dfm.index[-1], f'pred_5k_age_grade_{mode}'] = round(mode_ag, 1)
