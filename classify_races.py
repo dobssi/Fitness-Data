@@ -696,6 +696,13 @@ def enrich_and_classify(master_path: str, overrides_path: str,
     bbox_track_count = 0
     bbox_indoor_count = 0
     has_bbox = 'gps_bbox_m2' in master.columns if master is not None else False
+    if has_bbox:
+        # Only trust NaN-as-indoor if the column is actually populated for most runs
+        # (i.e. the pipeline computes bbox). If >80% NaN, the column is just empty.
+        bbox_fill_rate = master['gps_bbox_m2'].notna().mean() if master is not None else 0
+        if bbox_fill_rate < 0.2:
+            has_bbox = False
+            print(f"  GPS bbox detection skipped — gps_bbox_m2 only {bbox_fill_rate:.0%} populated")
     if not has_bbox:
         print("  GPS bbox detection skipped — gps_bbox_m2 not in Master")
     else:
