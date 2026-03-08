@@ -165,6 +165,21 @@ def load_and_process_data():
         if pd.notna(cp_val):
             critical_power = int(round(float(cp_val)))
         
+        # v53: Derive effective PEAK_CP from Master's CP and RFL columns.
+        # StepB computes CP = RFL × PEAK_CP (possibly bootstrapped from race data).
+        # The Master value is authoritative — it reflects bootstrap results and
+        # era-adjusted calculations that config.py's static value doesn't have.
+        global PEAK_CP_WATTS_DASH, _PEAK_CP_OVERRIDDEN
+        if pd.notna(cp_val):
+            _rfl_col = 'RFL_Trend'
+            _rfl_val = float(latest.get(_rfl_col, 0))
+            if _rfl_val > 0.3:
+                _derived_peak = round(float(cp_val) / _rfl_val)
+                if _derived_peak > 200 and abs(_derived_peak - PEAK_CP_WATTS_DASH) > 5:
+                    print(f"  PEAK_CP derived from Master: {_derived_peak}W (config: {_cfg_cp}W)")
+                    PEAK_CP_WATTS_DASH = _derived_peak
+                    _PEAK_CP_OVERRIDDEN = True
+        
         # Predicted 5K age grade
         ag_val = latest.get('pred_5k_age_grade')
         if pd.notna(ag_val):
@@ -1968,6 +1983,12 @@ from config import PLANNED_RACES as _cfg_races
 from config import POWER_MODE as _cfg_power_mode
 from config import ATHLETE_NAME as _cfg_name
 PEAK_CP_WATTS_DASH = _cfg_cp
+
+# v53: If PEAK_CP was bootstrapped by StepB (config value is placeholder 300W),
+# back-calculate effective PEAK_CP from the Master's CP and RFL columns.
+# This ensures zones, race readiness, and all dashboard sections use the
+# bootstrapped value rather than the placeholder.
+_PEAK_CP_OVERRIDDEN = False
 
 # Load raw zone overrides from athlete.yml (not in dataclass — optional section)
 _zone_overrides = {}
