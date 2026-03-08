@@ -1489,15 +1489,31 @@ def get_race_history_data(df, ctl_atl_lookup, zone_data=None):
         
         # Distance category — standard distances get their label,
         # bespoke distances (not close to any standard) get 'Other'
-        _std_dists = [(1.5, 1.8, '1500m'), (1.609, 1.8, 'Mile'),
-                      (3.0, 0.5, '3K'), (5.0, 0.5, '5K'), (10.0, 1.0, '10K'),
-                      (16.0934, 1.0, '10M'), (21.097, 1.5, 'HM'),
-                      (30.0, 2.0, '30K'), (42.195, 2.0, 'Marathon')]
+        # Same tolerance formula as classify_races:
+        #   Base: max(2%, 300m), Parkrun: max(3%, 400m), Bad GPS: max(4%, 500m)
+        _std_dists = [(1.5, '1500m'), (1.609, 'Mile'),
+                      (3.0, '3K'), (5.0, '5K'), (10.0, '10K'),
+                      (16.0934, '10M'), (21.097, 'HM'),
+                      (30.0, '30K'), (42.195, 'Marathon')]
+        _is_parkrun = bool(re.search(r'parkrun|park run', str(row.get('activity_name', '')), re.I))
+        _max_seg = row.get('gps_max_seg_m', 0) if 'gps_max_seg_m' in row.index else 0
+        _outlier = row.get('gps_outlier_frac', 0) if 'gps_outlier_frac' in row.index else 0
+        _max_seg = _max_seg if (pd.notna(_max_seg)) else 0
+        _outlier = _outlier if (pd.notna(_outlier)) else 0
+        _bad_gps = (_max_seg > 200) or (_outlier > 0.005)
         _matched_cat = None
-        for _sd, _tol, _lbl in _std_dists:
-            if abs(dist_km - _sd) <= _tol:
+        _best_gap = float('inf')
+        for _sd, _lbl in _std_dists:
+            if _bad_gps:
+                _tol = max(_sd * 0.04, 0.5)
+            elif _is_parkrun and _lbl == '5K':
+                _tol = max(_sd * 0.03, 0.4)
+            else:
+                _tol = max(_sd * 0.02, 0.3)
+            _gap = abs(dist_km - _sd)
+            if _gap <= _tol and _gap < _best_gap:
                 _matched_cat = _lbl
-                break
+                _best_gap = _gap
         if _matched_cat:
             dist_cat = _matched_cat
         else:
