@@ -3,11 +3,12 @@
 #
 # Changelist v53 (2026-03-08):
 #   - Factor boost: replaced flat 50% PS boost (PS > 310 threshold) with
-#     exponential min((PS/CP)^25, 8) boost, gated on PS > current CP.
-#     Only above-CP efforts (genuine race-quality output) get amplified.
-#     Training runs unchanged. Cap of 8x prevents HM/marathon distance
-#     from creating outsized factors. A 5K at 6% above CP gets ~4x;
-#     a HM at 20% above CP gets capped at 8x instead of 95x.
+#     additive distance-independent bonus, gated on PS > current CP.
+#     Formula: factor += 1000 * (min((PS/CP)^25, 4) - 1)
+#     Only above-CP efforts get amplified. Additive bonus means a 5K and
+#     HM race at same PS/CP ratio get the same absolute boost, preventing
+#     longer distances from dominating the trend. A 5K at 6% above CP
+#     gets ~3,170 added; training runs are unchanged.
 #
 # Changelist v52 (2026-03-01):
 #   - Version bump from v51. See v51 changelog below for accumulated changes.
@@ -4673,8 +4674,9 @@ def main() -> int:
     ps_riegel_k = POWER_SCORE_RIEGEL_K
     ps_reference_dist_km = POWER_SCORE_REFERENCE_DIST_KM
     ps_rf_divisor = POWER_SCORE_RF_DIVISOR  # RF_adj floor = Power_Score / this
-    ps_factor_exponent = 25  # v53: Factor *= (PS/CP)^25 when PS > current CP
-    ps_factor_max_mult = 8   # v53: Cap the multiplier to prevent HM/marathon dominance
+    ps_factor_exponent = 25   # v53: Exponent for (PS/CP)^N above-CP boost
+    ps_factor_bonus = 1000    # v53: Additive bonus base (distance-independent)
+    ps_factor_max_mult = 4    # v53: Cap on (PS/CP)^25 multiplier
     
     for i, row in dfm.iterrows():
         current_date = row['date']
@@ -4838,14 +4840,16 @@ def main() -> int:
             avg_hr = pd.to_numeric(row.get('avg_hr', np.nan), errors='coerce')
             factor = calc_factor(distance_m, avg_hr, rf_adj, prev_rf_trend, days_since_last_run)
             
-            # v53: Exponential Factor boost for above-CP efforts
-            # PS > current CP means genuine race-quality output; boost by min((PS/CP)^25, 8)
-            # Cap prevents HM/marathon distance from creating outsized factors
+            # v53: Additive Factor bonus for above-CP efforts
+            # PS > current CP means genuine race-quality output
+            # Additive bonus is distance-independent: a 5K race and HM race at
+            # the same PS/CP ratio get the same absolute bonus, preventing
+            # longer distances from dominating the trend
             if pd.notna(power_score) and pd.notna(prev_rf_trend) and peak_rf_trend > 0:
                 current_cp = PEAK_CP_WATTS * (prev_rf_trend / peak_rf_trend)
                 if current_cp > 0 and power_score > current_cp:
                     mult = min((power_score / current_cp) ** ps_factor_exponent, ps_factor_max_mult)
-                    factor = factor * mult
+                    factor += ps_factor_bonus * (mult - 1)
             
             if np.isfinite(factor):
                 dfm.at[i, 'Factor'] = float(factor)
