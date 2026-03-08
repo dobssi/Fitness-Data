@@ -2852,12 +2852,40 @@ def _generate_zone_html(zone_data, stats=None):
         _lr_dist_m   = _lr_dist_km * 1000
         _lr_dk       = _lr_race.get('distance_key', 'HM')
         _lr_stepb_key_map = {'5K': '5k_raw', '10K': '10k_raw', 'HM': 'hm_raw', 'Mara': 'marathon_raw'}
+        _lr_stepb_std_km = {'5K': 5.0, '10K': 10.0, 'HM': 21.097, 'Mara': 42.195}
+        _lr_is_std = abs(_lr_dist_km - _lr_stepb_std_km.get(_lr_dk, 0)) < 0.1
         _lr_rp       = stats.get('race_predictions', {}) if stats else {}
-        if _cfg_power_mode in ('gap', 'sim'):
-            _lr_mode_preds = _lr_rp.get(f'_mode_{_cfg_power_mode}', {})
-            _lr_pred_s = _lr_mode_preds.get(_lr_stepb_key_map.get(_lr_dk, ''), 0) if _lr_surface == 'road' else 0
-        else:
-            _lr_pred_s = _lr_rp.get(_lr_stepb_key_map.get(_lr_dk, ''), 0) if _lr_surface == 'road' else 0
+        _lr_pred_s = 0
+        if _lr_is_std and _lr_surface == 'road':
+            if _cfg_power_mode in ('gap', 'sim'):
+                _lr_mode_preds = _lr_rp.get(f'_mode_{_cfg_power_mode}', {})
+                _lr_pred_s = _lr_mode_preds.get(_lr_stepb_key_map.get(_lr_dk, ''), 0)
+            else:
+                _lr_pred_s = _lr_rp.get(_lr_stepb_key_map.get(_lr_dk, ''), 0)
+        if not (_lr_pred_s and _lr_pred_s > 0) and _lr_surface == 'road':
+            # Riegel interpolation from mode-specific predictions
+            import math as _m
+            _lr_pred_order = [('5K', 5.0, '5k_raw'), ('10K', 10.0, '10k_raw'), ('HM', 21.097, 'hm_raw'), ('Mara', 42.195, 'marathon_raw')]
+            if _cfg_power_mode in ('gap', 'sim'):
+                _lr_isrc = _lr_rp.get(f'_mode_{_cfg_power_mode}', {})
+            else:
+                _lr_isrc = _lr_rp
+            _lr_pts = [(d, _lr_isrc.get(k, 0)) for _, d, k in _lr_pred_order if _lr_isrc.get(k, 0) > 0]
+            if len(_lr_pts) >= 2:
+                _lr_lo, _lr_hi = _lr_pts[0], _lr_pts[-1]
+                for _li in range(len(_lr_pts) - 1):
+                    if _lr_dist_km >= _lr_pts[_li][0] and _lr_dist_km <= _lr_pts[_li+1][0]:
+                        _lr_lo, _lr_hi = _lr_pts[_li], _lr_pts[_li+1]
+                        break
+                if _lr_dist_km < _lr_pts[0][0]:
+                    _lr_lo, _lr_hi = _lr_pts[0], _lr_pts[1]
+                if _lr_dist_km > _lr_pts[-1][0]:
+                    _lr_lo, _lr_hi = _lr_pts[-2], _lr_pts[-1]
+                if _lr_lo[0] != _lr_hi[0]:
+                    _lr_e = _m.log(_lr_hi[1] / _lr_lo[1]) / _m.log(_lr_hi[0] / _lr_lo[0])
+                    _lr_pred_s = round(_lr_lo[1] * (_lr_dist_km / _lr_lo[0]) ** _lr_e)
+                else:
+                    _lr_pred_s = _lr_lo[1]
         if not (_lr_pred_s and _lr_pred_s > 0):
             _lr_speed  = (_lr_pw / ATHLETE_MASS_KG_DASH) * _lr_re
             _lr_pred_s = round(_lr_dist_m / _lr_speed) if _lr_speed > 0 else 0
@@ -2948,7 +2976,7 @@ def _generate_zone_html(zone_data, stats=None):
         band = round(pw * 0.03)
         
         # For standard road distances, use StepB predictions (matches stats grid exactly)
-        # For bespoke distances (e.g. 16.2km), use power-duration model instead
+        # For bespoke distances (e.g. 16.2km), interpolate from StepB predictions via Riegel
         # Use mode-appropriate predictions: GAP mode → _mode_gap, Sim → _mode_sim
         _stepb_key_map = {'5K': '5k_raw', '10K': '10k_raw', 'HM': 'hm_raw', 'Mara': 'marathon_raw'}
         _stepb_std_km = {'5K': 5.0, '10K': 10.0, 'HM': 21.097, 'Mara': 42.195}
@@ -2964,6 +2992,34 @@ def _generate_zone_html(zone_data, stats=None):
                 _stepb_raw = _rp.get(_stepb_key_map.get(key, ''), 0)
         if _stepb_raw and _stepb_raw > 0:
             t = _stepb_raw
+        elif not _is_standard_dist and surface == 'road':
+            # Riegel interpolation from mode-specific StepB predictions
+            import math as _m
+            _pred_order = [('5K', 5.0, '5k_raw'), ('10K', 10.0, '10k_raw'), ('HM', 21.097, 'hm_raw'), ('Mara', 42.195, 'marathon_raw')]
+            if _cfg_power_mode in ('gap', 'sim'):
+                _interp_src = _rp.get(f'_mode_{_cfg_power_mode}', {})
+            else:
+                _interp_src = _rp
+            _pts = [(d, _interp_src.get(k, 0)) for _, d, k in _pred_order if _interp_src.get(k, 0) > 0]
+            if len(_pts) >= 2:
+                # Find bracket
+                _lo, _hi = _pts[0], _pts[-1]
+                for _i in range(len(_pts) - 1):
+                    if dist_km >= _pts[_i][0] and dist_km <= _pts[_i+1][0]:
+                        _lo, _hi = _pts[_i], _pts[_i+1]
+                        break
+                if dist_km < _pts[0][0]:
+                    _lo, _hi = _pts[0], _pts[1]
+                if dist_km > _pts[-1][0]:
+                    _lo, _hi = _pts[-2], _pts[-1]
+                if _lo[0] != _hi[0]:
+                    _e = _m.log(_hi[1] / _lo[1]) / _m.log(_hi[0] / _lo[0])
+                    t = round(_lo[1] * (dist_km / _lo[0]) ** _e)
+                else:
+                    t = _lo[1]
+            else:
+                speed = (pw / ATHLETE_MASS_KG_DASH) * surface_re
+                t = round(dist_m / speed) if speed > 0 else 0
         else:
             speed = (pw / ATHLETE_MASS_KG_DASH) * surface_re
             t = round(dist_m / speed) if speed > 0 else 0
@@ -6505,6 +6561,24 @@ function raceAnnotations(dates) {{
         function _roadCpF(d){{d=Math.max(d,1);const ld=Math.log(d);if(ld<=Math.log(_pdA[0][0]))return _pdA[0][1];if(ld>=Math.log(_pdA[_pdA.length-1][0]))return _pdA[_pdA.length-1][1];for(let i=0;i<_pdA.length-1;i++){{const l0=Math.log(_pdA[i][0]),l1=Math.log(_pdA[i+1][0]);if(ld>=l0&&ld<=l1){{const f=(ld-l0)/(l1-l0);return _pdA[i][1]+f*(_pdA[i+1][1]-_pdA[i][1]);}}}}return 1.0;}};
         // Map distance_key to modeStats raw seconds keys
         const _stepbKeyMap = {{'5K':'pred5k_s','10K':'pred10k_s','HM':'predHm_s','Mara':'predMara_s'}};
+        const _stdKm = {{'5K':5.0,'10K':10.0,'HM':21.097,'Mara':42.195}};
+        // Ordered StepB prediction keys for Riegel interpolation
+        const _predOrder = [['5K',5.0,'pred5k_s'],['10K',10.0,'pred10k_s'],['HM',21.097,'predHm_s'],['Mara',42.195,'predMara_s']];
+        function _riegelInterp(dist, ms) {{
+            // Find bracketing StepB predictions and interpolate via Riegel exponent
+            const pts = _predOrder.map(p => ({{d:p[1], t:ms[p[2]]||0}})).filter(p => p.t > 0);
+            if (pts.length < 2) return 0;
+            // Find bracket
+            let lo = pts[0], hi = pts[pts.length - 1];
+            for (let i = 0; i < pts.length - 1; i++) {{
+                if (dist >= pts[i].d && dist <= pts[i+1].d) {{ lo = pts[i]; hi = pts[i+1]; break; }}
+            }}
+            if (dist < pts[0].d) {{ lo = pts[0]; hi = pts[1]; }}
+            if (dist > pts[pts.length-1].d) {{ lo = pts[pts.length-2]; hi = pts[pts.length-1]; }}
+            if (lo.d === hi.d) return lo.t;
+            const e = Math.log(hi.t / lo.t) / Math.log(hi.d / lo.d);
+            return Math.round(lo.t * Math.pow(dist / lo.d, e));
+        }}
         PLANNED_RACES.forEach((race, idx) => {{
             const dist = race.distance_km || 5.0;
             const sf = _surfF[race.surface||'road'] || _surfF.road;
@@ -6515,12 +6589,16 @@ function raceAnnotations(dates) {{
             const pwEl = document.getElementById('race-pw-' + idx);
             if (pwEl) pwEl.textContent = pw + 'W';
             // For standard road distances, use StepB predictions (matches stats grid)
-            // For non-standard distances or non-road surfaces, use continuous model
+            // For non-standard distances, interpolate from StepB predictions via Riegel
             const stepbKey = _stepbKeyMap[race.distance_key];
-            const stepbSecs = (stepbKey && (race.surface||'road')==='road') ? ms[stepbKey] : 0;
+            const isStdDist = _stdKm[race.distance_key] && Math.abs(dist - _stdKm[race.distance_key]) < 0.1;
+            const stepbSecs = (stepbKey && isStdDist && (race.surface||'road')==='road') ? ms[stepbKey] : 0;
             let t;
             if (stepbSecs && stepbSecs > 0) {{
                 t = stepbSecs;
+            }} else if ((race.surface||'road') === 'road') {{
+                // Interpolate from mode-specific StepB predictions (respects GAP/SIM/Stryd)
+                t = _riegelInterp(dist, ms);
             }} else {{
                 const re = (ZONE_RE || 0.914) * sf.re;
                 const speed = (pw / {ATHLETE_MASS_KG_DASH}) * re;

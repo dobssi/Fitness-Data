@@ -6,11 +6,13 @@ Detects races from Master file using HR intensity as the primary signal,
 with distance-specific HR thresholds (marathons are run at lower HR than 5Ks).
 
 Strategy:
-  1. Find all runs at standard race distances (3K–Marathon) with HR data
+  1. Find all runs at standard race distances (1500m–Marathon) using
+     gps_distance_km and strava_distance_km (uncontaminated by prior corrections).
+     Tolerance: max(2%, 300m), parkrun: max(3%, 400m), bad GPS: max(4%, 500m).
   2. Classify using HR-for-distance model (sustained 90%+ LTHR at marathon = race)
   3. Boost/demote using activity name keywords (expanded for international events)
   4. Detect parkruns (name, or Saturday ~9am + ~5km)
-  5. Detect surface from name keywords (indoor, track)
+  5. Detect surface from name keywords (indoor, track) and GPS bbox
 
 Usage:
     python classify_races.py \\
@@ -67,7 +69,9 @@ RACE_NAME_OVERRIDES = re.compile(
     r'Lidingöloppet|Midnattsloppet|2 sjöar|'
     # Additional known races
     r'Royal Parks|Oxford Half|Hampton Court|Göteborgsvarvet|Premiärhalv|'
-    r'Broloppet|Örebro|Big Half|Reading Half|Willow 10k',
+    r'Broloppet|Örebro|Big Half|Reading Half|Willow 10k|'
+    # Mile / 1500m races
+    r'Golden Stag|Bannister.*mile|Highgate.*1500|Palladino.*mile|virtual mile',
     re.I
 )
 
@@ -85,18 +89,65 @@ NON_PARKRUN_RACE_KW = re.compile(
 
 # Surface detection from activity name
 INDOOR_KEYWORDS = re.compile(r'\bindoor\b|\btreadmill\b|\bgym\b', re.I)
-TRACK_KEYWORDS = re.compile(r'\btrack\b|\b[345]000m\b|\b1500m\b|\bmile\b.*\btrack\b', re.I)
+TRACK_KEYWORDS = re.compile(r'\btrack\b|\b[345]000m\b|\b1500m\b|\bmile\b.*\btrack\b|\bopen\s+1500\b|\bHighgate\b.*\b1500\b', re.I)
 
-# Standard race distances: (min_km, max_km, official_km, label)
-RACE_DISTANCES = [
-    (2.8, 3.2, 3.0, "3K"),
-    (4.8, 5.5, 5.0, "5K"),
-    (9.5, 10.8, 10.0, "10K"),
-    (14.5, 16.5, 16.0934, "10M"),
-    (20.5, 22.0, 21.097, "HM"),
-    (29.5, 31.5, 30.0, "30K"),
-    (41.0, 43.5, 42.195, "Marathon"),
+# Standard race distances: (official_km, label)
+# Tolerances are computed dynamically by _distance_tolerance().
+RACE_DISTANCES_V2 = [
+    (1.5,     "1500m"),
+    (1.609,   "Mile"),
+    (3.0,     "3K"),
+    (5.0,     "5K"),
+    (10.0,    "10K"),
+    (16.0934, "10M"),
+    (21.097,  "HM"),
+    (30.0,    "30K"),
+    (42.195,  "Marathon"),
 ]
+
+# Legacy format for backward compatibility (race_type lookup from distance)
+RACE_DISTANCES = [(d - _tol, d + _tol, d, l)
+                  for d, l in RACE_DISTANCES_V2
+                  for _tol in [max(d * 0.02, 0.3)]]
+
+
+def _distance_tolerance(official_km: float, is_parkrun: bool = False,
+                        bad_gps: bool = False) -> float:
+    """Compute distance matching tolerance.
+
+    Base:    max(2%, 300m)
+    Parkrun: max(3%, 400m)  — GPS-noisy short courses
+    Bad GPS: max(4%, 500m)  — high outlier_frac or max_seg > 200m
+    """
+    if bad_gps:
+        return max(official_km * 0.04, 0.5)
+    if is_parkrun:
+        return max(official_km * 0.03, 0.4)
+    return max(official_km * 0.02, 0.3)
+
+
+def _match_standard_distance(km: float, is_parkrun: bool = False,
+                             bad_gps: bool = False):
+    """Match a distance to a standard race distance.
+
+    Returns (official_km, label) or (None, None).
+    When multiple standard distances are within tolerance (e.g. 1500m vs Mile),
+    picks the nearest.
+    """
+    if km is None or km != km or km <= 0:  # NaN/None/zero check
+        return None, None
+    best_dist = None
+    best_label = None
+    best_gap = float('inf')
+    for official, label in RACE_DISTANCES_V2:
+        tol = _distance_tolerance(official, is_parkrun=is_parkrun,
+                                  bad_gps=bad_gps)
+        gap = abs(km - official)
+        if gap <= tol and gap < best_gap:
+            best_dist = official
+            best_label = label
+            best_gap = gap
+    return best_dist, best_label
 
 # ─── HR thresholds by distance ────────────────────────────────────────────
 # Default race HR thresholds as %LTHR. Loaded from athlete.yml if present.
@@ -104,13 +155,16 @@ RACE_DISTANCES = [
 # Keywords do the heavy lifting; HR is the tiebreaker for unnamed runs.
 # Named races (keyword/override match) get threshold - 5%.
 DEFAULT_RACE_HR_THRESHOLDS = {
-    "3K":   0.98,
-    "5K":   0.98,
-    "10K":  0.97,
-    "10M":  0.95,
-    "HM":   0.94,
-    "30K":  0.90,
+    "1500m": 0.98,
+    "Mile":  0.98,
+    "3K":    0.98,
+    "5K":    0.98,
+    "10K":   0.97,
+    "10M":   0.95,
+    "HM":    0.94,
+    "30K":   0.90,
     "Marathon": 0.88,
+    "Bespoke": 0.95,
 }
 
 
@@ -302,44 +356,112 @@ def _first_match(pattern, text):
 def detect_candidates_from_master(master_df: pd.DataFrame, lthr: float,
                                   max_hr: float) -> pd.DataFrame:
     """Find ALL runs at standard race distances that could be races.
-    
+
+    Distance matching uses gps_distance_km and strava_distance_km (both
+    immune to prior official_distance_km corrections) with dynamic
+    tolerances:
+      - Base:    max(2%, 300m)
+      - Parkrun: max(3%, 400m) for 5K when parkrun candidate
+      - Bad GPS: max(4%, 500m) when gps_max_seg_m > 200 or outlier_frac > 0.5%
+
+    If either GPS or Strava distance matches a standard distance → candidate.
+
     HR above 82% LTHR, OR no HR data (classify_run handles no-HR via pace).
     No pace filter. The classify_run() step handles the actual classification.
     """
     df = master_df.copy()
-    valid = df[df['distance_km'].notna()].copy()
-    
+    has_gps_col = 'gps_distance_km' in df.columns
+    has_strava_col = 'strava_distance_km' in df.columns
+    has_max_seg = 'gps_max_seg_m' in df.columns
+    has_outlier = 'gps_outlier_frac' in df.columns
+
     candidates = []
-    for _, row in valid.iterrows():
-        dist = row['distance_km']
+    for _, row in df.iterrows():
         hr = row.get('avg_hr', 0) or 0
-        
+        name = str(row.get('activity_name', '') or '')
+
+        # Gather uncontaminated distance measurements
+        gps_km = row['gps_distance_km'] if has_gps_col else None
+        if gps_km is not None and (gps_km != gps_km or gps_km <= 0):
+            gps_km = None
+        strava_km = row['strava_distance_km'] if has_strava_col else None
+        if strava_km is not None and (strava_km != strava_km or strava_km <= 0):
+            strava_km = None
+
+        # Fallback: if neither GPS nor Strava available, use distance_km
+        # (may be corrected on re-runs but better than skipping entirely)
+        dist_km = row.get('distance_km')
+        if gps_km is None and strava_km is None:
+            if dist_km is not None and dist_km == dist_km and dist_km > 0:
+                gps_km = dist_km  # treat as GPS-equivalent
+            else:
+                continue
+
+        # Detect GPS quality issues
+        max_seg = row.get('gps_max_seg_m', 0) if has_max_seg else 0
+        outlier_frac = row.get('gps_outlier_frac', 0) if has_outlier else 0
+        max_seg = max_seg if (max_seg is not None and max_seg == max_seg) else 0
+        outlier_frac = outlier_frac if (outlier_frac is not None and outlier_frac == outlier_frac) else 0
+        bad_gps = (max_seg > 200) or (outlier_frac > 0.005)
+
+        # Detect parkrun candidate (for wider 5K tolerance)
+        date_val = row.get('date')
+        _is_parkrun_candidate = is_parkrun(name, date_val,
+                                           gps_km or strava_km or dist_km)
+
+        # Try matching each distance source against standard race distances
         matched = False
         official_dist = None
         race_type = None
-        for dmin, dmax, odist, label in RACE_DISTANCES:
-            if dmin <= dist <= dmax:
+        for km in [gps_km, strava_km]:
+            if km is None:
+                continue
+            odist, label = _match_standard_distance(
+                km,
+                is_parkrun=_is_parkrun_candidate,
+                bad_gps=bad_gps)
+            if label:
                 matched = True
                 official_dist = odist
                 race_type = label
                 break
-        
+
         if not matched:
+            # ── Bespoke distance detection ──
+            # Runs at non-standard distances with race-effort HR (>= 95% LTHR)
+            # become bespoke candidates at their actual GPS distance.
+            # Examples: Stockholm's Bästa series, Lidingöloppet 15, relay legs.
+            # classify_run() applies keyword/anti-keyword filtering downstream.
+            BESPOKE_HR_PCT = 0.95
+            BESPOKE_MIN_DIST_KM = 1.0
+            BESPOKE_MIN_DURATION_S = 180  # 3 minutes
+            has_hr = hr > 0
+            elapsed = row.get('elapsed_time_s', 0) or 0
+            best_dist_km = gps_km or strava_km or 0
+            if (has_hr and lthr > 0
+                    and hr >= lthr * BESPOKE_HR_PCT
+                    and best_dist_km >= BESPOKE_MIN_DIST_KM
+                    and elapsed >= BESPOKE_MIN_DURATION_S):
+                candidates.append({
+                    'file': row['file'],
+                    'official_distance_km': round(best_dist_km, 3),
+                    'race_type': 'Bespoke',
+                })
             continue
-        
+
         # Minimum HR floor — below 82% LTHR nothing is a race in calibration data
         # (Easy parkruns at 83-88% are caught by parkrun name detection instead)
         # Exception: no HR data (hr == 0 or NaN) — let through for pace-based classification
         has_hr = hr > 0
         if has_hr and lthr > 0 and hr < lthr * 0.82:
             continue
-        
+
         candidates.append({
             'file': row['file'],
             'official_distance_km': official_dist,
             'race_type': race_type,
         })
-    
+
     return pd.DataFrame(candidates)
 
 
@@ -395,7 +517,7 @@ def enrich_and_classify(master_path: str, overrides_path: str,
             for i, row in ov.iterrows():
                 dist = row.get('official_distance_km', 0)
                 if dist:
-                    for _, _, odist, label in RACE_DISTANCES:
+                    for odist, label in RACE_DISTANCES_V2:
                         if abs(dist - odist) < 0.5:
                             ov.at[i, 'race_type'] = label
                             break
@@ -543,7 +665,7 @@ def enrich_and_classify(master_path: str, overrides_path: str,
     # Skip entirely if gps_bbox_m2 is not in the Master (e.g. GAP-mode athletes).
     INDOOR_BBOX_THRESHOLD_M2 = 5_000
     TRACK_BBOX_THRESHOLD_M2 = 50_000
-    TRACK_RACE_DISTANCES = {'3K', '5K', '10K'}
+    TRACK_RACE_DISTANCES = {'1500m', 'Mile', '3K', '5K', '10K'}
     bbox_track_count = 0
     bbox_indoor_count = 0
     has_bbox = 'gps_bbox_m2' in master.columns if master is not None else False
