@@ -1191,6 +1191,7 @@ def calc_rolling_metrics(df: pd.DataFrame) -> pd.DataFrame:
     df['RFL_Trend'] = np.nan
     
     # Find all-time peak RF_Trend
+    # Find all-time peak RF_Trend
     peak_rf_trend = df['RF_Trend'].max()
     print(f"  Peak RF_Trend: {peak_rf_trend:.4f}")
     
@@ -3651,8 +3652,8 @@ def apply_auto_excludes(dfm: pd.DataFrame) -> pd.DataFrame:
     # 6. Very slow
     reason = reason.where(~(pace > 10), "very_slow")
 
-    # 5. Cycling segment
-    reason = reason.where(~((pace < 3.0) & (dist > 5)), "cycling_segment")
+    # 5. Cycling / multi-sport segment (no human runs sub-3:30/km for 5km+)
+    reason = reason.where(~((pace < 3.5) & (dist > 5)), "cycling_segment")
 
     # 4. Sub-5min
     reason = reason.where(~(elapsed < 300), "sub_5min")
@@ -4836,6 +4837,11 @@ def main() -> int:
             
             # Calculate Factor for this row (with outlier adjustment based on prev_rf_trend)
             # v44.3: Pass days_since_last_run to skip reduction if there's been a long gap
+            # v53: Skip Factor for auto-excluded activities (cycling segments, duplicates, etc.)
+            if dfm.at[i, 'auto_exclude'] == 1:
+                dfm.at[i, 'Factor'] = 0
+                dfm.at[i, 'RF_adj'] = np.nan  # Don't let excluded runs contaminate trend
+                continue
             distance_m = pd.to_numeric(row.get('distance_km', 0), errors='coerce') * 1000
             avg_hr = pd.to_numeric(row.get('avg_hr', np.nan), errors='coerce')
             factor = calc_factor(distance_m, avg_hr, rf_adj, prev_rf_trend, days_since_last_run)

@@ -486,6 +486,18 @@ def assign_detected_eras(df: pd.DataFrame, result: EraDetectionResult,
                 df.at[idx, era_col] = best_era.era_id
                 df.at[idx, adjuster_col] = best_era.adjuster
 
+    # Sim power (pre-Stryd) runs: calibrate to first Stryd era's scale.
+    # Sim power ≈ GAP power (Minetti model). The first era's mean_ratio tells us
+    # how that earliest Stryd pod reads relative to GAP: ratio = Stryd_RF / GAP_RF.
+    # Scaling sim to the first era (not anchor) keeps the pre-Stryd → first-Stryd
+    # transition seamless — no discontinuity at the boundary.
+    is_sim = (power_src == 'sim_v1')
+    if is_sim.any() and result.eras:
+        first_era = result.eras[0]  # Earliest detected era
+        sim_adj = first_era.mean_ratio
+        df.loc[is_sim, era_col] = 0  # keep era_id=0 (pre-Stryd)
+        df.loc[is_sim, adjuster_col] = round(sim_adj, 5)
+
     return df
 
 
