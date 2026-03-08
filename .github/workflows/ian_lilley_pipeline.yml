@@ -1,0 +1,574 @@
+# .github/workflows/ian_lilley_pipeline.yml
+# Pipeline for Ian Lilley — GAP mode, intervals.icu sync
+#
+# INITIAL mode — two sequential jobs, each with their own 6h clock:
+#   rebuild:      FIT ingest + full rebuild + weather fetch (~5h). Uploads
+#                 Master_FULL.xlsx + weather cache + persec NPZs to Dropbox.
+#   stepb_deploy: Auto-triggered after rebuild succeeds. Downloads from
+#                 Dropbox, runs StepB + dashboard + deploy (~15 min).
+#
+# Secrets required:
+#   DROPBOX_TOKEN / DROPBOX_REFRESH_TOKEN / DROPBOX_APP_KEY / DROPBOX_APP_SECRET
+#   IAN_INTERVALS_API_KEY    — Ian Lilley's intervals.icu API key
+#   IAN_INTERVALS_ATHLETE_ID — Ian Lilley's intervals.icu athlete ID
+
+name: Ian Lilley Pipeline
+
+on:
+  # schedule:
+  #   - cron: '0 9,11,13,15,17,19,21,23 * * *'
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: 'Pipeline mode'
+        type: choice
+        options:
+          - UPDATE
+          - FULL
+          - INITIAL
+          - FROM_STEPB
+          - DASHBOARD
+          - CLASSIFY_RACES
+        default: UPDATE
+      sync:
+        description: 'Sync from intervals.icu'
+        type: boolean
+        default: true
+
+concurrency:
+  group: ian_lilley-pipeline
+  cancel-in-progress: false
+
+jobs:
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # JOB 1: rebuild
+  # Handles UPDATE / FULL / INITIAL / CLASSIFY_RACES and the lightweight
+  # scheduled check. FROM_STEPB and DASHBOARD skip this job entirely.
+  # ═══════════════════════════════════════════════════════════════════════════
+  rebuild:
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    if: ${{ github.event.inputs.mode != 'FROM_STEPB' && github.event.inputs.mode != 'DASHBOARD' }}
+
+    outputs:
+      continue: ${{ steps.gate.outputs.continue }}
+      mode:     ${{ steps.mode.outputs.mode }}
+
+    env:
+      DROPBOX_TOKEN:         ${{ secrets.DROPBOX_TOKEN }}
+      DROPBOX_REFRESH_TOKEN: ${{ secrets.DROPBOX_REFRESH_TOKEN }}
+      DROPBOX_APP_KEY:       ${{ secrets.DROPBOX_APP_KEY }}
+      DROPBOX_APP_SECRET:    ${{ secrets.DROPBOX_APP_SECRET }}
+      INTERVALS_API_KEY:     ${{ secrets.IAN_INTERVALS_API_KEY }}
+      INTERVALS_ATHLETE_ID:  ${{ secrets.IAN_INTERVALS_ATHLETE_ID }}
+      ATHLETE_DIR:           athletes/IanLilley
+      ATHLETE_CONFIG_PATH:   athletes/IanLilley/athlete.yml
+      DB_BASE:               /Running and Cycling/DataPipeline/athletes/IanLilley
+      TZ_LOCAL:              Europe/London
+      PIPELINE_MODE:         ${{ github.event.inputs.mode || 'UPDATE' }}
+      PYTHONUNBUFFERED:      1
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Create directories
+        run: |
+          mkdir -p ${{ env.ATHLETE_DIR }}/data/FIT_downloads
+          mkdir -p ${{ env.ATHLETE_DIR }}/persec_cache
+          mkdir -p ${{ env.ATHLETE_DIR }}/output/dashboard
+          mkdir -p ${{ env.ATHLETE_DIR }}/output/_weather_cache_openmeteo
+
+      - name: Expose mode
+        id: mode
+        run: echo "mode=${{ env.PIPELINE_MODE }}" >> $GITHUB_OUTPUT
+
+      # ── Lightweight check ──────────────────────────────────────────────────
+
+      - name: Restore sync state
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            ${{ env.ATHLETE_DIR }}/fit_sync_state.json
+            ${{ env.ATHLETE_DIR }}/pending_activities.csv
+          key: ian_lilley-sync-v2-${{ github.run_number }}
+          restore-keys: |
+            ian_lilley-sync-v2-
+
+      - name: Download fits.zip for dedup
+        if: ${{ github.event.inputs.sync != 'false' }}
+        run: |
+          python ci/dropbox_sync.py download \
+            --dropbox-base "${{ env.DB_BASE }}" \
+            --local-prefix "${{ env.ATHLETE_DIR }}" \
+            --items data/fits.zip
+        continue-on-error: true
+
+      - name: Reset sync state (manual dispatch only)
+        if: ${{ github.event_name == 'workflow_dispatch' }}
+        run: |
+          rm -f ${{ env.ATHLETE_DIR }}/fit_sync_state.json
+          echo "Sync state deleted — fetch will do full scan"
+
+      - name: Check for new activities
+        id: fetch
+        if: ${{ github.event.inputs.sync != 'false' && env.PIPELINE_MODE != 'INITIAL' }}
+        run: |
+          python fetch_fit_files.py \
+            --fit-dir ${{ env.ATHLETE_DIR }}/data/FIT_downloads \
+            --zip ${{ env.ATHLETE_DIR }}/data/fits.zip \
+            --state-file ${{ env.ATHLETE_DIR }}/fit_sync_state.json \
+            --pending-csv ${{ env.ATHLETE_DIR }}/pending_activities.csv \
+            --refresh-names 14
+
+          if [ -f _new_runs_added.tmp ]; then
+            echo "new_runs=true" >> $GITHUB_OUTPUT
+            COUNT=$(cat _new_runs_added.tmp)
+            echo "  → $COUNT new run(s) detected"
+          else
+            echo "new_runs=false" >> $GITHUB_OUTPUT
+            echo "  → No new runs"
+          fi
+        continue-on-error: true
+
+      - name: Decide whether to continue
+        id: gate
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "continue=true" >> $GITHUB_OUTPUT
+          elif [ "${{ steps.fetch.outputs.new_runs }}" = "true" ]; then
+            echo "continue=true" >> $GITHUB_OUTPUT
+          else
+            echo "continue=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Save sync state
+        uses: actions/cache/save@v4
+        if: always()
+        with:
+          path: |
+            ${{ env.ATHLETE_DIR }}/fit_sync_state.json
+            ${{ env.ATHLETE_DIR }}/pending_activities.csv
+          key: ian_lilley-sync-v2-${{ github.run_number }}
+
+      # ── Full pipeline ──────────────────────────────────────────────────────
+
+      - name: Restore persec cache
+        if: ${{ steps.gate.outputs.continue == 'true' && env.PIPELINE_MODE != 'INITIAL' }}
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ env.ATHLETE_DIR }}/persec_cache
+          key: ian_lilley-persec-${{ github.run_number }}
+          restore-keys: |
+            ian_lilley-persec-
+
+      - name: Download data from Dropbox
+        if: ${{ steps.gate.outputs.continue == 'true' }}
+        run: |
+          CACHE_FLAG=""
+          if [ "${{ env.PIPELINE_MODE }}" != "INITIAL" ]; then
+            CACHE_FLAG="--cache-dir ${{ env.ATHLETE_DIR }}/persec_cache --cache-full"
+          fi
+          python ci/dropbox_sync.py download \
+            --dropbox-base "${{ env.DB_BASE }}" \
+            --local-prefix "${{ env.ATHLETE_DIR }}" \
+            --items data/activities.csv \
+                    activity_overrides.xlsx \
+                    athlete_data.csv \
+                    output/Master_FULL.xlsx \
+                    output/Master_FULL_post.xlsx \
+                    output/_weather_cache_openmeteo/openmeteo_cache.sqlite \
+            $CACHE_FLAG
+        continue-on-error: true
+
+      - name: Sync athlete data from intervals.icu
+        if: ${{ steps.gate.outputs.continue == 'true' && github.event.inputs.sync != 'false' && env.PIPELINE_MODE != 'CLASSIFY_RACES' }}
+        run: |
+          python sync_athlete_data.py \
+            --athlete-data ${{ env.ATHLETE_DIR }}/athlete_data.csv \
+            --nr-tss-oldest 2020-01-01 \
+            --weight-oldest 2020-01-01
+        continue-on-error: true
+
+      - name: Initial data ingest (INITIAL only)
+        if: ${{ steps.gate.outputs.continue == 'true' && env.PIPELINE_MODE == 'INITIAL' }}
+        run: |
+          python ci/initial_data_ingest.py \
+            --athlete-dir ${{ env.ATHLETE_DIR }} \
+            --dropbox-base "${{ env.DB_BASE }}" \
+            --tz ${{ env.TZ_LOCAL }}
+
+      - name: Fetch intervals.icu FITs after ingest (INITIAL only)
+        if: ${{ steps.gate.outputs.continue == 'true' && env.PIPELINE_MODE == 'INITIAL' }}
+        run: |
+          echo "Fetching intervals.icu FITs to pick up runs after Strava export date..."
+          rm -f ${{ env.ATHLETE_DIR }}/fit_sync_state.json
+          python fetch_fit_files.py \
+            --fit-dir ${{ env.ATHLETE_DIR }}/data/FIT_downloads \
+            --zip ${{ env.ATHLETE_DIR }}/data/fits.zip \
+            --state-file ${{ env.ATHLETE_DIR }}/fit_sync_state.json \
+            --pending-csv ${{ env.ATHLETE_DIR }}/pending_activities.csv \
+            --refresh-names 14 \
+            --full
+        continue-on-error: true
+
+      - name: Rebuild from FIT files (FULL / INITIAL)
+        if: ${{ steps.gate.outputs.continue == 'true' && env.PIPELINE_MODE == 'FULL' || env.PIPELINE_MODE == 'INITIAL' }}
+        run: |
+          python rebuild_from_fit_zip.py \
+            --fit-zip ${{ env.ATHLETE_DIR }}/data/fits.zip \
+            --template master_template.xlsx \
+            --out ${{ env.ATHLETE_DIR }}/output/Master_FULL.xlsx \
+            --persec-cache-dir ${{ env.ATHLETE_DIR }}/persec_cache \
+            --strava ${{ env.ATHLETE_DIR }}/data/activities.csv \
+            --pending-activities ${{ env.ATHLETE_DIR }}/pending_activities.csv \
+            --override-file ${{ env.ATHLETE_DIR }}/activity_overrides.xlsx \
+            --tz ${{ env.TZ_LOCAL }} \
+            --weight 87.0
+
+      - name: Rebuild from FIT files (UPDATE — append only)
+        if: ${{ steps.gate.outputs.continue == 'true' && env.PIPELINE_MODE == 'UPDATE' }}
+        run: |
+          STRAVA_FLAG=""
+          if [ -f "${{ env.ATHLETE_DIR }}/data/activities.csv" ]; then
+            STRAVA_FLAG="--strava ${{ env.ATHLETE_DIR }}/data/activities.csv"
+          fi
+          python rebuild_from_fit_zip.py \
+            --fit-zip ${{ env.ATHLETE_DIR }}/data/fits.zip \
+            --template master_template.xlsx \
+            --out ${{ env.ATHLETE_DIR }}/output/Master_FULL.xlsx \
+            --append-master-in ${{ env.ATHLETE_DIR }}/output/Master_FULL.xlsx \
+            --persec-cache-dir ${{ env.ATHLETE_DIR }}/persec_cache \
+            $STRAVA_FLAG \
+            --pending-activities ${{ env.ATHLETE_DIR }}/pending_activities.csv \
+            --override-file ${{ env.ATHLETE_DIR }}/activity_overrides.xlsx \
+            --tz ${{ env.TZ_LOCAL }} \
+            --weight 87.0
+
+      - name: Add GAP power
+        if: ${{ steps.gate.outputs.continue == 'true' && env.PIPELINE_MODE == 'FULL' || env.PIPELINE_MODE == 'INITIAL' || env.PIPELINE_MODE == 'UPDATE' }}
+        run: |
+          python add_gap_power.py \
+            --master ${{ env.ATHLETE_DIR }}/output/Master_FULL.xlsx \
+            --cache-dir ${{ env.ATHLETE_DIR }}/persec_cache \
+            --out ${{ env.ATHLETE_DIR }}/output/Master_FULL.xlsx \
+            --mass-kg 87.0 \
+            --re-constant 0.92
+
+      - name: Classify races
+        if: ${{ steps.gate.outputs.continue == 'true' && env.PIPELINE_MODE == 'FULL' || env.PIPELINE_MODE == 'INITIAL' || env.PIPELINE_MODE == 'CLASSIFY_RACES' }}
+        run: |
+          SKIP_FLAG=""
+          if [ "${{ env.PIPELINE_MODE }}" != "CLASSIFY_RACES" ] && [ "${{ env.PIPELINE_MODE }}" != "INITIAL" ]; then
+            SKIP_FLAG="--skip-if-classified"
+          fi
+          python classify_races.py \
+            --master ${{ env.ATHLETE_DIR }}/output/Master_FULL.xlsx \
+            --overrides ${{ env.ATHLETE_DIR }}/activity_overrides.xlsx \
+            --athlete-yml ${{ env.ATHLETE_CONFIG_PATH }} \
+            --from-master \
+            $SKIP_FLAG
+
+      - name: StepB post-processing (UPDATE / FULL)
+        if: ${{ steps.gate.outputs.continue == 'true' && env.PIPELINE_MODE == 'UPDATE' || env.PIPELINE_MODE == 'FULL' }}
+        run: |
+          python StepB_PostProcess.py \
+            --master ${{ env.ATHLETE_DIR }}/output/Master_FULL.xlsx \
+            --persec-cache-dir ${{ env.ATHLETE_DIR }}/persec_cache \
+            --out ${{ env.ATHLETE_DIR }}/output/Master_FULL_post.xlsx \
+            --model-json re_model_generic.json \
+            --override-file ${{ env.ATHLETE_DIR }}/activity_overrides.xlsx \
+            --athlete-data ${{ env.ATHLETE_DIR }}/athlete_data.csv \
+            --mass-kg 87.0 \
+            --tz ${{ env.TZ_LOCAL }} \
+            --runner-dob "1971-11-27" \
+            --runner-gender male \
+            --strava ${{ env.ATHLETE_DIR }}/data/activities.csv \
+            --progress-every 50
+
+      - name: Generate dashboard (UPDATE / FULL)
+        if: ${{ steps.gate.outputs.continue == 'true' && env.PIPELINE_MODE == 'UPDATE' || env.PIPELINE_MODE == 'FULL' }}
+        env:
+          MASTER_FILE:       ${{ env.ATHLETE_DIR }}/output/Master_FULL_post.xlsx
+          OUTPUT_FILE:       ${{ env.ATHLETE_DIR }}/output/dashboard/index.html
+          ATHLETE_DATA_FILE: ${{ env.ATHLETE_DIR }}/athlete_data.csv
+        run: python generate_dashboard.py
+        continue-on-error: true
+
+      - name: Save persec cache
+        uses: actions/cache/save@v4
+        if: ${{ steps.gate.outputs.continue == 'true' }}
+        with:
+          path: ${{ env.ATHLETE_DIR }}/persec_cache
+          key: ian_lilley-persec-${{ github.run_number }}
+
+      - name: Upload fits.zip to Dropbox
+        if: ${{ steps.gate.outputs.continue == 'true' && steps.fetch.outputs.new_runs == 'true' || env.PIPELINE_MODE == 'INITIAL' || env.PIPELINE_MODE == 'FULL' }}
+        run: |
+          python ci/dropbox_sync.py upload \
+            --dropbox-base "${{ env.DB_BASE }}" \
+            --local-prefix "${{ env.ATHLETE_DIR }}" \
+            --items data/fits.zip
+        continue-on-error: true
+
+      # Safety upload — always runs, preserves critical files even on timeout.
+      - name: Safety upload — weather cache + Master (always)
+        if: always()
+        run: |
+          python ci/dropbox_sync.py upload \
+            --dropbox-base "${{ env.DB_BASE }}" \
+            --local-prefix "${{ env.ATHLETE_DIR }}" \
+            --items output/_weather_cache_openmeteo/openmeteo_cache.sqlite \
+                    output/Master_FULL.xlsx \
+                    output/Master_FULL_post.xlsx
+        continue-on-error: true
+
+      - name: Upload results to Dropbox
+        if: ${{ steps.gate.outputs.continue == 'true' && env.PIPELINE_MODE != 'CLASSIFY_RACES' }}
+        run: |
+          python ci/dropbox_sync.py upload \
+            --dropbox-base "${{ env.DB_BASE }}" \
+            --local-prefix "${{ env.ATHLETE_DIR }}" \
+            --items activity_overrides.xlsx \
+                    athlete_data.csv \
+                    data/activities.csv \
+                    fit_sync_state.json \
+                    pending_activities.csv \
+                    output/Master_FULL.xlsx \
+                    output/Master_FULL_post.xlsx \
+                    output/dashboard/index.html \
+                    output/_weather_cache_openmeteo/openmeteo_cache.sqlite
+
+      - name: Upload persec cache archive (INITIAL only)
+        if: ${{ steps.gate.outputs.continue == 'true' && env.PIPELINE_MODE == 'INITIAL' }}
+        run: |
+          python ci/dropbox_sync.py upload \
+            --dropbox-base "${{ env.DB_BASE }}" \
+            --local-prefix "${{ env.ATHLETE_DIR }}" \
+            --cache-dir ${{ env.ATHLETE_DIR }}/persec_cache \
+            --cache-full
+
+      - name: Prepare dashboard for Pages (UPDATE / FULL)
+        if: ${{ steps.gate.outputs.continue == 'true' && env.PIPELINE_MODE == 'UPDATE' || env.PIPELINE_MODE == 'FULL' }}
+        run: |
+          mkdir -p docs/ian
+          cp -f ${{ env.ATHLETE_DIR }}/output/dashboard/index.html docs/ian/index.html 2>/dev/null || true
+        continue-on-error: true
+
+      - name: Deploy to GitHub Pages (UPDATE / FULL)
+        uses: peaceiris/actions-gh-pages@v3
+        if: ${{ steps.gate.outputs.continue == 'true' && env.PIPELINE_MODE == 'UPDATE' || env.PIPELINE_MODE == 'FULL' }}
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./docs
+          publish_branch: gh-pages
+          keep_files: true
+        continue-on-error: true
+
+      - name: Summary
+        if: always()
+        run: |
+          echo "## Ian Lilley Pipeline — rebuild job" >> $GITHUB_STEP_SUMMARY
+          echo "- **Mode:** ${{ env.PIPELINE_MODE }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Status:** ${{ job.status }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Time:** $(date -u +%Y-%m-%dT%H:%M:%SZ)" >> $GITHUB_STEP_SUMMARY
+          CACHE="${{ env.ATHLETE_DIR }}/persec_cache"
+          if [ -d "$CACHE" ]; then
+            COUNT=$(find "$CACHE" -name "*.npz" | wc -l)
+            echo "- **NPZ cache:** $COUNT files" >> $GITHUB_STEP_SUMMARY
+          fi
+          MASTER="${{ env.ATHLETE_DIR }}/output/Master_FULL.xlsx"
+          if [ -f "$MASTER" ]; then
+            SIZE=$(stat -c%s "$MASTER" 2>/dev/null || echo "?")
+            echo "- **Master_FULL:** $SIZE bytes" >> $GITHUB_STEP_SUMMARY
+          fi
+
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # JOB 2: stepb_deploy
+  # Runs StepB + dashboard + GitHub Pages deploy.
+  # Auto-triggered after INITIAL/CLASSIFY_RACES rebuild succeeds (fresh 6h clock).
+  # Also triggered directly via FROM_STEPB or DASHBOARD modes.
+  # ═══════════════════════════════════════════════════════════════════════════
+  stepb_deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    needs: [rebuild]
+    if: |
+      always() && (
+        (needs.rebuild.result == 'success' && needs.rebuild.outputs.mode == 'INITIAL') ||
+        (needs.rebuild.result == 'success' && needs.rebuild.outputs.mode == 'CLASSIFY_RACES') ||
+        github.event.inputs.mode == 'FROM_STEPB' ||
+        github.event.inputs.mode == 'DASHBOARD'
+      )
+
+    env:
+      DROPBOX_TOKEN:         ${{ secrets.DROPBOX_TOKEN }}
+      DROPBOX_REFRESH_TOKEN: ${{ secrets.DROPBOX_REFRESH_TOKEN }}
+      DROPBOX_APP_KEY:       ${{ secrets.DROPBOX_APP_KEY }}
+      DROPBOX_APP_SECRET:    ${{ secrets.DROPBOX_APP_SECRET }}
+      INTERVALS_API_KEY:     ${{ secrets.IAN_INTERVALS_API_KEY }}
+      INTERVALS_ATHLETE_ID:  ${{ secrets.IAN_INTERVALS_ATHLETE_ID }}
+      ATHLETE_DIR:           athletes/IanLilley
+      ATHLETE_CONFIG_PATH:   athletes/IanLilley/athlete.yml
+      DB_BASE:               /Running and Cycling/DataPipeline/athletes/IanLilley
+      TZ_LOCAL:              Europe/London
+      PIPELINE_MODE:         ${{ github.event.inputs.mode || 'FROM_STEPB' }}
+      PYTHONUNBUFFERED:      1
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Create directories
+        run: |
+          mkdir -p ${{ env.ATHLETE_DIR }}/data/FIT_downloads
+          mkdir -p ${{ env.ATHLETE_DIR }}/persec_cache
+          mkdir -p ${{ env.ATHLETE_DIR }}/output/dashboard
+          mkdir -p ${{ env.ATHLETE_DIR }}/output/_weather_cache_openmeteo
+
+      - name: Restore persec cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ env.ATHLETE_DIR }}/persec_cache
+          key: ian_lilley-persec-${{ github.run_number }}
+          restore-keys: |
+            ian_lilley-persec-
+
+      - name: Download data from Dropbox
+        run: |
+          python ci/dropbox_sync.py download \
+            --dropbox-base "${{ env.DB_BASE }}" \
+            --local-prefix "${{ env.ATHLETE_DIR }}" \
+            --items data/activities.csv \
+                    activity_overrides.xlsx \
+                    athlete_data.csv \
+                    output/Master_FULL.xlsx \
+                    output/Master_FULL_post.xlsx \
+                    output/_weather_cache_openmeteo/openmeteo_cache.sqlite \
+            --cache-dir ${{ env.ATHLETE_DIR }}/persec_cache \
+            --cache-full
+        continue-on-error: true
+
+      - name: Sync athlete data from intervals.icu
+        if: ${{ env.PIPELINE_MODE != 'DASHBOARD' }}
+        run: |
+          python sync_athlete_data.py \
+            --athlete-data ${{ env.ATHLETE_DIR }}/athlete_data.csv \
+            --nr-tss-oldest 2020-01-01 \
+            --weight-oldest 2020-01-01
+        continue-on-error: true
+
+      - name: StepB post-processing
+        if: ${{ env.PIPELINE_MODE != 'DASHBOARD' }}
+        run: |
+          python StepB_PostProcess.py \
+            --master ${{ env.ATHLETE_DIR }}/output/Master_FULL.xlsx \
+            --persec-cache-dir ${{ env.ATHLETE_DIR }}/persec_cache \
+            --out ${{ env.ATHLETE_DIR }}/output/Master_FULL_post.xlsx \
+            --model-json re_model_generic.json \
+            --override-file ${{ env.ATHLETE_DIR }}/activity_overrides.xlsx \
+            --athlete-data ${{ env.ATHLETE_DIR }}/athlete_data.csv \
+            --mass-kg 87.0 \
+            --tz ${{ env.TZ_LOCAL }} \
+            --runner-dob "1971-11-27" \
+            --runner-gender male \
+            --strava ${{ env.ATHLETE_DIR }}/data/activities.csv \
+            --progress-every 50
+
+      - name: Re-classify races (with predictions)
+        if: ${{ env.PIPELINE_MODE == 'INITIAL' || env.PIPELINE_MODE == 'CLASSIFY_RACES' }}
+        run: |
+          python classify_races.py \
+            --master ${{ env.ATHLETE_DIR }}/output/Master_FULL_post.xlsx \
+            --overrides ${{ env.ATHLETE_DIR }}/activity_overrides.xlsx \
+            --athlete-yml ${{ env.ATHLETE_CONFIG_PATH }} \
+            --from-master
+
+      - name: StepB second pass (apply new race flags)
+        if: ${{ env.PIPELINE_MODE == 'INITIAL' || env.PIPELINE_MODE == 'CLASSIFY_RACES' }}
+        run: |
+          python StepB_PostProcess.py \
+            --master ${{ env.ATHLETE_DIR }}/output/Master_FULL.xlsx \
+            --persec-cache-dir ${{ env.ATHLETE_DIR }}/persec_cache \
+            --out ${{ env.ATHLETE_DIR }}/output/Master_FULL_post.xlsx \
+            --model-json re_model_generic.json \
+            --override-file ${{ env.ATHLETE_DIR }}/activity_overrides.xlsx \
+            --athlete-data ${{ env.ATHLETE_DIR }}/athlete_data.csv \
+            --mass-kg 87.0 \
+            --tz ${{ env.TZ_LOCAL }} \
+            --runner-dob "1971-11-27" \
+            --runner-gender male \
+            --strava ${{ env.ATHLETE_DIR }}/data/activities.csv \
+            --progress-every 50
+
+      - name: Generate dashboard
+        env:
+          MASTER_FILE:       ${{ env.ATHLETE_DIR }}/output/Master_FULL_post.xlsx
+          OUTPUT_FILE:       ${{ env.ATHLETE_DIR }}/output/dashboard/index.html
+          ATHLETE_DATA_FILE: ${{ env.ATHLETE_DIR }}/athlete_data.csv
+        run: python generate_dashboard.py
+        continue-on-error: true
+
+      - name: Upload results to Dropbox
+        run: |
+          python ci/dropbox_sync.py upload \
+            --dropbox-base "${{ env.DB_BASE }}" \
+            --local-prefix "${{ env.ATHLETE_DIR }}" \
+            --items activity_overrides.xlsx \
+                    athlete_data.csv \
+                    data/activities.csv \
+                    output/Master_FULL_post.xlsx \
+                    output/dashboard/index.html \
+                    output/_weather_cache_openmeteo/openmeteo_cache.sqlite
+
+      - name: Prepare dashboard for Pages
+        run: |
+          mkdir -p docs/ian
+          cp -f ${{ env.ATHLETE_DIR }}/output/dashboard/index.html docs/ian/index.html 2>/dev/null || true
+        continue-on-error: true
+
+      - name: Deploy to GitHub Pages
+        uses: peaceiris/actions-gh-pages@v3
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./docs
+          publish_branch: gh-pages
+          keep_files: true
+        continue-on-error: true
+
+      - name: Summary
+        if: always()
+        run: |
+          echo "## Ian Lilley Pipeline — stepb_deploy job" >> $GITHUB_STEP_SUMMARY
+          echo "- **Mode:** ${{ env.PIPELINE_MODE }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Status:** ${{ job.status }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Time:** $(date -u +%Y-%m-%dT%H:%M:%SZ)" >> $GITHUB_STEP_SUMMARY
+          MASTER="${{ env.ATHLETE_DIR }}/output/Master_FULL_post.xlsx"
+          if [ -f "$MASTER" ]; then
+            SIZE=$(stat -c%s "$MASTER" 2>/dev/null || echo "?")
+            echo "- **Master_FULL_post:** $SIZE bytes" >> $GITHUB_STEP_SUMMARY
+          fi

@@ -525,24 +525,40 @@ def main():
         return 0
     
     # Append new FIT files to the zip so rebuild_from_fit_zip can find them
-    if downloaded and os.path.exists(args.zip):
-        print(f"\nAppending {len(downloaded)} new FIT file(s) to {args.zip}...")
-        existing_in_zip = set()
-        with zipfile.ZipFile(args.zip, 'r') as zf:
-            existing_in_zip = {os.path.basename(n).lower() for n in zf.namelist()}
-        added = 0
-        with zipfile.ZipFile(args.zip, 'a', zipfile.ZIP_DEFLATED) as zf:
-            for fname, _act in downloaded:
-                # downloaded stores stem without .FIT; actual file has .FIT
-                fname_fit = fname if fname.upper().endswith('.FIT') else fname + '.FIT'
-                if fname_fit.lower() not in existing_in_zip:
+    if downloaded:
+        if os.path.exists(args.zip):
+            print(f"\nAppending {len(downloaded)} new FIT file(s) to {args.zip}...")
+            existing_in_zip = set()
+            with zipfile.ZipFile(args.zip, 'r') as zf:
+                existing_in_zip = {os.path.basename(n).lower() for n in zf.namelist()}
+            added = 0
+            with zipfile.ZipFile(args.zip, 'a', zipfile.ZIP_DEFLATED) as zf:
+                for fname, _act in downloaded:
+                    # downloaded stores stem without .FIT; actual file has .FIT
+                    fname_fit = fname if fname.upper().endswith('.FIT') else fname + '.FIT'
+                    if fname_fit.lower() not in existing_in_zip:
+                        fit_path = os.path.join(args.fit_dir, fname_fit)
+                        if os.path.exists(fit_path):
+                            zf.write(fit_path, fname_fit)
+                            added += 1
+                        else:
+                            print(f"  [WARN] {fit_path} not found on disk")
+            print(f"  Added {added} to zip ({args.zip})")
+        else:
+            # Create fits.zip from scratch — first time for this athlete
+            print(f"\nCreating new {args.zip} with {len(downloaded)} FIT file(s)...")
+            os.makedirs(os.path.dirname(os.path.abspath(args.zip)), exist_ok=True)
+            added = 0
+            with zipfile.ZipFile(args.zip, 'w', zipfile.ZIP_DEFLATED) as zf:
+                for fname, _act in downloaded:
+                    fname_fit = fname if fname.upper().endswith('.FIT') else fname + '.FIT'
                     fit_path = os.path.join(args.fit_dir, fname_fit)
                     if os.path.exists(fit_path):
                         zf.write(fit_path, fname_fit)
                         added += 1
                     else:
                         print(f"  [WARN] {fit_path} not found on disk")
-        print(f"  Added {added} to zip ({args.zip})")
+            print(f"  Created: {args.zip} ({added} files, {os.path.getsize(args.zip) / 1024 / 1024:.1f} MB)")
     
     # Update pending_activities.csv
     if not args.no_pending and downloaded:
