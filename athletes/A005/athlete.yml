@@ -34,7 +34,7 @@ planned_races:
   - name: "2 sjoar runt"
     date: "2026-03-15"
     distance_km: 16.2
-    priority: B
+    priority: C
     surface: road
 
 power:
