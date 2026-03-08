@@ -1,0 +1,154 @@
+RUNNING PROFILE 
+======================================== 
+Name: Paul Stryd 
+Email: paul.collyer@sigames.com 
+DOB: 1969-05-27 
+Gender: male 
+Weight: 76 kg 
+Timezone: Europe/Stockholm 
+Power meter: Stryd 
+Max HR: 194 
+LTHR: 178 
+HR ZONES (customised) 
+------------------------------ 
+  Z1: < 140 
+  Z2: 140 – 155 
+  Z3: 155 – 169 
+  Z4: 169 – 178 
+  Z5: > 178 
+intervals.icu ID: i224884 
+intervals.icu API Key: tgbv1rdzgciobj8meem47cml 
+RACE TIMES (official chip times) 
+------------------------------ 
+  1.609km  5:17  (317s) 
+  3.0km  11:21  (681s) 
+  5.0km  17:53  (1073s) 
+  10.0km  37:22  (2242s) 
+  42.195km  3:11:15  (11475s) 
+  21.097km  1:22:28  (4948s) 
+  1.5km  5:00  (300s) 
+UPCOMING RACES 
+------------------------------ 
+  2026-04-25  21.097km  "Premiärhalvan"  Priority: A 
+  2026-03-14  5.0km  "Haga parkrun"  Priority: C 
+
+======================================== 
+ATHLETE.YML SNIPPET 
+======================================== 
+athlete: 
+  name: "Paul Stryd" 
+  athlete_id: "A___" 
+  mass_kg: 76 
+  date_of_birth: "1969-05-27" 
+  gender: "male" 
+  timezone: "Europe/Stockholm" 
+  power_mode: "stryd" 
+  max_hr: 194 
+  lthr: 178 
+zones: 
+  hr_zones: [140, 155, 169, 178] 
+data: 
+  source: "intervals" 
+  intervals: 
+    athlete_id: "i224884" 
+    api_key: "tgbv1rdzgciobj8meem47cml" 
+planned_races: 
+  - name: "Premiärhalvan" 
+    date: "2026-04-25" 
+    distance_km: 21.097 
+    priority: A 
+    surface: road 
+  - name: "Haga parkrun" 
+    date: "2026-03-14" 
+    distance_km: 5.0 
+    priority: C 
+    surface: road 
+
+======================================== 
+ACTIVITY OVERRIDE ROWS (for official_time_s) 
+======================================== 
+file    race_flag       parkrun official_distance_km    surface surface_adj     temp_override   power_override_w        official_time_s notes
+[match 1.609km] 1       0       1.609                                   317     PB: 5:17 for Mile 
+[match 3.0km]   1       0       3.0                                     681     PB: 11:21 for 3K 
+[match 5.0km]   1       0       5.0                                     1073    PB: 17:53 for 5K 
+[match 10.0km]  1       0       10.0                                    2242    PB: 37:22 for 10K 
+[match 42.195km]        1       0       42.195                                  11475   PB: 3:11:15 for Marathon 
+[match 21.097km]        1       0       21.097                                  4948    PB: 1:22:28 for HM 
+[match 1.5km]   1       0       1.5                                     300     PB: 5:00 for 1.5km 
+Submitted: 2026-03-08T12:25:27.014Z 
+--- CONFIG JSON START --- 
+{ 
+  "name": "Paul Stryd", 
+  "email": "paul.collyer@sigames.com", 
+  "dob": "1969-05-27", 
+  "gender": "male", 
+  "mass_kg": 76, 
+  "timezone": "Europe/Stockholm", 
+  "power_mode": "stryd", 
+  "max_hr": 194, 
+  "lthr": 178, 
+  "data_source": "intervals", 
+  "intervals_id": "i224884", 
+  "intervals_key": "tgbv1rdzgciobj8meem47cml", 
+  "hr_zones": { 
+    "z12": 140, 
+    "z23": 155, 
+    "z34": 169, 
+    "z45": 178 
+  }, 
+  "planned_races": [ 
+    { 
+      "name": "Premiärhalvan", 
+      "date": "2026-04-25", 
+      "distance_km": 21.097, 
+      "priority": "A", 
+      "surface": "road" 
+    }, 
+    { 
+      "name": "Haga parkrun", 
+      "date": "2026-03-14", 
+      "distance_km": 5, 
+      "priority": "C", 
+      "surface": "road" 
+    } 
+  ], 
+  "race_times": [ 
+    { 
+      "date": null, 
+      "distance_km": 1.609, 
+      "time_s": 317 
+    }, 
+    { 
+      "date": null, 
+      "distance_km": 3, 
+      "time_s": 681 
+    }, 
+    { 
+      "date": null, 
+      "distance_km": 5, 
+      "time_s": 1073 
+    }, 
+    { 
+      "date": null, 
+      "distance_km": 10, 
+      "time_s": 2242 
+    }, 
+    { 
+      "date": null, 
+      "distance_km": 42.195, 
+      "time_s": 11475 
+    }, 
+    { 
+      "date": null, 
+      "distance_km": 21.097, 
+      "time_s": 4948 
+    }, 
+    { 
+      "date": null, 
+      "distance_km": 1.5, 
+      "time_s": 300 
+    } 
+  ] 
+} 
+--- CONFIG JSON END --- 
+
