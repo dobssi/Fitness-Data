@@ -3131,23 +3131,10 @@ def _generate_zone_html(zone_data, stats=None):
         _surface_labels = {'indoor_track': '🏟️ Indoor', 'track': '🏟️ Track', 'road': '🛣️ Road', 'trail': '🌲 Trail', 'undulating_trail': '⛰️ Trail'}
         s_label = _surface_labels.get(surface, '')
         
-        # Projected arrival CTL/TSB from Daily sheet (includes planned sessions)
+        # Projected arrival CTL/TSB — computed after race week plan so we can use its values
+        # For races with a race week plan (≤7d, A/B priority), use the plan's projection
+        # For other races, fall back to zero-TSS decay from daily lookup
         _arrival_html = ''
-        if days_to > 0 and _daily_lookup:
-            # Race morning = previous day's values decayed one step
-            import math as _arr_math
-            _arr_alpha_c = 1 - _arr_math.exp(-1.0 / 42)
-            _arr_alpha_a = 1 - _arr_math.exp(-1.0 / 7)
-            _prev_date_str = (_race_dt - timedelta(days=1)).strftime('%Y-%m-%d')
-            _prev_daily = _daily_lookup.get(_prev_date_str)
-            if _prev_daily and all(pd.notna(v) for v in [_prev_daily['ctl'], _prev_daily['atl']]):
-                _arr_ctl = _prev_daily['ctl'] * (1 - _arr_alpha_c)
-                _arr_atl = _prev_daily['atl'] * (1 - _arr_alpha_a)
-                _arr_tsb = _arr_ctl - _arr_atl
-                _arr_pct = (_arr_tsb / _arr_ctl * 100) if _arr_ctl > 0 else 0
-                _tsb_sign = '+' if _arr_tsb >= 0 else ''
-                _tsb_color = '#4ade80' if _arr_tsb >= 0 else '#fbbf24'
-                _arrival_html = f'<div style="margin-top:4px;font-size:0.72rem;color:var(--text-dim)">📊 Projected arrival: CTL <b style="color:var(--accent)">{_arr_ctl:.0f}</b> · TSB <b style="color:{_tsb_color}">{_tsb_sign}{_arr_tsb:.0f}</b> ({_tsb_sign}{_arr_pct:.0f}% of CTL)</div>'
         
         # Build training specificity HTML (HM+ races only)
         # Build training specificity HTML (HM+ races only)
@@ -3209,6 +3196,12 @@ def _generate_zone_html(zone_data, stats=None):
         _rwp_html = ''
         if priority in ('A', 'B') and 0 < days_to <= 7:
             _rwp_dist_cat = 'Mara' if dist_km >= 35 else ('HM' if dist_km > 12 else ('10K' if dist_km > 5.5 else '5K'))
+            _rwp_taper_label = _rwp_dist_cat
+            # For bespoke distances, show actual distance in label
+            _bespoke_check = {5.0: 0.3, 10.0: 0.3, 21.097: 0.5, 42.195: 1.5}
+            _is_std_taper = any(abs(dist_km - sd) <= tol for sd, tol in _bespoke_check.items())
+            if not _is_std_taper:
+                _rwp_taper_label = f'{dist_km:.1f}km'
             _rwp_ctl0 = zone_data.get('current_ctl', 0)
             _rwp_atl0 = zone_data.get('current_atl', 0)
             _rwp_recent = {r['date']: r for r in zone_data.get('recent_tss', [])}
@@ -3247,7 +3240,7 @@ def _generate_zone_html(zone_data, stats=None):
             _DOW = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
             _MON = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
             
-            _rwp_html = f'<div class="rwp"><div class="rwp-label">📋 Race Week Plan · {_rwp_dist_cat} taper</div>'
+            _rwp_html = f'<div class="rwp"><div class="rwp-label">📋 Race Week Plan · {_rwp_taper_label} taper</div>'
             _rwp_html += '<div class="dh"><span>Day</span><span>Session</span><span style="text-align:right">TSS</span><span style="text-align:right">CTL</span><span style="text-align:right">ATL</span><span style="text-align:right">TSB</span></div>'
             
             for _dd in _rwp_results:
@@ -3265,6 +3258,24 @@ def _generate_zone_html(zone_data, stats=None):
             _rwp_html += f'<div class="tsb-v {_v_cls}">{_v_txt}</div>'
             _rwp_html += f'<div class="tsb-cw"><canvas id="tsbChart_{race_idx}"></canvas></div>'
             _rwp_html += '</div>'
+            # Use race week plan's projection for arrival
+            _arrival_html = f'<div style="margin-top:4px;font-size:0.72rem;color:var(--text-dim)">📊 Projected arrival: CTL <b style="color:var(--accent)">{_rwp_race_ctl:.0f}</b> · TSB <b style="color:{"#4ade80" if _rwp_race_tsb >= 0 else "#fbbf24"}">{"+" if _rwp_race_tsb >= 0 else ""}{_rwp_race_tsb:.0f}</b> ({"+" if _race_pct >= 0 else ""}{_race_pct:.0f}% of CTL)</div>'
+        
+        # Fallback arrival for races without a race week plan
+        if not _arrival_html and days_to > 0 and _daily_lookup:
+            import math as _arr_math
+            _arr_alpha_c = 1 - _arr_math.exp(-1.0 / 42)
+            _arr_alpha_a = 1 - _arr_math.exp(-1.0 / 7)
+            _prev_date_str = (_race_dt - timedelta(days=1)).strftime('%Y-%m-%d')
+            _prev_daily = _daily_lookup.get(_prev_date_str)
+            if _prev_daily and all(pd.notna(v) for v in [_prev_daily['ctl'], _prev_daily['atl']]):
+                _arr_ctl = _prev_daily['ctl'] * (1 - _arr_alpha_c)
+                _arr_atl = _prev_daily['atl'] * (1 - _arr_alpha_a)
+                _arr_tsb = _arr_ctl - _arr_atl
+                _arr_pct = (_arr_tsb / _arr_ctl * 100) if _arr_ctl > 0 else 0
+                _tsb_sign = '+' if _arr_tsb >= 0 else ''
+                _tsb_color = '#4ade80' if _arr_tsb >= 0 else '#fbbf24'
+                _arrival_html = f'<div style="margin-top:4px;font-size:0.72rem;color:var(--text-dim)">📊 Projected arrival: CTL <b style="color:var(--accent)">{_arr_ctl:.0f}</b> · TSB <b style="color:{_tsb_color}">{_tsb_sign}{_arr_tsb:.0f}</b> ({_tsb_sign}{_arr_pct:.0f}% of CTL)</div>'
         
         race_cards += _rwp_html + '</div>'''
     
