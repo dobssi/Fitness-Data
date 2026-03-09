@@ -129,6 +129,13 @@ POWER_SCORE_FACTOR_BOOST = 0.5          # Factor multiplier for high Power Score
 POWER_SCORE_AIR_THRESHOLD = 0.04        # Air power as fraction of total above which diminishing returns apply (4%)
 POWER_SCORE_AIR_EXCESS_FACTOR = 0.5     # Fraction of excess air power retained above threshold (50% = cut in half)
 
+# v54: Stryd/GAP divergence detection — substitute GAP RF when Stryd power is implausible
+# Gate: RE is anomalously low (Stryd power too high for speed) AND Stryd/GAP ratio exceeds EMA
+# This catches both hardware glitches and terrain-inflated power where GAP gives a better fitness signal
+STRYD_GAP_RE_Z_THRESHOLD = -2.0        # RE z-score below which Stryd power is suspect
+STRYD_GAP_RATIO_EMA_SPAN = 30          # EMA span for tracking the Stryd/GAP RF ratio
+STRYD_GAP_EXCESS_THRESHOLD = 0.02      # Minimum Stryd/GAP ratio excess above EMA to trigger substitution (2%)
+
 # =============================================================================
 # CTL/ATL PARAMETERS  
 # =============================================================================

@@ -304,6 +304,7 @@ HR_CV_THRESHOLD = 12.0  # If power:HR ratio CV > this %, mark HR as unreliable a
 from config import (PEAK_CP_WATTS, POWER_SCORE_RIEGEL_K, POWER_SCORE_REFERENCE_DIST_KM,
                     POWER_SCORE_RF_DIVISOR, POWER_SCORE_FACTOR_BOOST,
                     POWER_SCORE_AIR_THRESHOLD, POWER_SCORE_AIR_EXCESS_FACTOR,
+                    STRYD_GAP_RE_Z_THRESHOLD, STRYD_GAP_RATIO_EMA_SPAN, STRYD_GAP_EXCESS_THRESHOLD,
                     CTL_TIME_CONSTANT, ATL_TIME_CONSTANT, CTL_ALPHA, ATL_ALPHA,
                     RF_TREND_WINDOW,
                     RF_WINDOW_DURATION_S,
@@ -4671,6 +4672,14 @@ def main() -> int:
     prev_run_date = None  # v44.3: Track previous run date for gap calculation
     peak_rf_trend = 0.0   # Running max of RF_Trend (for intensity_adj RFL conversion)
     
+    # v54: Stryd/GAP divergence tracking
+    # Track rolling EMA of Stryd/GAP RF ratio and rolling RE stats
+    sg_ratio_ema = np.nan  # Will be initialised from first valid run
+    sg_ratio_alpha = 2.0 / (STRYD_GAP_RATIO_EMA_SPAN + 1)  # EMA decay factor
+    re_values = []  # Rolling window of RE values for z-score calculation
+    RE_WINDOW = 30  # Number of runs for rolling RE stats
+    stryd_gap_sub_count = 0  # Count substitutions for logging
+    
     # v44.5: Power Score parameters for RF_adj floor and Factor boost
     ps_riegel_k = POWER_SCORE_RIEGEL_K
     ps_reference_dist_km = POWER_SCORE_REFERENCE_DIST_KM
@@ -4772,6 +4781,55 @@ def main() -> int:
                 capped_air_pct = POWER_SCORE_AIR_THRESHOLD + excess_air_pct * POWER_SCORE_AIR_EXCESS_FACTOR
                 rf_air_factor = 1.0 - (air_pct - capped_air_pct)  # e.g., 1.0 - 0.014 = 0.986
                 rf_raw = rf_raw * rf_air_factor
+
+        # v54: Stryd/GAP divergence check — substitute GAP RF when Stryd power is implausible
+        # Gate 1: RE is anomalously low (z < threshold) → Stryd power too high for speed
+        # Gate 2: Stryd/GAP ratio exceeds its EMA → not explained by stable Stryd-vs-GAP offset
+        # Gate 3: Run is flat with low air power → RE can't be explained by terrain or wind
+        # When all gates fire: use GAP RF scaled to Stryd units via the EMA ratio
+        rf_gap_raw = pd.to_numeric(row.get('RF_gap_median', np.nan), errors='coerce')
+        run_re = pd.to_numeric(row.get('rf_window_RE', np.nan), errors='coerce')
+        run_undulation = pd.to_numeric(row.get('rf_window_undulation_score', 0), errors='coerce')
+        run_grade_std = pd.to_numeric(row.get('rf_window_grade_std_pct', 0), errors='coerce')
+        if pd.isna(run_undulation): run_undulation = 0.0
+        if pd.isna(run_grade_std): run_grade_std = 0.0
+        run_air = avg_air_power if pd.notna(avg_air_power) else 0.0
+        
+        # Update rolling RE stats (for z-score)
+        if pd.notna(run_re) and run_re > 0.5:
+            re_values.append(run_re)
+            if len(re_values) > RE_WINDOW:
+                re_values.pop(0)
+        
+        # Update Stryd/GAP ratio EMA
+        if pd.notna(rf_raw) and rf_raw > 0 and pd.notna(rf_gap_raw) and rf_gap_raw > 0:
+            sg_ratio = rf_raw / rf_gap_raw
+            sg_substituted = False
+            
+            # Check gates before updating EMA
+            if len(re_values) >= 10 and pd.notna(run_re) and run_re > 0.5 and not np.isnan(sg_ratio_ema):
+                re_arr = np.array(re_values[:-1])  # Exclude current run from stats
+                if len(re_arr) >= 10:
+                    re_mean = np.mean(re_arr)
+                    re_std = np.std(re_arr, ddof=1)
+                    if re_std > 0.001:
+                        re_z = (run_re - re_mean) / re_std
+                        sg_excess = sg_ratio / sg_ratio_ema - 1.0
+                        
+                        if (re_z < STRYD_GAP_RE_Z_THRESHOLD and 
+                                sg_excess > STRYD_GAP_EXCESS_THRESHOLD and
+                                run_undulation < 5.0 and run_grade_std < 4.0 and run_air < 15.0):
+                            # Substitute: use GAP RF scaled to Stryd units
+                            rf_raw = rf_gap_raw * sg_ratio_ema
+                            sg_substituted = True
+                            stryd_gap_sub_count += 1
+            
+            # Update EMA — skip when substitution fired (don't let bogus ratio corrupt baseline)
+            if not sg_substituted:
+                if np.isnan(sg_ratio_ema):
+                    sg_ratio_ema = sg_ratio  # Initialise
+                else:
+                    sg_ratio_ema = sg_ratio_alpha * sg_ratio + (1 - sg_ratio_alpha) * sg_ratio_ema
 
         if pd.notna(rf_raw) and rf_raw > 0 and np.isfinite(total_adj):
             # Get previous RF_Trend (from row i-1) for intensity calculation
@@ -4939,6 +4997,9 @@ def main() -> int:
                         dfm.at[i, 'RF_Trend'] = rf_trend_val
                         if np.isfinite(rf_trend_val) and rf_trend_val > peak_rf_trend:
                             peak_rf_trend = rf_trend_val
+    
+    if stryd_gap_sub_count > 0:
+        print(f"  v54: Substituted GAP RF for Stryd RF on {stryd_gap_sub_count} runs (RE outlier + S/G divergence)")
     
     # --- Phase 2: GAP RF_adj and RF_gap_Trend (parallel to Stryd RF) ---
     # Uses same Factor weights but with GAP-based RF, no era adjustment
