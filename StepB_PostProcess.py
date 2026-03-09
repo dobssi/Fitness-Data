@@ -4889,8 +4889,10 @@ def main() -> int:
             
             # v44.5: Apply Power Score floor - RF_adj can't be lower than Power_Score / 180
             # This ensures great race performances are reflected even if RF was suppressed
+            # v54: Skip PS floor when Stryd/GAP substitution was applied — the Power Score
+            # is computed from bogus Stryd power and would override the corrected RF
             ps_floor_applied = False
-            if pd.notna(power_score) and power_score > 0:
+            if pd.notna(power_score) and power_score > 0 and not sg_substituted:
                 rf_floor = power_score / ps_rf_divisor
                 if rf_adj < rf_floor:
                     rf_adj = rf_floor
