@@ -263,7 +263,14 @@ jobs:
             --pending-activities ${{ env.ATHLETE_DIR }}/pending_activities.csv \
             --override-file ${{ env.ATHLETE_DIR }}/activity_overrides.xlsx \
             --tz ${{ env.TZ_LOCAL }} \
-            --weight 75
+            --weight 75 \
+          || EXIT_CODE=$?
+          # Exit code 2 = "success but nothing new" — continue pipeline
+          if [ "${EXIT_CODE:-0}" -eq 2 ]; then
+            echo "No new runs — continuing to StepB"
+          elif [ "${EXIT_CODE:-0}" -ne 0 ]; then
+            exit $EXIT_CODE
+          fi
 
       - name: Add GAP power
         if: ${{ steps.gate.outputs.continue == 'true' && (env.PIPELINE_MODE == 'FULL' || env.PIPELINE_MODE == 'INITIAL' || env.PIPELINE_MODE == 'UPDATE') }}
