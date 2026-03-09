@@ -446,7 +446,10 @@ def generate_athlete_yml(cfg: dict) -> str:
     stryd_fallback_comment = ""
     if cfg.get("_stryd_declared") and mode == "gap":
         stryd_fallback_comment = "  # NOTE: User has Stryd but insufficient power data in export (<10 runs).\n  # Change mode to 'stryd' when you have 10+ runs with Stryd power data.\n"
-    peak_cp = cfg.get("peak_cp_watts", 300)
+    # Seed PEAK_CP from weight: 4.85 W/kg is a reasonable club runner baseline.
+    # StepB will bootstrap the real value from race data and write it back.
+    weight_based_seed = round(4.85 * cfg['mass_kg'])
+    peak_cp = cfg.get("peak_cp_watts", weight_based_seed)
     
     # Intervals section
     intervals_section = ""
@@ -502,6 +505,7 @@ power:
     re_reference_era: "s4"
 
   gap:
+    peak_cp_watts: {peak_cp}  # Auto-updated by StepB bootstrap
     re_constant: {cfg.get('re_constant', 0.92)}
 
 data:

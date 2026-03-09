@@ -5225,28 +5225,28 @@ def main() -> int:
         # v44.5: Use RFL_Trend (Power Score now affects RF_adj directly)
         latest_rfl = dfm['RFL_Trend'].iloc[-1] if 'RFL_Trend' in dfm.columns else np.nan
         
-        # v52: For auto-detected eras (or when PEAK_CP is default 300W placeholder),
-        # bootstrap PEAK_CP from race data instead of using config value.
+        # v52/v53: Bootstrap PEAK_CP from race data.
+        # Always run bootstrap — the result is written back to athlete.yml
+        # so the Factor calculation uses an accurate value on the next run.
         _effective_peak_cp = PEAK_CP_WATTS
-        if _use_detected_eras or PEAK_CP_WATTS <= 300:
-            mass_kg = args.mass_kg
-            stryd_peak_speed, stryd_peak_cp, stryd_n_races, stryd_method = bootstrap_peak_speed(
-                dfm, rfl_col='RFL_Trend', mass_kg=mass_kg,
-                re_generic=GAP_RE_CONSTANT,
-                lthr=RF_CONSTANTS['lthr'],
-                max_hr=RF_CONSTANTS['max_hr'],
-                exclude_parkruns=True
-            )
-            if stryd_peak_cp is not None:
-                _effective_peak_cp = stryd_peak_cp
-                detail = {
-                    'race': f'from {stryd_n_races} flagged races',
-                    'auto': f'from {stryd_n_races} auto-detected races, p75',
-                    'training': 'estimated from training × 0.97'
-                }.get(stryd_method, '')
-                print(f"  Stryd PEAK_CP bootstrap ({stryd_method}): {_effective_peak_cp:.0f}W ({detail})")
-            else:
-                print(f"  Stryd PEAK_CP bootstrap: no data, using config value {PEAK_CP_WATTS}W")
+        mass_kg = args.mass_kg
+        stryd_peak_speed, stryd_peak_cp, stryd_n_races, stryd_method = bootstrap_peak_speed(
+            dfm, rfl_col='RFL_Trend', mass_kg=mass_kg,
+            re_generic=GAP_RE_CONSTANT,
+            lthr=RF_CONSTANTS['lthr'],
+            max_hr=RF_CONSTANTS['max_hr'],
+            exclude_parkruns=True
+        )
+        if stryd_peak_cp is not None:
+            _effective_peak_cp = stryd_peak_cp
+            detail = {
+                'race': f'from {stryd_n_races} flagged races',
+                'auto': f'from {stryd_n_races} auto-detected races, p75',
+                'training': 'estimated from training × 0.97'
+            }.get(stryd_method, '')
+            print(f"  Stryd PEAK_CP bootstrap ({stryd_method}): {_effective_peak_cp:.0f}W ({detail})")
+        else:
+            print(f"  Stryd PEAK_CP bootstrap: no data, using config value {PEAK_CP_WATTS}W")
         
         # CP = RFL_Trend * peak_CP
         if pd.notna(latest_rfl) and latest_rfl > 0:
@@ -5477,6 +5477,61 @@ def main() -> int:
             print(f"  → Use pb_corrections.html to submit official chip times for these races\n")
     else:
         print("  Age grade calculations skipped (module not available)")
+    
+    # ── Write bootstrapped PEAK_CP back to athlete.yml ──
+    # The bootstrap derives PEAK_CP from race data each run. Writing it back
+    # ensures the Factor calculation (which runs BEFORE bootstrap) uses a
+    # good value on the next run, making the system self-correcting.
+    # Uses regex replacement to preserve YAML comments and formatting.
+    _yaml_path = os.getenv("ATHLETE_CONFIG_PATH", "athlete.yml")
+    if os.path.exists(_yaml_path):
+        try:
+            import re as _re
+            with open(_yaml_path, 'r') as f:
+                _yml_text = f.read()
+            
+            _yml_changed = False
+            
+            # Write Stryd PEAK_CP if bootstrapped
+            if '_effective_peak_cp' in dir() and _effective_peak_cp is not None and np.isfinite(_effective_peak_cp):
+                _new_val = round(_effective_peak_cp)
+                if _new_val > 0:
+                    _pattern = r'(stryd:\s*\n(?:.*\n)*?\s*peak_cp_watts:\s*)(\d+)'
+                    _match = _re.search(_pattern, _yml_text)
+                    if _match and int(_match.group(2)) != _new_val:
+                        _old_val = int(_match.group(2))
+                        _yml_text = _yml_text[:_match.start(2)] + str(_new_val) + _yml_text[_match.end(2):]
+                        _yml_changed = True
+                        print(f"  PEAK_CP write-back (stryd): {_old_val} → {_new_val}W")
+            
+            # Write GAP PEAK_CP if bootstrapped
+            if 'gap_peak_cp' in dir() and gap_peak_cp is not None and np.isfinite(gap_peak_cp):
+                _new_val = round(gap_peak_cp)
+                if _new_val > 0:
+                    _pattern = r'(gap:\s*\n(?:.*\n)*?\s*peak_cp_watts:\s*)(\d+)'
+                    _match = _re.search(_pattern, _yml_text)
+                    if _match and int(_match.group(2)) != _new_val:
+                        _old_val = int(_match.group(2))
+                        _yml_text = _yml_text[:_match.start(2)] + str(_new_val) + _yml_text[_match.end(2):]
+                        _yml_changed = True
+                        print(f"  PEAK_CP write-back (gap): {_old_val} → {_new_val}W")
+                    elif not _match:
+                        # GAP section exists but has no peak_cp_watts — insert it
+                        _gap_match = _re.search(r'(gap:\s*\n\s*)(re_constant:)', _yml_text)
+                        if _gap_match:
+                            _insert = f"peak_cp_watts: {_new_val}  # Auto-updated by StepB bootstrap\n    "
+                            _yml_text = _yml_text[:_gap_match.start(2)] + _insert + _yml_text[_gap_match.start(2):]
+                            _yml_changed = True
+                            print(f"  PEAK_CP write-back (gap): added {_new_val}W")
+            
+            if _yml_changed:
+                with open(_yaml_path, 'w') as f:
+                    f.write(_yml_text)
+                print(f"  Updated {_yaml_path}")
+            else:
+                print(f"  PEAK_CP unchanged, no write-back needed")
+        except Exception as e:
+            print(f"  Warning: PEAK_CP write-back failed: {e}")
     
     # Round v43 columns
     for c in ("Temp_Adj", "Terrain_Adj", "Elevation_Adj", "Era_Adj", "Total_Adj", "Intensity_Adj", "Duration_Adj"):
