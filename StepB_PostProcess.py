@@ -5411,9 +5411,21 @@ def main() -> int:
         
         age_grade_count = 0
         for i, row in dfm.iterrows():
-            # Skip if no time data
+            # Determine race time: prefer official_time_s (chip time override),
+            # then elapsed_time_s (gun-to-finish), then moving_time_s (fallback).
+            # Moving time strips GPS dropout pauses which distorts marathon times
+            # in urban canyons (e.g. Tokyo 2:47 elapsed → 2:01 moving = 110% AG).
+            official_time = row.get('official_time_s')
+            elapsed_s = row.get('elapsed_time_s')
             moving_s = row.get('moving_time_s')
-            if pd.isna(moving_s) or moving_s <= 0:
+            
+            if pd.notna(official_time) and official_time > 0:
+                race_time_s = official_time
+            elif pd.notna(elapsed_s) and elapsed_s > 0:
+                race_time_s = elapsed_s
+            elif pd.notna(moving_s) and moving_s > 0:
+                race_time_s = moving_s
+            else:
                 continue
             
             # Determine if this is a race or parkrun
@@ -5449,7 +5461,7 @@ def main() -> int:
             else:
                 age_at_race = runner_age_default
             
-            ag = calc_age_grade(moving_s, dist_km, age_at_race, runner_gender, surface_type)
+            ag = calc_age_grade(race_time_s, dist_km, age_at_race, runner_gender, surface_type)
             if ag:
                 dfm.at[i, 'age_grade_pct'] = round(ag, 2)
                 age_grade_count += 1
