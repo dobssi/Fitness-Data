@@ -4762,6 +4762,17 @@ def main() -> int:
                 sim_power_score = sim_avg_power * distance_factor * ps_temp_adj
                 dfm.at[i, 'PS_sim'] = sim_power_score
         
+        # v54: Apply air power cap to RF (same diminishing returns as Power Score)
+        # RF = power/HR, so if air power inflates total power, it inflates RF.
+        # Reduce rf_raw proportionally: rf_capped = rf_raw * (capped_power / raw_power)
+        if pd.notna(rf_raw) and rf_raw > 0 and pd.notna(avg_air_power) and avg_air_power > 0 and pd.notna(avg_power) and avg_power > 0:
+            air_pct = avg_air_power / avg_power
+            if air_pct > POWER_SCORE_AIR_THRESHOLD:
+                excess_air_pct = air_pct - POWER_SCORE_AIR_THRESHOLD
+                capped_air_pct = POWER_SCORE_AIR_THRESHOLD + excess_air_pct * POWER_SCORE_AIR_EXCESS_FACTOR
+                rf_air_factor = 1.0 - (air_pct - capped_air_pct)  # e.g., 1.0 - 0.014 = 0.986
+                rf_raw = rf_raw * rf_air_factor
+
         if pd.notna(rf_raw) and rf_raw > 0 and np.isfinite(total_adj):
             # Get previous RF_Trend (from row i-1) for intensity calculation
             prev_rf_trend = dfm.at[i-1, 'RF_Trend'] if i > 0 else np.nan
