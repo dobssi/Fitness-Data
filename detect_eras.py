@@ -504,8 +504,10 @@ def assign_detected_eras(df: pd.DataFrame, result: EraDetectionResult,
             anchor_era = result.eras[-1]  # fallback: last era
         anchor_mean = anchor_era.mean_ratio
 
-        # Compute sim RF / GAP RF ratio from the dataframe
-        sim_rf = pd.to_numeric(df.loc[is_sim, 'RF_adjusted_median_W_per_bpm'], errors='coerce')
+        # Compute sim nPower_HR / GAP RF ratio from the dataframe
+        # Must use nPower_HR (not RF_adjusted_median) to match the column used
+        # for Stryd era ratio computation — mixing columns gives wrong adjuster
+        sim_rf = pd.to_numeric(df.loc[is_sim, 'nPower_HR'], errors='coerce')
         sim_gap = pd.to_numeric(df.loc[is_sim, 'RF_gap_median'], errors='coerce')
         valid_sim = sim_rf.notna() & sim_gap.notna() & (sim_gap > 0)
         if valid_sim.sum() >= 10:
