@@ -3751,6 +3751,9 @@ def main() -> int:
         "RFL_Trend",
         "Power_Score",       # v44.5: Riegel-normalised power output (sets RF floor, boosts Factor)
         "PS_Floor_Applied",  # v44.5: True if Power Score floor was applied to RF_adj
+        "rf_stryd_gap_sub",  # v54: True when GAP RF was substituted for Stryd RF
+        "rf_stryd_gap_re_z",  # v54: terrain-corrected RE z-score when substituted
+        "rf_stryd_gap_sg_excess",  # v54: Stryd/GAP ratio excess when substituted
         "TSS",
         "CTL",
         "ATL",
@@ -4665,6 +4668,9 @@ def main() -> int:
     dfm['Power_Score'] = np.nan  # v44.5: Power Score for each run
     dfm['PS_Floor_Applied'] = False  # v44.5: Track when Power Score floor was used
     dfm['PS_sim'] = np.nan  # Phase 2: SIM Power Score
+    dfm['rf_stryd_gap_sub'] = False  # v54: True when GAP RF was substituted for Stryd RF
+    dfm['rf_stryd_gap_re_z'] = np.nan  # v54: terrain-corrected RE z-score when substituted
+    dfm['rf_stryd_gap_sg_excess'] = np.nan  # v54: Stryd/GAP ratio excess above EMA when substituted
     
     days_back = RF_CONSTANTS['days_back']
     max_jump_pct = RF_CONSTANTS['rf_max_jump_pct']
@@ -4783,21 +4789,29 @@ def main() -> int:
                 rf_raw = rf_raw * rf_air_factor
 
         # v54: Stryd/GAP divergence check — substitute GAP RF when Stryd power is implausible
-        # Gate 1: RE is anomalously low (z < threshold) → Stryd power too high for speed
-        # Gate 2: Stryd/GAP ratio exceeds its EMA → not explained by stable Stryd-vs-GAP offset
-        # Gate 3: Run is flat with low air power → RE can't be explained by terrain or wind
-        # When all gates fire: use GAP RF scaled to Stryd units via the EMA ratio
+        # Gate 1: Terrain-corrected RE is anomalously low → Stryd power too high for speed
+        #         RE is corrected for undulation, grade_std, and air power so hilly runs
+        #         aren't penalised. Only fires when RE is lower than terrain can explain.
+        # Gate 2: Stryd/GAP ratio exceeds its EMA → not a stable Stryd-vs-GAP offset
+        # When both gates fire: use GAP RF scaled to Stryd units via the EMA ratio
         rf_gap_raw = pd.to_numeric(row.get('RF_gap_median', np.nan), errors='coerce')
         run_re = pd.to_numeric(row.get('rf_window_RE', np.nan), errors='coerce')
         run_undulation = pd.to_numeric(row.get('rf_window_undulation_score', 0), errors='coerce')
         run_grade_std = pd.to_numeric(row.get('rf_window_grade_std_pct', 0), errors='coerce')
         if pd.isna(run_undulation): run_undulation = 0.0
         if pd.isna(run_grade_std): run_grade_std = 0.0
-        run_air = avg_air_power if pd.notna(avg_air_power) else 0.0
+        run_air_wkg = pd.to_numeric(row.get('avg_air_power_wkg', 0), errors='coerce')
+        if pd.isna(run_air_wkg): run_air_wkg = 0.0
         
-        # Update rolling RE stats (for z-score)
+        # Terrain-corrected RE: add back the expected RE reduction from terrain
+        # Coefficients from regression on full dataset (RE ~ undulation + grade_std + air_wkg)
+        re_corrected = np.nan
         if pd.notna(run_re) and run_re > 0.5:
-            re_values.append(run_re)
+            re_corrected = run_re + 0.00078 * run_undulation + 0.00284 * run_grade_std + 0.122 * run_air_wkg
+        
+        # Update rolling terrain-corrected RE stats (for z-score)
+        if pd.notna(re_corrected):
+            re_values.append(re_corrected)
             if len(re_values) > RE_WINDOW:
                 re_values.pop(0)
         
@@ -4807,22 +4821,24 @@ def main() -> int:
             sg_substituted = False
             
             # Check gates before updating EMA
-            if len(re_values) >= 10 and pd.notna(run_re) and run_re > 0.5 and not np.isnan(sg_ratio_ema):
+            if len(re_values) >= 10 and pd.notna(re_corrected) and not np.isnan(sg_ratio_ema):
                 re_arr = np.array(re_values[:-1])  # Exclude current run from stats
                 if len(re_arr) >= 10:
                     re_mean = np.mean(re_arr)
                     re_std = np.std(re_arr, ddof=1)
                     if re_std > 0.001:
-                        re_z = (run_re - re_mean) / re_std
+                        re_z = (re_corrected - re_mean) / re_std
                         sg_excess = sg_ratio / sg_ratio_ema - 1.0
                         
                         if (re_z < STRYD_GAP_RE_Z_THRESHOLD and 
-                                sg_excess > STRYD_GAP_EXCESS_THRESHOLD and
-                                run_undulation < 5.0 and run_grade_std < 4.0 and run_air < 15.0):
+                                sg_excess > STRYD_GAP_EXCESS_THRESHOLD):
                             # Substitute: use GAP RF scaled to Stryd units
                             rf_raw = rf_gap_raw * sg_ratio_ema
                             sg_substituted = True
                             stryd_gap_sub_count += 1
+                            dfm.at[i, 'rf_stryd_gap_sub'] = True
+                            dfm.at[i, 'rf_stryd_gap_re_z'] = round(re_z, 2)
+                            dfm.at[i, 'rf_stryd_gap_sg_excess'] = round(sg_excess, 4)
             
             # Update EMA — skip when substitution fired (don't let bogus ratio corrupt baseline)
             if not sg_substituted:
