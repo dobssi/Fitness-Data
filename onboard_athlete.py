@@ -739,6 +739,7 @@ on:
             --dropbox-base "${{{{ env.DB_BASE }}}}" \\
             --local-prefix "${{{{ env.ATHLETE_DIR }}}}" \\
             --items data/activities.csv \\
+                    athlete.yml \\
                     activity_overrides.xlsx \\
                     athlete_data.csv \\
                     output/Master_FULL.xlsx \\
@@ -858,6 +859,7 @@ on:
             --dropbox-base "${{{{ env.DB_BASE }}}}" \\
             --local-prefix "${{{{ env.ATHLETE_DIR }}}}" \\
             --items activity_overrides.xlsx \\
+                    athlete.yml \\
                     athlete_data.csv \\
                     fit_sync_state.json \\
                     pending_activities.csv \\
@@ -971,6 +973,7 @@ on:
             --dropbox-base "${{{{ env.DB_BASE }}}}" \\
             --local-prefix "${{{{ env.ATHLETE_DIR }}}}" \\
             --items activity_overrides.xlsx \\
+                    athlete.yml \\
                     athlete_data.csv \\
                     output/Master_FULL.xlsx \\
                     output/Master_FULL_post.xlsx \\
