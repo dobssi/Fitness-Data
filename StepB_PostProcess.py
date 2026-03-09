@@ -4832,8 +4832,12 @@ def main() -> int:
                         
                         if (re_z < STRYD_GAP_RE_Z_THRESHOLD and 
                                 sg_excess > STRYD_GAP_EXCESS_THRESHOLD):
-                            # Substitute: use GAP RF scaled to Stryd units
-                            rf_raw = rf_gap_raw * sg_ratio_ema
+                            # Substitute: use GAP RF directly (no EMA scaling)
+                            # Scaling by sg_ratio_ema would inflate the substitution because
+                            # the EMA encodes a systematic Stryd>GAP offset that shouldn't
+                            # apply when Stryd data is bogus. Using raw GAP RF preserves
+                            # correct run-to-run ordering with neighbouring genuine runs.
+                            rf_raw = rf_gap_raw
                             sg_substituted = True
                             stryd_gap_sub_count += 1
                             dfm.at[i, 'rf_stryd_gap_sub'] = True
