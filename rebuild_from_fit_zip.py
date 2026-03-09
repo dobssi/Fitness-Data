@@ -2070,6 +2070,7 @@ def compute_gps_metrics(df: pd.DataFrame, outlier_speed_mps: float) -> tuple[flo
 
     seg_m = []
     seg_speed = []
+    seg_dt = []
     for i in range(1, len(lat)):
         d_m = haversine_m(lat[i - 1], lon[i - 1], lat[i], lon[i])
         dt = ts[i] - ts[i - 1]
@@ -2077,14 +2078,28 @@ def compute_gps_metrics(df: pd.DataFrame, outlier_speed_mps: float) -> tuple[flo
             continue
         seg_m.append(d_m)
         seg_speed.append(d_m / dt)
+        seg_dt.append(dt)
 
     if not seg_m:
         return (float("nan"), coverage, float("nan"), float("nan"), float("nan"))
 
     seg_m = np.asarray(seg_m, float)
     seg_speed = np.asarray(seg_speed, float)
+    seg_dt = np.asarray(seg_dt, float)
 
-    gps_distance_km = float(np.nansum(seg_m) / 1000.0)
+    # Clamp segments to max plausible running speed (8 m/s ≈ 2:05/km).
+    # GPS teleports produce segments at 50-400+ m/s; clamping them to
+    # 8 m/s × dt preserves the distance contribution of legitimate fast
+    # running while eliminating phantom distance from GPS jumps.
+    # The raw (unclamped) metrics are still reported for diagnostics.
+    MAX_RUNNING_SPEED_MPS = 8.0
+    seg_m_clamped = np.where(
+        seg_speed > MAX_RUNNING_SPEED_MPS,
+        MAX_RUNNING_SPEED_MPS * seg_dt,
+        seg_m
+    )
+
+    gps_distance_km = float(np.nansum(seg_m_clamped) / 1000.0)
     gps_max_seg_m = float(np.nanmax(seg_m)) if np.isfinite(seg_m).any() else float("nan")
     gps_p99_speed_mps = float(np.nanpercentile(seg_speed, 99)) if np.isfinite(seg_speed).any() else float("nan")
     gps_outlier_frac = float(np.mean(seg_speed > outlier_speed_mps)) if seg_speed.size else float("nan")
@@ -3489,9 +3504,9 @@ def main():
         except Exception as e:
             print("ERROR: Append mode write failed:", repr(e))
             raise
-        # v50: Return 2 to signal "success but nothing new" — run_pipeline.py
-        # uses this to skip Steps 2-4 in UPDATE mode.
-        return 2
+        # No new FITs, but master was re-written (Strava match, solar backfill etc.)
+        # Return 0 — downstream steps (add_gap_power, StepB) should still run.
+        return 0
 
     if args.cache_only:
         # Only write caches; no master build.
