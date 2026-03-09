@@ -460,6 +460,20 @@ def detect_candidates_from_master(master_df: pd.DataFrame, lthr: float,
                 race_type = label
                 break
 
+        # ── Parkrun name override ──
+        # If the name says "parkrun" but GPS distance fell outside tolerance
+        # (e.g. 5.7km from GPS wander, or 4.5km from cutting corners),
+        # force-match to 5.0km. This catches GPS-distorted parkruns that
+        # is_parkrun() rejected as "sandwiches" due to the >5.1km cutoff.
+        # Range 4.0–7.0km: below 4.0 is likely a different activity,
+        # above 7.0 is likely a genuine sandwich/longer run.
+        if not matched and name and re.search(r'parkrun|park run', name, re.I):
+            best_km = gps_km or strava_km or 0
+            if 4.0 <= best_km <= 7.0:
+                matched = True
+                official_dist = 5.0
+                race_type = '5K'
+
         if not matched:
             # ── Bespoke distance detection ──
             # Runs at non-standard distances with race-effort HR (>= 95% LTHR)
@@ -705,6 +719,13 @@ def enrich_and_classify(master_path: str, overrides_path: str,
             ov.at[i, 'parkrun'] = 1
             # race_flag already set by classify_run — don't override
             parkrun_count += 1
+        elif name and re.search(r'parkrun|park run', name, re.I):
+            # Name says parkrun but is_parkrun() rejected it (GPS distance
+            # outside tolerance). If official_distance is 5.0 (set by the
+            # parkrun name override in detect_candidates), still flag it.
+            if row.get('official_distance_km') == 5.0:
+                ov.at[i, 'parkrun'] = 1
+                parkrun_count += 1
     
     # ── Detect surface from activity name ──
     surface_count = 0
