@@ -1317,6 +1317,11 @@ def get_race_history_data(df, ctl_atl_lookup, zone_data=None):
     LR_THRESHOLD_S = 3600  # 60 min in seconds
     LR_THRESHOLD_MIN = 60
     
+    # Overnight decay for race-morning CTL/ATL (Banister exponential, zero TSS)
+    import math
+    _morning_decay_ctl = math.exp(-1/42)
+    _morning_decay_atl = math.exp(-1/7)
+    
     # ── NPZ cache index ──
     npz_dir = None
     _master_dir = os.path.dirname(os.path.abspath(MASTER_FILE))
@@ -1577,13 +1582,22 @@ def get_race_history_data(df, ctl_atl_lookup, zone_data=None):
         # TSS
         tss = int(round(row['TSS'])) if pd.notna(row.get('TSS')) else None
         
-        # Training state MORNING of race (previous day's end-of-day values)
+        # Training state MORNING of race: previous day's end-of-day CTL/ATL
+        # with one day of zero-TSS decay applied (overnight recovery)
         date_str = row['date'].strftime('%Y-%m-%d')
         prev_date = (row['date'] - pd.Timedelta(days=1)).strftime('%Y-%m-%d')
         day_data = ctl_atl_lookup.get(prev_date, ctl_atl_lookup.get(date_str, {}))
-        ctl = day_data.get('ctl')
-        atl = day_data.get('atl')
-        tsb = day_data.get('tsb')
+        _prev_ctl = day_data.get('ctl')
+        _prev_atl = day_data.get('atl')
+        if _prev_ctl is not None and _prev_atl is not None:
+            # Apply one day of exponential decay (Banister model, zero TSS)
+            ctl = round(_prev_ctl * _morning_decay_ctl, 1)
+            atl = round(_prev_atl * _morning_decay_atl, 1)
+            tsb = round(ctl - atl, 1)
+        else:
+            ctl = _prev_ctl
+            atl = _prev_atl
+            tsb = day_data.get('tsb')
         
         # RFL on race day
         rfl = round(row['RFL_Trend'] * 100, 1) if pd.notna(row.get('RFL_Trend')) else None
