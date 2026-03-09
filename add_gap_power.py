@@ -175,31 +175,46 @@ def add_gap_power_to_master(
         df['npower_w'] = np.nan
     if 'power_source' not in df.columns:
         df['power_source'] = ''
+    if 'avg_gap_pace_min_per_km' not in df.columns:
+        df['avg_gap_pace_min_per_km'] = np.nan
     
     # Process each run
     success_count = 0
+    gap_pace_count = 0
     for idx in df.index:
         row = df.loc[idx]
         
-        # Skip if already has Stryd power
-        if pd.notna(row.get('avg_power_w')):
+        has_power = pd.notna(row.get('avg_power_w'))
+        has_gap_pace = pd.notna(row.get('avg_gap_pace_min_per_km'))
+        
+        # Skip if already has both power and GAP pace
+        if has_power and has_gap_pace:
             continue
         
-        # Compute GAP power
+        # Compute GAP metrics from cache
         metrics = add_gap_power_to_run(row, cache_dir, mass_kg, re_constant)
         
         if metrics:
-            df.loc[idx, 'avg_power_w'] = metrics['avg_power_w']
-            df.loc[idx, 'npower_w'] = metrics['npower_w']
-            df.loc[idx, 'power_source'] = 'gap_simulated'
-            success_count += 1
+            # Only set power if not already present (preserve Stryd)
+            if not has_power:
+                df.loc[idx, 'avg_power_w'] = metrics['avg_power_w']
+                df.loc[idx, 'npower_w'] = metrics['npower_w']
+                df.loc[idx, 'power_source'] = 'gap_simulated'
+                success_count += 1
             
-            if verbose and success_count % 100 == 0:
-                print(f"  Added GAP power to {success_count} runs...")
+            # Always set GAP pace if available
+            gap_pace = metrics.get('avg_gap_pace_min_per_km')
+            if gap_pace is not None and not pd.isna(gap_pace):
+                df.loc[idx, 'avg_gap_pace_min_per_km'] = gap_pace
+                gap_pace_count += 1
+            
+            if verbose and (success_count + gap_pace_count) % 200 == 0:
+                print(f"  Processed {success_count} power + {gap_pace_count} GAP pace...")
     
     if verbose:
         print(f"\nGAP power summary:")
-        print(f"  Runs with GAP power: {success_count}")
+        print(f"  Runs with GAP power added: {success_count}")
+        print(f"  Runs with GAP pace added: {gap_pace_count}")
         print(f"  Runs with Stryd power: {df['power_source'].eq('stryd').sum()}")
         print(f"  Total runs with power: {pd.notna(df['avg_power_w']).sum()}")
     
