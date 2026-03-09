@@ -3594,7 +3594,14 @@ def main():
     wx_db_path = args.weather_cache_db.strip() if hasattr(args, "weather_cache_db") and args.weather_cache_db else os.path.join(wx_cache_dir, "openmeteo_cache.sqlite")
     try:
         _wx_db_init(wx_db_path)
-        print(f"Weather SQLite cache: {wx_db_path}")
+        # Log cache size so we can tell if the download from Dropbox worked
+        try:
+            _wx_con = sqlite3.connect(wx_db_path)
+            _wx_rows = _wx_con.execute("SELECT COUNT(*) FROM wx_hourly").fetchone()[0]
+            _wx_con.close()
+            print(f"Weather SQLite cache: {wx_db_path} ({_wx_rows:,} rows)")
+        except Exception:
+            print(f"Weather SQLite cache: {wx_db_path} (new/empty)")
         # Auto-clean: delete SQLite rows that lack shortwave_radiation
         # so they'll be re-fetched from Open-Meteo with the new params.
         # Also runs when --refresh-weather-solar is set explicitly.
