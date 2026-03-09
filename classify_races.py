@@ -70,6 +70,8 @@ RACE_NAME_OVERRIDES = re.compile(
     # Additional known races
     r'Royal Parks|Oxford Half|Hampton Court|Göteborgsvarvet|Premiärhalv|'
     r'Broloppet|Örebro|Big Half|Reading Half|Willow 10k|'
+    r'Paddock Wood|Chichester|Maidenhead|Beckenham Assembly|'
+    r'Middlesex 10k|Kent XC|Surrey league|Titsey|'
     # Mile / 1500m races
     r'Golden Stag|Bannister.*mile|Highgate.*1500|Palladino.*mile|virtual mile',
     re.I
@@ -349,11 +351,34 @@ def classify_run(name: str, avg_hr: float, lthr: float, max_hr: float,
         else:
             return ('training', 'medium', f'Mixed keywords, HR {hr_pct*100:.0f}%LTHR suggests training')
     
-    # 5. No keywords — rely entirely on calibrated HR thresholds
-    if hr_pct >= min_hr:
-        return ('race', 'medium', f'HR {hr_pct*100:.0f}%LTHR ≥ {min_hr*100:.0f}% for {race_type} — REVIEW')
+    # 5. No keywords — HR thresholds + pace sanity + unnamed uplift
+    #    Without any keyword signal, the evidence bar is higher:
+    #    a) Pace check: reject if pace is >10% slower than predicted race pace
+    #       (predictions are GAP-based, so terrain is already accounted for;
+    #       a tight threshold is appropriate for unnamed runs)
+    #    b) HR uplift: require +4% LTHR above the named-race threshold
+    #    This catches training runs at standard distances with high HR while
+    #    still detecting genuine unnamed race efforts (e.g. Strava users who
+    #    don't name their parkruns).
+    UNNAMED_HR_UPLIFT = 0.04  # +4% LTHR for runs with no keyword signal
+    UNNAMED_PACE_RATIO = 1.10  # >10% slower than predicted race pace → training
+    if hr_pct >= min_hr + UNNAMED_HR_UPLIFT:
+        # Pace sanity: reject if slower than predicted race pace
+        if avg_pace and pred_5k_pace and pred_5k_pace > 0:
+            STANDARD_KMS = {'5K': 5, '10K': 10, 'HM': 21.097, 'Marathon': 42.195,
+                            '3K': 3, '1500m': 1.5, 'Mile': 1.609, '10M': 16.093, '30K': 30}
+            dist_for_type = STANDARD_KMS.get(race_type, distance_km)
+            dist_factor = (dist_for_type / 5.0) ** 0.06 if dist_for_type > 0 else 1.0
+            expected_race_pace = pred_5k_pace * dist_factor
+            pace_ratio = avg_pace / expected_race_pace if expected_race_pace > 0 else 1.0
+            if pace_ratio > UNNAMED_PACE_RATIO:
+                return ('training', 'medium',
+                        f'HR {hr_pct*100:.0f}%LTHR but pace {avg_pace:.2f} min/km is '
+                        f'{(pace_ratio-1)*100:.0f}% slower than expected race pace '
+                        f'{expected_race_pace:.2f} — no keywords to override')
+        return ('race', 'medium', f'HR {hr_pct*100:.0f}%LTHR ≥ {(min_hr+UNNAMED_HR_UPLIFT)*100:.0f}% (unnamed) for {race_type} — REVIEW')
     else:
-        return ('training', 'medium', f'HR {hr_pct*100:.0f}%LTHR < {min_hr*100:.0f}% for {race_type}')
+        return ('training', 'medium', f'HR {hr_pct*100:.0f}%LTHR < {(min_hr+UNNAMED_HR_UPLIFT)*100:.0f}% (unnamed) for {race_type}')
 
 
 def _first_match(pattern, text):
@@ -440,6 +465,12 @@ def detect_candidates_from_master(master_df: pd.DataFrame, lthr: float,
             # Runs at non-standard distances with race-effort HR (>= 95% LTHR)
             # become bespoke candidates at their actual GPS distance.
             # Examples: Stockholm's Bästa series, Lidingöloppet 15, relay legs.
+            #
+            # Bespoke candidates MUST have a race keyword or race name override.
+            # HR alone at a non-standard distance produces too many false
+            # positives — club sessions, tempo runs, and interval workouts
+            # routinely exceed 95% LTHR for athletes whose training and racing
+            # HR ranges overlap.
             # classify_run() applies keyword/anti-keyword filtering downstream.
             BESPOKE_HR_PCT = 0.95
             BESPOKE_MIN_DIST_KM = 1.0
@@ -447,10 +478,14 @@ def detect_candidates_from_master(master_df: pd.DataFrame, lthr: float,
             has_hr = hr > 0
             elapsed = row.get('elapsed_time_s', 0) or 0
             best_dist_km = gps_km or strava_km or 0
+            has_race_signal = bool(
+                RACE_KEYWORDS.search(name) or RACE_NAME_OVERRIDES.search(name)
+            )
             if (has_hr and lthr > 0
                     and hr >= lthr * BESPOKE_HR_PCT
                     and best_dist_km >= BESPOKE_MIN_DIST_KM
-                    and elapsed >= BESPOKE_MIN_DURATION_S):
+                    and elapsed >= BESPOKE_MIN_DURATION_S
+                    and has_race_signal):
                 candidates.append({
                     'file': row['file'],
                     'official_distance_km': round(best_dist_km, 3),
@@ -584,7 +619,9 @@ def enrich_and_classify(master_path: str, overrides_path: str,
         hr = 0 if (hr_raw is None or (isinstance(hr_raw, float) and pd.isna(hr_raw))) else hr_raw
         elapsed = m.get('elapsed_time_s', 0) or 0
         duration = elapsed / 60
-        pace = m.get('avg_pace_min_per_km', 0) or 0
+        pace = m.get('avg_gap_pace_min_per_km', 0) or 0
+        if not pace:
+            pace = m.get('avg_pace_min_per_km', 0) or 0
         race_type = row.get('race_type', '') or ''
         
         enriched_cols['date'].append(

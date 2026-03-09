@@ -29,7 +29,7 @@ from typing import Optional
 import numpy as np
 import pandas as pd
 
-from gap_power import compute_gap_power_for_run
+from gap_power import compute_gap_power_for_run, compute_gap_for_run
 
 # Try to import rolling_median, or use simple version
 try:
@@ -53,6 +53,7 @@ def compute_gap_power_metrics(
     Returns same metrics as Stryd power:
     - avg_power_w: Average power over moving segments
     - npower_w: Normalized power (30s rolling average, then 4th-root mean)
+    - avg_gap_pace_min_per_km: Average GAP (equivalent flat pace) in min/km
     
     Args:
         speed_mps: Speed array in m/s
@@ -61,7 +62,7 @@ def compute_gap_power_metrics(
         re_constant: Running economy constant
         
     Returns:
-        dict with avg_power_w, npower_w
+        dict with avg_power_w, npower_w, avg_gap_pace_min_per_km
     """
     # Compute power
     power_w = compute_gap_power_for_run(speed_mps, grade, mass_kg, re_constant)
@@ -69,7 +70,8 @@ def compute_gap_power_metrics(
     # Average power (moving only)
     moving_mask = (speed_mps > 0.3) & np.isfinite(power_w)
     if moving_mask.sum() < 10:
-        return {'avg_power_w': np.nan, 'npower_w': np.nan}
+        return {'avg_power_w': np.nan, 'npower_w': np.nan,
+                'avg_gap_pace_min_per_km': np.nan}
     
     avg_power = float(np.mean(power_w[moving_mask]))
     
@@ -78,9 +80,22 @@ def compute_gap_power_metrics(
     power_30s = rolling_median(power_w, 30)
     np_power = float(np.mean(power_30s[moving_mask]**4)**(1/4))
     
+    # GAP (Grade Adjusted Pace): equivalent flat speed
+    # Uses the Minetti cost model to compute what flat speed would produce
+    # the same effort as the actual speed+grade combination.
+    gap_speed = compute_gap_for_run(speed_mps, grade)
+    gap_moving = gap_speed[moving_mask]
+    gap_valid = gap_moving[np.isfinite(gap_moving) & (gap_moving > 0.3)]
+    if len(gap_valid) > 0:
+        avg_gap_speed_mps = float(np.mean(gap_valid))
+        avg_gap_pace = (1000 / avg_gap_speed_mps) / 60  # min/km
+    else:
+        avg_gap_pace = np.nan
+    
     return {
         'avg_power_w': avg_power,
-        'npower_w': np_power
+        'npower_w': np_power,
+        'avg_gap_pace_min_per_km': round(avg_gap_pace, 2) if np.isfinite(avg_gap_pace) else np.nan,
     }
 
 
