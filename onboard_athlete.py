@@ -426,6 +426,44 @@ def make_slug(name: str) -> str:
     return "_".join(parts) if parts else "athlete"
 
 
+def _generate_zones_yaml(cfg: dict) -> str:
+    """Generate the zones section for athlete.yml.
+    
+    If the user customised HR zones on the onboard page, writes them as
+    explicit boundaries. Otherwise computes defaults from LTHR/max_hr
+    so the YAML always has zones (pipeline and dashboard read from here).
+    """
+    lthr = cfg.get('lthr')
+    max_hr = cfg.get('max_hr')
+    
+    if not lthr or lthr < 100:
+        return ""  # Can't compute zones without LTHR
+    
+    hr_zones = cfg.get('hr_zones')
+    if hr_zones and isinstance(hr_zones, dict):
+        # User customised zones on the onboard page
+        z12 = int(hr_zones.get('z12', round(lthr * 0.81)))
+        z23 = int(hr_zones.get('z23', round(lthr * 0.90)))
+        z34 = int(hr_zones.get('z34', round(lthr * 0.955)))
+        z45 = int(hr_zones.get('z45', lthr))
+        source = "customised on onboard page"
+    else:
+        # Auto-calculate from LTHR (same formula as onboard.html and generate_dashboard.py)
+        z12 = round(lthr * 0.81)
+        z23 = round(lthr * 0.90)
+        z34 = round(lthr * 0.955)
+        z45 = lthr
+        source = "auto-calculated from LTHR"
+    
+    return f"""# HR zones ({source})
+# Boundaries: [Z1/Z2, Z2/Z3, Z3/Z4, Z4/Z5]
+# Z1: < {z12}, Z2: {z12}-{z23}, Z3: {z23}-{z34}, Z4: {z34}-{z45}, Z5: > {z45}
+zones:
+  hr_zones: [{z12}, {z23}, {z34}, {z45}]
+
+"""
+
+
 def generate_athlete_yml(cfg: dict) -> str:
     """Generate athlete.yml content."""
     
@@ -492,6 +530,7 @@ athlete:
   #   30K: 0.90
   #   Marathon: 0.88
 
+{_generate_zones_yaml(cfg)}\
 planned_races:
 {races_yaml}
 
