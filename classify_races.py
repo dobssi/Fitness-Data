@@ -242,16 +242,19 @@ def classify_run(name: str, avg_hr: float, lthr: float, max_hr: float,
                  race_type: str,
                  avg_pace: float = None,
                  pred_5k_pace: float = None,
-                 race_hr_thresholds: dict = None) -> tuple:
+                 race_hr_thresholds: dict = None,
+                 is_parkrun_candidate: bool = False) -> tuple:
     """Classify a single candidate as race/training/uncertain.
     
     Primary signal: HR intensity vs distance-specific threshold.
     Secondary signal: activity name keywords.
+    Tertiary signal: structural parkrun detection (Saturday + 5km + start time).
     Fallback (no HR): race keyword + pace at least as fast as predicted 5K.
     
     avg_pace: average pace in min/km (used as fallback when HR is missing).
     pred_5k_pace: predicted 5K race pace in min/km (athlete-specific threshold).
     race_hr_thresholds: dict of {distance_label: pct_lthr} from athlete.yml.
+    is_parkrun_candidate: True if structurally detected as parkrun (Saturday + ~5km + start time).
     """
     if race_hr_thresholds is None:
         race_hr_thresholds = DEFAULT_RACE_HR_THRESHOLDS
@@ -262,9 +265,14 @@ def classify_run(name: str, avg_hr: float, lthr: float, max_hr: float,
     has_race_name = bool(RACE_NAME_OVERRIDES.search(name))
     has_anti_kw = bool(ANTI_KEYWORDS.search(name))
     
+    # Structural parkrun detection (Saturday + 5km + start time) is equivalent
+    # to a race keyword — it's strong evidence this is a race event
+    if is_parkrun_candidate and not has_race_kw:
+        has_race_kw = True
+    
     # "parkrun" in a non-5K run is a sandwich/longer run — don't treat as race keyword
     if has_race_kw and race_type != "5K":
-        if not NON_PARKRUN_RACE_KW.search(name):
+        if not NON_PARKRUN_RACE_KW.search(name) and not is_parkrun_candidate:
             has_race_kw = False  # Only "parkrun" matched — not a race at this distance
     
     min_hr = race_hr_thresholds.get(race_type, 1.00)
@@ -321,13 +329,14 @@ def classify_run(name: str, avg_hr: float, lthr: float, max_hr: float,
             return ('training', 'medium', f'Named race but HR {hr_pct*100:.0f}%LTHR below race threshold')
     
     # 2. Race keyword + no anti-keyword — use FULL HR threshold (no discount)
-    #    If HR is below threshold but pace confirms race effort, still classify
-    #    as race (2-of-3 rule: keyword + pace = sufficient evidence)
+    #    If HR is just below threshold AND pace confirms race effort (faster than
+    #    predicted 5K), classify as race. But HR must be within 5% of threshold —
+    #    a parkrun at 88% LTHR is not a race even if pace is fast.
     if has_race_kw and not has_anti_kw:
         if hr_pct >= min_hr:
             return ('race', 'high', f'Race keyword + HR {hr_pct*100:.0f}%LTHR')
-        elif _has_fast_pace:
-            return ('race', 'medium', f'Race keyword + {_pace_str} (HR {hr_pct*100:.0f}%LTHR below threshold)')
+        elif _has_fast_pace and hr_pct >= min_hr - 0.05:
+            return ('race', 'medium', f'Race keyword + {_pace_str} (HR {hr_pct*100:.0f}%LTHR just below threshold)')
         else:
             return ('training', 'medium', f'Race keyword but HR {hr_pct*100:.0f}%LTHR below race threshold')
     
@@ -356,20 +365,24 @@ def classify_run(name: str, avg_hr: float, lthr: float, max_hr: float,
             return ('training', 'medium', f'Mixed keywords, HR {hr_pct*100:.0f}%LTHR suggests training')
     
     # 5. No keywords — HR thresholds + pace as co-signal
-    #    Without any keyword signal, we use two independent signals:
-    #    a) HR alone: require base threshold + 4% uplift (high bar, no other evidence)
-    #    b) HR + pace together: if HR >= base threshold AND pace is within 10% of
-    #       predicted race pace, that's sufficient — two signals confirming race effort
-    #    c) Pace rejection: even with high HR, reject if pace is >10% slower than
-    #       predicted (catches hard training at race HR but slow pace)
+    #    a) Faster than predicted 5K pace at ANY distance → race (strongest pace signal,
+    #       you can't run faster than 5K prediction without racing)
+    #    b) HR + pace together: HR >= base threshold AND pace within 5% of distance-
+    #       adjusted prediction → race (two co-signals confirming race effort)
+    #    c) HR alone: require base threshold + 4% uplift (high bar, no other evidence)
+    #    d) Pace rejection: even with high HR, reject if pace is >5% slower than predicted
     UNNAMED_HR_UPLIFT = 0.04  # +4% LTHR for HR-only classification (no pace signal)
-    UNNAMED_PACE_RATIO = 1.10  # >10% slower than predicted race pace → training
+    UNNAMED_PACE_RATIO = 1.05  # >5% slower than predicted race pace → not race pace
     
     # Compute pace evidence once
     _has_pace_data = (avg_pace and pred_5k_pace and pred_5k_pace > 0)
+    _faster_than_5k_pred = False
     _pace_confirms_race = False
     _pace_rejects_race = False
     if _has_pace_data:
+        # Faster than predicted 5K pace (raw, no distance scaling)
+        _faster_than_5k_pred = avg_pace < pred_5k_pace
+        # Distance-adjusted pace comparison
         STANDARD_KMS = {'5K': 5, '10K': 10, 'HM': 21.097, 'Marathon': 42.195,
                         '3K': 3, '1500m': 1.5, 'Mile': 1.609, '10M': 16.093, '30K': 30}
         dist_for_type = STANDARD_KMS.get(race_type, distance_km)
@@ -379,9 +392,16 @@ def classify_run(name: str, avg_hr: float, lthr: float, max_hr: float,
         _pace_confirms_race = pace_ratio <= UNNAMED_PACE_RATIO
         _pace_rejects_race = pace_ratio > UNNAMED_PACE_RATIO
     
-    # Path A: HR above base threshold + pace confirms → race (two co-signals)
-    if hr_pct >= min_hr and _pace_confirms_race:
-        return ('race', 'medium', f'HR {hr_pct*100:.0f}%LTHR ≥ {min_hr*100:.0f}% + race pace {avg_pace:.2f}/km (unnamed) for {race_type} — REVIEW')
+    # Path A: HR above base threshold + pace confirms → race
+    #   Pace confirmation: either faster than predicted 5K (strongest) or within
+    #   5% of distance-adjusted prediction. Either way, HR must also be above
+    #   the base threshold — pace alone (without keywords) is not sufficient
+    #   because interval sessions can average fast pace with low avg HR.
+    if hr_pct >= min_hr and (_faster_than_5k_pred or _pace_confirms_race):
+        pace_detail = (f'faster than pred 5K {pred_5k_pace:.2f}/km'
+                       if _faster_than_5k_pred
+                       else f'race pace ratio {pace_ratio:.2f}')
+        return ('race', 'medium', f'HR {hr_pct*100:.0f}%LTHR ≥ {min_hr*100:.0f}% + {pace_detail} (unnamed) for {race_type} — REVIEW')
     
     # Path B: HR above uplifted threshold (HR alone is strong enough)
     if hr_pct >= min_hr + UNNAMED_HR_UPLIFT:
@@ -660,10 +680,17 @@ def enrich_and_classify(master_path: str, overrides_path: str,
         enriched_cols['hr_pct_lthr'].append(round(hr / lthr * 100, 0) if hr and lthr else None)
         enriched_cols['duration_min'].append(round(duration, 1) if duration else None)
         
+        # Detect structural parkrun (Saturday + ~5km + start time)
+        _start_hour = None
+        if hasattr(date, 'hour'):
+            _start_hour = date.hour + date.minute / 60
+        _parkrun_cand = is_parkrun(name, date, dist, _start_hour)
+        
         verdict, conf, reason = classify_run(name, hr, lthr, max_hr, dist, duration, race_type,
                                                avg_pace=pace,
                                                pred_5k_pace=_pred_5k_by_file.get(fname),
-                                               race_hr_thresholds=race_hr_thresholds)
+                                               race_hr_thresholds=race_hr_thresholds,
+                                               is_parkrun_candidate=_parkrun_cand)
         
         enriched_cols['verdict'].append(f"{verdict} ({conf})")
         enriched_cols['confidence'].append(conf)
