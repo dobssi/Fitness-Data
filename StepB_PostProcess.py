@@ -532,8 +532,13 @@ def bootstrap_peak_speed(df: pd.DataFrame, rfl_col: str = 'RFL_gap_Trend',
     HEAT_MAX_MULT = 1.5       # Cap on heat duration scaling
     
     def _classify_dist(d):
-        for name, target in [('5k', 5.0), ('10k', 10.0), ('hm', 21.1), ('marathon', 42.2)]:
-            tol = 1.0 if target > 20 else (0.5 if target > 8 else 0.3)
+        """Match distance to standard race category using tight tolerances.
+        
+        Uses max(2%, 300m) — same as classify_races — to avoid catching
+        bespoke-distance races (e.g. 9.65km trail races matched to 10K).
+        """
+        for name, target in [('5k', 5.0), ('10k', 10.0), ('hm', 21.097), ('marathon', 42.195)]:
+            tol = max(target * 0.02, 0.3)  # max(2%, 300m)
             if abs(d - target) < tol:
                 return name
         return None
@@ -5472,26 +5477,37 @@ def main() -> int:
         # v52/v53: Bootstrap PEAK_CP from race data.
         # Always run bootstrap — the result is written back to athlete.yml
         # so the Factor calculation uses an accurate value on the next run.
+        # v53: Skip Stryd bootstrap for GAP-mode athletes — Stryd power data
+        # is absent or meaningless, producing junk PEAK_CP and predictions.
         _effective_peak_cp = PEAK_CP_WATTS
         mass_kg = args.mass_kg
-        stryd_peak_speed, stryd_peak_cp, stryd_n_races, stryd_method, stryd_factors = bootstrap_peak_speed(
-            dfm, rfl_col='RFL_Trend', mass_kg=mass_kg,
-            re_generic=GAP_RE_CONSTANT,
-            lthr=RF_CONSTANTS['lthr'],
-            max_hr=RF_CONSTANTS['max_hr'],
-            exclude_parkruns=True
-        )
-        if stryd_peak_cp is not None:
-            _effective_peak_cp = stryd_peak_cp
-            detail = {
-                'race': f'from {stryd_n_races} flagged races',
-                'auto': f'from {stryd_n_races} auto-detected races, p75',
-                'training': 'estimated from training × 0.97'
-            }.get(stryd_method, '')
-            print(f"  Stryd PEAK_CP bootstrap ({stryd_method}): {_effective_peak_cp:.0f}W ({detail})")
+        if POWER_MODE == 'stryd':
+            stryd_peak_speed, stryd_peak_cp, stryd_n_races, stryd_method, stryd_factors = bootstrap_peak_speed(
+                dfm, rfl_col='RFL_Trend', mass_kg=mass_kg,
+                re_generic=GAP_RE_CONSTANT,
+                lthr=RF_CONSTANTS['lthr'],
+                max_hr=RF_CONSTANTS['max_hr'],
+                exclude_parkruns=True
+            )
+            if stryd_peak_cp is not None:
+                _effective_peak_cp = stryd_peak_cp
+                detail = {
+                    'race': f'from {stryd_n_races} flagged races',
+                    'auto': f'from {stryd_n_races} auto-detected races, p75',
+                    'training': 'estimated from training × 0.97'
+                }.get(stryd_method, '')
+                print(f"  Stryd PEAK_CP bootstrap ({stryd_method}): {_effective_peak_cp:.0f}W ({detail})")
+            else:
+                stryd_factors = {'5k': 1.05, '10k': 1.0, 'hm': 0.95, 'marathon': 0.89}
+                print(f"  Stryd PEAK_CP bootstrap: no data, using config value {PEAK_CP_WATTS}W")
         else:
+            # GAP mode — skip Stryd bootstrap, use defaults for Stryd columns
+            stryd_peak_speed = None
+            stryd_peak_cp = None
+            stryd_n_races = 0
+            stryd_method = None
             stryd_factors = {'5k': 1.05, '10k': 1.0, 'hm': 0.95, 'marathon': 0.89}
-            print(f"  Stryd PEAK_CP bootstrap: no data, using config value {PEAK_CP_WATTS}W")
+            print(f"  Stryd bootstrap: skipped (POWER_MODE={POWER_MODE})")
         
         # CP = RFL_Trend * peak_CP
         if pd.notna(latest_rfl) and latest_rfl > 0:
@@ -5512,45 +5528,53 @@ def main() -> int:
             print(f"  RE p90: {re_p90:.4f}")
             
             # Race predictions using data-driven factors
+            # v53: For GAP-mode athletes, skip Stryd headline predictions —
+            # they use meaningless RFL_Trend from absent Stryd data.
+            # The GAP predictions (populated below) are the real ones.
             mass_kg = args.mass_kg
             RACE_DISTS_PRINT = {'5k': 5000, '10k': 10000, 'hm': 21097.5, 'marathon': 42195}
-            if stryd_peak_speed:
+            if POWER_MODE == 'stryd' and stryd_peak_speed:
                 pred_5k = RACE_DISTS_PRINT['5k'] / (latest_rfl * stryd_peak_speed * stryd_factors.get('5k', 1.05))
                 pred_10k = RACE_DISTS_PRINT['10k'] / (latest_rfl * stryd_peak_speed * stryd_factors.get('10k', 1.0))
                 pred_hm = RACE_DISTS_PRINT['hm'] / (latest_rfl * stryd_peak_speed * stryd_factors.get('hm', 0.95))
                 pred_mara = RACE_DISTS_PRINT['marathon'] / (latest_rfl * stryd_peak_speed * stryd_factors.get('marathon', 0.89))
-            else:
+            elif POWER_MODE == 'stryd':
                 pred_5k = calc_race_prediction(latest_rfl, '5k', re_p90, _effective_peak_cp, mass_kg)
                 pred_10k = calc_race_prediction(latest_rfl, '10k', re_p90, _effective_peak_cp, mass_kg)
                 pred_hm = calc_race_prediction(latest_rfl, 'hm', re_p90, _effective_peak_cp, mass_kg)
                 pred_mara = calc_race_prediction(latest_rfl, 'marathon', re_p90, _effective_peak_cp, mass_kg)
+            else:
+                # GAP mode — Stryd headline predictions skipped
+                pred_5k = pred_10k = pred_hm = pred_mara = np.nan
+                print(f"  Stryd predictions: skipped (GAP mode)")
             
             print(f"  Race predictions: 5K={format_time(pred_5k)}, 10K={format_time(pred_10k)}, "
                   f"HM={format_time(pred_hm)}, Mar={format_time(pred_mara)}")
             
             # v51: Populate predictions on ALL runs (not just last row)
-            # v52: Use PREVIOUS row's RFL_Trend for predictions.  The prediction answers
-            # "what could you race today?" which depends on fitness coming INTO this run,
-            # not fitness including this run's own result.  This prevents race-day
-            # conditions (temperature, PS floor) from contaminating the unadjusted prediction.
-            rfl_prev = dfm['RFL_Trend'].shift(1)
-            rfl_valid = rfl_prev.notna() & (rfl_prev > 0)
-            dfm.loc[rfl_valid, 'CP'] = (rfl_prev[rfl_valid] * _effective_peak_cp).round(0)
-            
-            # v53: Use data-driven race factors from bootstrap (not hardcoded)
-            RACE_DISTANCES_PRED = {'5k': 5000, '10k': 10000, 'hm': 21097.5, 'marathon': 42195}
-            for dist_key, col_name in [('5k', 'pred_5k_s'), ('10k', 'pred_10k_s'), 
-                                        ('hm', 'pred_hm_s'), ('marathon', 'pred_marathon_s')]:
-                _factor = stryd_factors.get(dist_key, 1.0)
-                _dist_m = RACE_DISTANCES_PRED[dist_key]
-                dfm.loc[rfl_valid, col_name] = rfl_prev[rfl_valid].apply(
-                    lambda rfl, f=_factor, d=_dist_m: round(
-                        d / (rfl * stryd_peak_speed * f), 0) if stryd_peak_speed else round(
-                        calc_race_prediction(rfl, dist_key, re_p90, _effective_peak_cp, mass_kg), 0)
-                )
-            
-            n_pred = rfl_valid.sum()
-            print(f"  Populated predictions on {n_pred} runs (all with RFL_Trend)")
+            # v52: Use PREVIOUS row's RFL_Trend for predictions.
+            # v53: Skip Stryd prediction columns for GAP-mode athletes.
+            if POWER_MODE == 'stryd':
+                rfl_prev = dfm['RFL_Trend'].shift(1)
+                rfl_valid = rfl_prev.notna() & (rfl_prev > 0)
+                dfm.loc[rfl_valid, 'CP'] = (rfl_prev[rfl_valid] * _effective_peak_cp).round(0)
+                
+                # v53: Use data-driven race factors from bootstrap (not hardcoded)
+                RACE_DISTANCES_PRED = {'5k': 5000, '10k': 10000, 'hm': 21097.5, 'marathon': 42195}
+                for dist_key, col_name in [('5k', 'pred_5k_s'), ('10k', 'pred_10k_s'), 
+                                            ('hm', 'pred_hm_s'), ('marathon', 'pred_marathon_s')]:
+                    _factor = stryd_factors.get(dist_key, 1.0)
+                    _dist_m = RACE_DISTANCES_PRED[dist_key]
+                    dfm.loc[rfl_valid, col_name] = rfl_prev[rfl_valid].apply(
+                        lambda rfl, f=_factor, d=_dist_m: round(
+                            d / (rfl * stryd_peak_speed * f), 0) if stryd_peak_speed else round(
+                            calc_race_prediction(rfl, dist_key, re_p90, _effective_peak_cp, mass_kg), 0)
+                    )
+                
+                n_pred = rfl_valid.sum()
+                print(f"  Populated Stryd predictions on {n_pred} runs")
+            else:
+                print(f"  Stryd prediction columns: skipped (GAP mode)")
             
             # v53: Write effective PEAK_CP and race factors to Master for dashboard consumption
             dfm['effective_peak_cp'] = round(_effective_peak_cp)
@@ -5659,20 +5683,24 @@ def main() -> int:
                 dfm.at[dfm.index[-1], 'pred_5k_age_grade'] = round(pred_5k_ag, 1)
                 print(f"  Predicted 5K Age Grade: {pred_5k_ag:.1f}% (age {runner_age})")
             
-            # Phase 2: GAP/Sim predicted age grades (latest row)
+            # Phase 2: GAP/Sim predicted age grades (latest valid RFL)
             for mode, rfl_col in [('gap', 'RFL_gap_Trend'), ('sim', 'RFL_sim_Trend')]:
                 if rfl_col not in dfm.columns:
                     continue
-                mode_rfl = dfm.iloc[-1].get(rfl_col)
+                # Use last row with valid RFL (not absolute last row, which may be auto-excluded)
+                _valid_rfl = dfm[rfl_col].dropna()
+                mode_rfl = _valid_rfl.iloc[-1] if len(_valid_rfl) > 0 else np.nan
                 if pd.notna(mode_rfl) and mode_rfl > 0:
                     if mode == 'gap' and gap_peak_speed is not None:
-                        # GAP: use bootstrapped peak_speed (RE-independent)
-                        mode_pred_5k = 5000 / (mode_rfl * gap_peak_speed * 1.05)
+                        # GAP: use bootstrapped peak_speed and data-driven factor
+                        _gap_5k_factor = gap_factors.get('5k', 1.05)
+                        mode_pred_5k = 5000 / (mode_rfl * gap_peak_speed * _gap_5k_factor)
                     else:
                         mode_pred_5k = calc_race_prediction(mode_rfl, '5k', re_p90, _effective_peak_cp, mass_kg)
                     mode_ag = calc_age_grade(mode_pred_5k, 5.0, runner_age, runner_gender, 'road')
                     if mode_ag:
                         dfm.at[dfm.index[-1], f'pred_5k_age_grade_{mode}'] = round(mode_ag, 1)
+                        print(f"  {mode.upper()} predicted 5K AG: {mode_ag:.1f}% (RFL={mode_rfl:.3f})")
         
         # Calculate age grades for races and parkruns
         print("  Calculating age grades for races/parkruns...")

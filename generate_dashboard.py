@@ -188,8 +188,13 @@ def load_and_process_data():
                     _PEAK_CP_OVERRIDDEN = True
         
         # Predicted 5K age grade
+        # v53: For GAP-mode athletes, Stryd AG may be empty — use mode-specific AG
         ag_val = latest.get('pred_5k_age_grade')
-        if pd.notna(ag_val):
+        if not (pd.notna(ag_val) and 30 < float(ag_val) < 120):
+            # Stryd AG missing or implausible — try mode-specific
+            _ag_mode_col = f'pred_5k_age_grade_{_cfg_power_mode}'
+            ag_val = latest.get(_ag_mode_col)
+        if pd.notna(ag_val) and 30 < float(ag_val) < 120:
             age_grade = round(float(ag_val), 2)
         
         # Race predictions (in seconds, need to format)

@@ -46,13 +46,13 @@ power:
   mode: "gap"
 
   stryd:
-    peak_cp_watts: 665
+    peak_cp_watts: 614
     eras: {}
     mass_corrections: []
     re_reference_era: "s4"
 
   gap:
-    peak_cp_watts: 408  # Auto-updated by StepB bootstrap
+    peak_cp_watts: 407  # Auto-updated by StepB bootstrap
     re_constant: 0.92
 
 data:
