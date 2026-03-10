@@ -1,0 +1,20 @@
+{
+  "name": "Johan",
+  "email": "jbaeck@gmail.com",
+  "dob": "1975-07-14",
+  "gender": "male",
+  "mass_kg": 91,
+  "timezone": "Europe/Stockholm",
+  "power_mode": "gap",
+  "max_hr": 186,
+  "lthr": 168,
+  "data_source": "intervals",
+  "intervals_id": "i527780",
+  "intervals_key": "2umslzefe9hqclaclvg7n2xze",
+  "hr_zones": null,
+  "planned_races": [],
+  "race_times": [],
+  "athlete_id": "A007",
+  "folder_name": "A007",
+  "slug": "johan"
+}
