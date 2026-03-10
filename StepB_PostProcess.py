@@ -527,7 +527,8 @@ def bootstrap_peak_speed(df: pd.DataFrame, rfl_col: str = 'RFL_gap_Trend',
     TRAINING_DISCOUNT = 0.97
     AUTO_HR_FRACTION = 0.87
     DEFAULT_RIEGEL_K = 0.06
-    MIN_RACES_FOR_FACTOR = 3  # Need >= 3 races at a distance to compute its factor
+    MIN_RACES_FOR_FACTOR = 5  # Need >= 5 races at a distance to compute its factor
+                              # (with < 5, a single outlier dominates the median)
     HEAT_REF_S = 5400.0       # 90 min — duration at which heat has full effect
     HEAT_MAX_MULT = 1.5       # Cap on heat duration scaling
     
