@@ -13,7 +13,7 @@ athlete:
 
   # HR thresholds
   lthr: 178
-  max_hr: 194
+  max_hr: 192
 
   # Race HR thresholds (% of LTHR). Used by classify_races.py to identify race efforts.
   # These defaults work well for most runners. Uncomment and adjust if needed.
