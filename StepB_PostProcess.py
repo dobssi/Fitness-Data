@@ -4184,6 +4184,28 @@ def main() -> int:
         if cache_fp is None:
             missing_cache += 1
             _progress(i, label + " (no cache)")
+            # v53: Summary-level GAP RF fallback — compute approximate RF_gap_median
+            # from avg_gap_pace and avg_hr so the GAP RF chain doesn't break on cache misses.
+            # Uses same formula as GAP Power Score: P = v*m/RE + air_resistance, RF = P/HR.
+            # Less accurate than per-second (uses whole-run averages, no RF window trimming)
+            # but much better than leaving a NaN hole in the GAP trend.
+            _fb_gap_pace = pd.to_numeric(row.get('avg_gap_pace_min_per_km', np.nan), errors='coerce')
+            _fb_avg_hr = pd.to_numeric(row.get('avg_hr', np.nan), errors='coerce')
+            _fb_dist = pd.to_numeric(row.get('distance_km', np.nan), errors='coerce')
+            _fb_time = pd.to_numeric(row.get('moving_time_s', np.nan), errors='coerce')
+            if (np.isfinite(_fb_avg_hr) and _fb_avg_hr > 60
+                    and np.isfinite(_fb_dist) and _fb_dist > 0
+                    and np.isfinite(_fb_time) and _fb_time > 0):
+                # Prefer GAP pace if available, fall back to actual pace
+                if np.isfinite(_fb_gap_pace) and _fb_gap_pace > 0:
+                    _fb_speed = 1000.0 / (_fb_gap_pace * 60.0)
+                else:
+                    _fb_speed = (_fb_dist * 1000.0) / _fb_time
+                _fb_gap_power = _fb_speed * float(args.mass_kg) / GAP_RE_CONSTANT
+                _fb_gap_power += 0.5 * 0.24 * 1.225 * _fb_speed ** 3  # air resistance
+                _fb_rf_gap = _fb_gap_power / _fb_avg_hr
+                if np.isfinite(_fb_rf_gap) and _fb_rf_gap > 0:
+                    dfm.at[i, 'RF_gap_median'] = float(_fb_rf_gap)
             continue
 
         z = np.load(cache_fp, allow_pickle=True)
