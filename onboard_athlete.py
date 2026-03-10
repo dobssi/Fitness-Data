@@ -575,6 +575,7 @@ def generate_workflow_yml(cfg: dict) -> str:
     name = cfg["name"]
     folder = cfg["folder_name"]
     slug = cfg["slug"]
+    aid = cfg.get("athlete_id", "A000")  # v53: for Master filename
     mode = cfg.get("power_mode", "gap")
     mass = cfg["mass_kg"]
     dob = cfg["dob"]
@@ -781,8 +782,8 @@ on:
                     athlete.yml \\
                     activity_overrides.xlsx \\
                     athlete_data.csv \\
-                    output/Master_FULL.xlsx \\
-                    output/Master_FULL_post.xlsx \\
+                    output/Master_{aid}_FULL.xlsx \\
+                    output/Master_{aid}_FULL_post.xlsx \\
                     output/_weather_cache_openmeteo/openmeteo_cache.sqlite \\
             --cache-dir ${{{{ env.ATHLETE_DIR }}}}/persec_cache
         continue-on-error: true
@@ -809,7 +810,7 @@ on:
           python rebuild_from_fit_zip.py \\
             --fit-zip ${{{{ env.ATHLETE_DIR }}}}/data/fits.zip \\
             --template master_template.xlsx \\
-            --out ${{{{ env.ATHLETE_DIR }}}}/output/Master_FULL.xlsx \\
+            --out ${{{{ env.ATHLETE_DIR }}}}/output/Master_{aid}_FULL.xlsx \\
             --persec-cache-dir ${{{{ env.ATHLETE_DIR }}}}/persec_cache \\
             --strava ${{{{ env.ATHLETE_DIR }}}}/data/activities.csv \\
             --pending-activities ${{{{ env.ATHLETE_DIR }}}}/pending_activities.csv \\
@@ -823,8 +824,8 @@ on:
           python rebuild_from_fit_zip.py \\
             --fit-zip ${{{{ env.ATHLETE_DIR }}}}/data/fits.zip \\
             --template master_template.xlsx \\
-            --out ${{{{ env.ATHLETE_DIR }}}}/output/Master_FULL.xlsx \\
-            --append-master-in ${{{{ env.ATHLETE_DIR }}}}/output/Master_FULL.xlsx \\
+            --out ${{{{ env.ATHLETE_DIR }}}}/output/Master_{aid}_FULL.xlsx \\
+            --append-master-in ${{{{ env.ATHLETE_DIR }}}}/output/Master_{aid}_FULL.xlsx \\
             --persec-cache-dir ${{{{ env.ATHLETE_DIR }}}}/persec_cache \\
             --strava ${{{{ env.ATHLETE_DIR }}}}/data/activities.csv \\
             --pending-activities ${{{{ env.ATHLETE_DIR }}}}/pending_activities.csv \\
@@ -843,9 +844,9 @@ on:
         if: ${{{{ {gc.strip('${{ }}')} && (env.PIPELINE_MODE == 'FULL' || env.PIPELINE_MODE == 'INITIAL' || env.PIPELINE_MODE == 'UPDATE') }}}}
         run: |
           python add_gap_power.py \\
-            --master ${{{{ env.ATHLETE_DIR }}}}/output/Master_FULL.xlsx \\
+            --master ${{{{ env.ATHLETE_DIR }}}}/output/Master_{aid}_FULL.xlsx \\
             --cache-dir ${{{{ env.ATHLETE_DIR }}}}/persec_cache \\
-            --out ${{{{ env.ATHLETE_DIR }}}}/output/Master_FULL.xlsx \\
+            --out ${{{{ env.ATHLETE_DIR }}}}/output/Master_{aid}_FULL.xlsx \\
             --mass-kg {mass} \\
             --re-constant 0.92
 
@@ -853,9 +854,9 @@ on:
         if: ${{{{ {gc.strip('${{ }}')} && env.PIPELINE_MODE != 'DASHBOARD' }}}}
         run: |
           python StepB_PostProcess.py \\
-            --master ${{{{ env.ATHLETE_DIR }}}}/output/Master_FULL.xlsx \\
+            --master ${{{{ env.ATHLETE_DIR }}}}/output/Master_{aid}_FULL.xlsx \\
             --persec-cache-dir ${{{{ env.ATHLETE_DIR }}}}/persec_cache \\
-            --out ${{{{ env.ATHLETE_DIR }}}}/output/Master_FULL_post.xlsx \\
+            --out ${{{{ env.ATHLETE_DIR }}}}/output/Master_{aid}_FULL_post.xlsx \\
             --model-json re_model_generic.json \\
             --override-file ${{{{ env.ATHLETE_DIR }}}}/activity_overrides.xlsx \\
             --athlete-data ${{{{ env.ATHLETE_DIR }}}}/athlete_data.csv \\
@@ -869,7 +870,7 @@ on:
       - name: Generate dashboard
         if: {gc}
         env:
-          MASTER_FILE: ${{{{ env.ATHLETE_DIR }}}}/output/Master_FULL_post.xlsx
+          MASTER_FILE: ${{{{ env.ATHLETE_DIR }}}}/output/Master_{aid}_FULL_post.xlsx
           OUTPUT_FILE: ${{{{ env.ATHLETE_DIR }}}}/output/dashboard/index.html
           ATHLETE_DATA_FILE: ${{{{ env.ATHLETE_DIR }}}}/athlete_data.csv
         run: python generate_dashboard.py
@@ -902,8 +903,8 @@ on:
                     athlete_data.csv \\
                     fit_sync_state.json \\
                     pending_activities.csv \\
-                    output/Master_FULL.xlsx \\
-                    output/Master_FULL_post.xlsx \\
+                    output/Master_{aid}_FULL.xlsx \\
+                    output/Master_{aid}_FULL_post.xlsx \\
                     output/dashboard/index.html \\
                     output/_weather_cache_openmeteo/openmeteo_cache.sqlite \\
             --cache-dir ${{{{ env.ATHLETE_DIR }}}}/persec_cache"""
@@ -929,8 +930,8 @@ on:
                     data/activities.csv \\
                     activity_overrides.xlsx \\
                     athlete_data.csv \\
-                    output/Master_FULL.xlsx \\
-                    output/Master_FULL_post.xlsx \\
+                    output/Master_{aid}_FULL.xlsx \\
+                    output/Master_{aid}_FULL_post.xlsx \\
                     output/_weather_cache_openmeteo/openmeteo_cache.sqlite \\
             --cache-dir ${{{{ env.ATHLETE_DIR }}}}/persec_cache
         continue-on-error: true
@@ -951,7 +952,7 @@ on:
           python rebuild_from_fit_zip.py \\
             --fit-zip ${{{{ env.ATHLETE_DIR }}}}/data/fits.zip \\
             --template master_template.xlsx \\
-            --out ${{{{ env.ATHLETE_DIR }}}}/output/Master_FULL.xlsx \\
+            --out ${{{{ env.ATHLETE_DIR }}}}/output/Master_{aid}_FULL.xlsx \\
             --persec-cache-dir ${{{{ env.ATHLETE_DIR }}}}/persec_cache \\
             --strava ${{{{ env.ATHLETE_DIR }}}}/data/activities.csv \\
             --override-file ${{{{ env.ATHLETE_DIR }}}}/activity_overrides.xlsx \\
@@ -963,9 +964,9 @@ on:
         if: ${{{{ github.event.inputs.mode == 'FULL' || github.event.inputs.mode == 'INITIAL' }}}}
         run: |
           python add_gap_power.py \\
-            --master ${{{{ env.ATHLETE_DIR }}}}/output/Master_FULL.xlsx \\
+            --master ${{{{ env.ATHLETE_DIR }}}}/output/Master_{aid}_FULL.xlsx \\
             --cache-dir ${{{{ env.ATHLETE_DIR }}}}/persec_cache \\
-            --out ${{{{ env.ATHLETE_DIR }}}}/output/Master_FULL.xlsx \\
+            --out ${{{{ env.ATHLETE_DIR }}}}/output/Master_{aid}_FULL.xlsx \\
             --mass-kg {mass} \\
             --re-constant 0.92
 
@@ -974,9 +975,9 @@ on:
         if: ${{{{ github.event.inputs.mode != 'DASHBOARD' }}}}
         run: |
           python StepB_PostProcess.py \\
-            --master ${{{{ env.ATHLETE_DIR }}}}/output/Master_FULL.xlsx \\
+            --master ${{{{ env.ATHLETE_DIR }}}}/output/Master_{aid}_FULL.xlsx \\
             --persec-cache-dir ${{{{ env.ATHLETE_DIR }}}}/persec_cache \\
-            --out ${{{{ env.ATHLETE_DIR }}}}/output/Master_FULL_post.xlsx \\
+            --out ${{{{ env.ATHLETE_DIR }}}}/output/Master_{aid}_FULL_post.xlsx \\
             --model-json re_model_generic.json \\
             --override-file ${{{{ env.ATHLETE_DIR }}}}/activity_overrides.xlsx \\
             --athlete-data ${{{{ env.ATHLETE_DIR }}}}/athlete_data.csv \\
@@ -990,7 +991,7 @@ on:
       # ─── Step 4: Generate dashboard ─────────────────────────
       - name: Generate dashboard
         env:
-          MASTER_FILE: ${{{{ env.ATHLETE_DIR }}}}/output/Master_FULL_post.xlsx
+          MASTER_FILE: ${{{{ env.ATHLETE_DIR }}}}/output/Master_{aid}_FULL_post.xlsx
           OUTPUT_FILE: ${{{{ env.ATHLETE_DIR }}}}/output/dashboard/index.html
           ATHLETE_DATA_FILE: ${{{{ env.ATHLETE_DIR }}}}/athlete_data.csv
         run: python generate_dashboard.py
@@ -1014,8 +1015,8 @@ on:
             --items activity_overrides.xlsx \\
                     athlete.yml \\
                     athlete_data.csv \\
-                    output/Master_FULL.xlsx \\
-                    output/Master_FULL_post.xlsx \\
+                    output/Master_{aid}_FULL.xlsx \\
+                    output/Master_{aid}_FULL_post.xlsx \\
                     output/dashboard/index.html \\
                     output/_weather_cache_openmeteo/openmeteo_cache.sqlite \\
             --cache-dir ${{{{ env.ATHLETE_DIR }}}}/persec_cache"""
@@ -1054,7 +1055,7 @@ on:
           echo "- **Status:** ${{{{ job.status }}}}" >> $GITHUB_STEP_SUMMARY
           echo "- **Time:** $(date -u +%Y-%m-%dT%H:%M:%SZ)" >> $GITHUB_STEP_SUMMARY
           
-          MASTER="${{{{ env.ATHLETE_DIR }}}}/output/Master_FULL_post.xlsx"
+          MASTER="${{{{ env.ATHLETE_DIR }}}}/output/Master_{aid}_FULL_post.xlsx"
           if [ -f "$MASTER" ]; then
             SIZE=$(stat -c%s "$MASTER" 2>/dev/null || echo "?")
             echo "- **Master size:** $SIZE bytes" >> $GITHUB_STEP_SUMMARY

@@ -646,11 +646,11 @@ def enrich_and_classify(master_path: str, overrides_path: str,
     
     # ── Build per-run predicted 5K pace lookup ──
     # Used for: (a) no-HR fallback, (b) named race pace override (HR ramp-up in short races)
-    # Prefer per-run predictions from Master_FULL_post (shift(1) values = prediction at race time)
-    # Per-row fallback: try gap → sim → stryd columns for each row (handles NaN from shift(1))
+    # Prefer per-run predictions from Master_*_FULL_post (shift(1) values = prediction at race time)
+    # Support both old (Master_FULL.xlsx) and new (Master_A001_FULL.xlsx) naming
     _pred_5k_by_file = {}
     _pred_source_df = master  # default
-    _post_path = master_path.replace('Master_FULL.xlsx', 'Master_FULL_post.xlsx')
+    _post_path = master_path.replace('_FULL.xlsx', '_FULL_post.xlsx')
     if Path(_post_path).exists() and _post_path != master_path:
         try:
             _post_df = pd.read_excel(_post_path, sheet_name=0)

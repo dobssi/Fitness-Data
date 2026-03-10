@@ -12,7 +12,7 @@
 #
 # INITIAL mode — two sequential jobs, each with their own 6h clock:
 #   rebuild:      FIT ingest + full rebuild + weather fetch (~5h). Uploads
-#                 Master_FULL.xlsx + weather cache + persec NPZs to Dropbox.
+#                 Master_A006_FULL.xlsx + weather cache + persec NPZs to Dropbox.
 #   stepb_deploy: Auto-triggered after rebuild succeeds. Downloads from
 #                 Dropbox, runs StepB + dashboard + deploy (~15 min).
 #                 Also triggered directly by FROM_STEPB / DASHBOARD modes.
@@ -196,8 +196,8 @@ jobs:
                     athlete.yml \
                     activity_overrides.xlsx \
                     athlete_data.csv \
-                    output/Master_FULL.xlsx \
-                    output/Master_FULL_post.xlsx \
+                    output/Master_A006_FULL.xlsx \
+                    output/Master_A006_FULL_post.xlsx \
                     output/_weather_cache_openmeteo/openmeteo_cache.sqlite \
             $CACHE_FLAG
         continue-on-error: true
@@ -239,7 +239,7 @@ jobs:
           python rebuild_from_fit_zip.py \
             --fit-zip ${{ env.ATHLETE_DIR }}/data/fits.zip \
             --template master_template.xlsx \
-            --out ${{ env.ATHLETE_DIR }}/output/Master_FULL.xlsx \
+            --out ${{ env.ATHLETE_DIR }}/output/Master_A006_FULL.xlsx \
             --persec-cache-dir ${{ env.ATHLETE_DIR }}/persec_cache \
             --strava ${{ env.ATHLETE_DIR }}/data/activities.csv \
             --pending-activities ${{ env.ATHLETE_DIR }}/pending_activities.csv \
@@ -257,8 +257,8 @@ jobs:
           python rebuild_from_fit_zip.py \
             --fit-zip ${{ env.ATHLETE_DIR }}/data/fits.zip \
             --template master_template.xlsx \
-            --out ${{ env.ATHLETE_DIR }}/output/Master_FULL.xlsx \
-            --append-master-in ${{ env.ATHLETE_DIR }}/output/Master_FULL.xlsx \
+            --out ${{ env.ATHLETE_DIR }}/output/Master_A006_FULL.xlsx \
+            --append-master-in ${{ env.ATHLETE_DIR }}/output/Master_A006_FULL.xlsx \
             --persec-cache-dir ${{ env.ATHLETE_DIR }}/persec_cache \
             $STRAVA_FLAG \
             --pending-activities ${{ env.ATHLETE_DIR }}/pending_activities.csv \
@@ -277,9 +277,9 @@ jobs:
         if: ${{ steps.gate.outputs.continue == 'true' && (env.PIPELINE_MODE == 'FULL' || env.PIPELINE_MODE == 'INITIAL' || env.PIPELINE_MODE == 'UPDATE') }}
         run: |
           python add_gap_power.py \
-            --master ${{ env.ATHLETE_DIR }}/output/Master_FULL.xlsx \
+            --master ${{ env.ATHLETE_DIR }}/output/Master_A006_FULL.xlsx \
             --cache-dir ${{ env.ATHLETE_DIR }}/persec_cache \
-            --out ${{ env.ATHLETE_DIR }}/output/Master_FULL.xlsx \
+            --out ${{ env.ATHLETE_DIR }}/output/Master_A006_FULL.xlsx \
             --mass-kg 76 \
             --re-constant 0.92
 
@@ -291,7 +291,7 @@ jobs:
             SKIP_FLAG="--skip-if-classified"
           fi
           python classify_races.py \
-            --master ${{ env.ATHLETE_DIR }}/output/Master_FULL.xlsx \
+            --master ${{ env.ATHLETE_DIR }}/output/Master_A006_FULL.xlsx \
             --overrides ${{ env.ATHLETE_DIR }}/activity_overrides.xlsx \
             --athlete-yml ${{ env.ATHLETE_CONFIG_PATH }} \
             --from-master \
@@ -303,9 +303,9 @@ jobs:
         if: ${{ steps.gate.outputs.continue == 'true' && (env.PIPELINE_MODE == 'UPDATE' || env.PIPELINE_MODE == 'FULL') }}
         run: |
           python StepB_PostProcess.py \
-            --master ${{ env.ATHLETE_DIR }}/output/Master_FULL.xlsx \
+            --master ${{ env.ATHLETE_DIR }}/output/Master_A006_FULL.xlsx \
             --persec-cache-dir ${{ env.ATHLETE_DIR }}/persec_cache \
-            --out ${{ env.ATHLETE_DIR }}/output/Master_FULL_post.xlsx \
+            --out ${{ env.ATHLETE_DIR }}/output/Master_A006_FULL_post.xlsx \
             --model-json re_model_generic.json \
             --override-file ${{ env.ATHLETE_DIR }}/activity_overrides.xlsx \
             --athlete-data ${{ env.ATHLETE_DIR }}/athlete_data.csv \
@@ -319,7 +319,7 @@ jobs:
       - name: Generate dashboard (UPDATE / FULL)
         if: ${{ steps.gate.outputs.continue == 'true' && (env.PIPELINE_MODE == 'UPDATE' || env.PIPELINE_MODE == 'FULL') }}
         env:
-          MASTER_FILE:       ${{ env.ATHLETE_DIR }}/output/Master_FULL_post.xlsx
+          MASTER_FILE:       ${{ env.ATHLETE_DIR }}/output/Master_A006_FULL_post.xlsx
           OUTPUT_FILE:       ${{ env.ATHLETE_DIR }}/output/dashboard/index.html
           ATHLETE_DATA_FILE: ${{ env.ATHLETE_DIR }}/athlete_data.csv
         run: python generate_dashboard.py
@@ -349,8 +349,8 @@ jobs:
             --dropbox-base "${{ env.DB_BASE }}" \
             --local-prefix "${{ env.ATHLETE_DIR }}" \
             --items output/_weather_cache_openmeteo/openmeteo_cache.sqlite \
-                    output/Master_FULL.xlsx \
-                    output/Master_FULL_post.xlsx
+                    output/Master_A006_FULL.xlsx \
+                    output/Master_A006_FULL_post.xlsx
         continue-on-error: true
 
       - name: Upload results to Dropbox (UPDATE / FULL / INITIAL / CLASSIFY_RACES)
@@ -365,8 +365,8 @@ jobs:
                     data/activities.csv \
                     fit_sync_state.json \
                     pending_activities.csv \
-                    output/Master_FULL.xlsx \
-                    output/Master_FULL_post.xlsx \
+                    output/Master_A006_FULL.xlsx \
+                    output/Master_A006_FULL_post.xlsx \
                     output/dashboard/index.html \
                     output/_weather_cache_openmeteo/openmeteo_cache.sqlite
 
@@ -410,7 +410,7 @@ jobs:
             COUNT=$(find "$CACHE" -name "*.npz" | wc -l)
             echo "- **NPZ cache:** $COUNT files" >> $GITHUB_STEP_SUMMARY
           fi
-          MASTER="${{ env.ATHLETE_DIR }}/output/Master_FULL.xlsx"
+          MASTER="${{ env.ATHLETE_DIR }}/output/Master_A006_FULL.xlsx"
           if [ -f "$MASTER" ]; then
             SIZE=$(stat -c%s "$MASTER" 2>/dev/null || echo "?")
             echo "- **Master_FULL:** $SIZE bytes" >> $GITHUB_STEP_SUMMARY
@@ -492,8 +492,8 @@ jobs:
                     athlete.yml \
                     activity_overrides.xlsx \
                     athlete_data.csv \
-                    output/Master_FULL.xlsx \
-                    output/Master_FULL_post.xlsx \
+                    output/Master_A006_FULL.xlsx \
+                    output/Master_A006_FULL_post.xlsx \
                     output/_weather_cache_openmeteo/openmeteo_cache.sqlite \
             --cache-dir ${{ env.ATHLETE_DIR }}/persec_cache \
             --cache-full
@@ -512,9 +512,9 @@ jobs:
         if: ${{ env.PIPELINE_MODE != 'DASHBOARD' }}
         run: |
           python StepB_PostProcess.py \
-            --master ${{ env.ATHLETE_DIR }}/output/Master_FULL.xlsx \
+            --master ${{ env.ATHLETE_DIR }}/output/Master_A006_FULL.xlsx \
             --persec-cache-dir ${{ env.ATHLETE_DIR }}/persec_cache \
-            --out ${{ env.ATHLETE_DIR }}/output/Master_FULL_post.xlsx \
+            --out ${{ env.ATHLETE_DIR }}/output/Master_A006_FULL_post.xlsx \
             --model-json re_model_generic.json \
             --override-file ${{ env.ATHLETE_DIR }}/activity_overrides.xlsx \
             --athlete-data ${{ env.ATHLETE_DIR }}/athlete_data.csv \
@@ -534,7 +534,7 @@ jobs:
         if: ${{ env.PIPELINE_MODE == 'INITIAL' || env.PIPELINE_MODE == 'CLASSIFY_RACES' }}
         run: |
           python classify_races.py \
-            --master ${{ env.ATHLETE_DIR }}/output/Master_FULL_post.xlsx \
+            --master ${{ env.ATHLETE_DIR }}/output/Master_A006_FULL_post.xlsx \
             --overrides ${{ env.ATHLETE_DIR }}/activity_overrides.xlsx \
             --athlete-yml ${{ env.ATHLETE_CONFIG_PATH }} \
             --from-master
@@ -543,9 +543,9 @@ jobs:
         if: ${{ env.PIPELINE_MODE == 'INITIAL' || env.PIPELINE_MODE == 'CLASSIFY_RACES' }}
         run: |
           python StepB_PostProcess.py \
-            --master ${{ env.ATHLETE_DIR }}/output/Master_FULL.xlsx \
+            --master ${{ env.ATHLETE_DIR }}/output/Master_A006_FULL.xlsx \
             --persec-cache-dir ${{ env.ATHLETE_DIR }}/persec_cache \
-            --out ${{ env.ATHLETE_DIR }}/output/Master_FULL_post.xlsx \
+            --out ${{ env.ATHLETE_DIR }}/output/Master_A006_FULL_post.xlsx \
             --model-json re_model_generic.json \
             --override-file ${{ env.ATHLETE_DIR }}/activity_overrides.xlsx \
             --athlete-data ${{ env.ATHLETE_DIR }}/athlete_data.csv \
@@ -558,7 +558,7 @@ jobs:
 
       - name: Generate dashboard
         env:
-          MASTER_FILE:       ${{ env.ATHLETE_DIR }}/output/Master_FULL_post.xlsx
+          MASTER_FILE:       ${{ env.ATHLETE_DIR }}/output/Master_A006_FULL_post.xlsx
           OUTPUT_FILE:       ${{ env.ATHLETE_DIR }}/output/dashboard/index.html
           ATHLETE_DATA_FILE: ${{ env.ATHLETE_DIR }}/athlete_data.csv
         run: python generate_dashboard.py
@@ -573,7 +573,7 @@ jobs:
                     athlete.yml \
                     athlete_data.csv \
                     data/activities.csv \
-                    output/Master_FULL_post.xlsx \
+                    output/Master_A006_FULL_post.xlsx \
                     output/dashboard/index.html \
                     output/_weather_cache_openmeteo/openmeteo_cache.sqlite
 
@@ -599,7 +599,7 @@ jobs:
           echo "- **Mode:** ${{ env.PIPELINE_MODE }}" >> $GITHUB_STEP_SUMMARY
           echo "- **Status:** ${{ job.status }}" >> $GITHUB_STEP_SUMMARY
           echo "- **Time:** $(date -u +%Y-%m-%dT%H:%M:%SZ)" >> $GITHUB_STEP_SUMMARY
-          MASTER="${{ env.ATHLETE_DIR }}/output/Master_FULL_post.xlsx"
+          MASTER="${{ env.ATHLETE_DIR }}/output/Master_A006_FULL_post.xlsx"
           if [ -f "$MASTER" ]; then
             SIZE=$(stat -c%s "$MASTER" 2>/dev/null || echo "?")
             echo "- **Master_FULL_post:** $SIZE bytes" >> $GITHUB_STEP_SUMMARY
