@@ -477,23 +477,29 @@ def bootstrap_peak_speed(df: pd.DataFrame, rfl_col: str = 'RFL_gap_Trend',
                          lthr: float = None, max_hr: float = None,
                          exclude_parkruns: bool = True) -> tuple:
     """
-    Auto-calculate peak threshold speed from available data.
+    Auto-calculate peak threshold speed and data-driven race factors.
     
-    Three tiers (tries each in order):
+    Three tiers for peak_speed (tries each in order):
     
     1. RACE-FLAGGED (best): Uses explicitly flagged races (race_flag column).
-       Back-calculates peak_speed from race results. RE cancels mathematically.
-       Uses MEDIAN of implied values. Validated at 2.1% MAE, ~0% bias.
+       Back-calculates peak_speed from race results using shift(1) RFL
+       (consistent with how predictions consume RFL). Also computes
+       per-distance race factors from the data when enough races exist.
     
     2. AUTO-DETECTED (good): When no race_flag data exists, auto-detects race
        candidates from standard distance + high HR (>87% max_hr).
        Uses P75 of implied values to compensate for training contamination.
-       Validated at +0.4% vs ground truth. Converges with ~5 races.
     
     3. TRAINING-ESTIMATED (fallback): When no races detectable at all,
-       estimates from peak RF_gap_Trend × LTHR × RE / mass × 0.97.
-       The 0.97 discount accounts for race conditions vs training.
-       Validated at ±2.5% across fitness levels.
+       estimates from peak RF_Trend × LTHR × RE / mass × 0.97.
+    
+    Race factors are self-calibrating:
+    - For each standard distance with >= 3 races, compute the median
+      RFL-normalised condition-adjusted speed.
+    - Anchor on 10K (factor = 1.0 by definition).
+    - Factor for other distances = their normalised speed / 10K speed.
+    - Distances with < 3 races use Riegel interpolation from distances
+      that do have data, or a default exponent (k=0.06) as final fallback.
     
     Args:
         df: Master DataFrame with RF data, distances, times, HR
@@ -505,18 +511,25 @@ def bootstrap_peak_speed(df: pd.DataFrame, rfl_col: str = 'RFL_gap_Trend',
         exclude_parkruns: If True, exclude parkruns from race-flagged calibration
     
     Returns:
-        (peak_speed_mps, peak_cp_watts, n_races_used, method)
-        peak_speed_mps: Threshold speed in m/s (the fundamental prediction input)
+        (peak_speed_mps, peak_cp_watts, n_races_used, method, race_factors)
+        peak_speed_mps: Threshold speed in m/s at 10K (the prediction anchor)
         peak_cp_watts: PEAK_CP for display = peak_speed × mass / RE_generic
         n_races_used: Number of races/candidates used (0 if training-estimated)
         method: 'race', 'auto', or 'training'
+        race_factors: dict {'5k': float, '10k': 1.0, 'hm': float, 'marathon': float}
+                      Data-driven where possible, Riegel-interpolated where not.
     """
     import numpy as np
+    import math
     
-    RACE_FACTORS = {'5k': 1.05, '10k': 1.0, 'hm': 0.95, 'marathon': 0.89}
+    DEFAULT_FACTORS = {'5k': 1.05, '10k': 1.0, 'hm': 0.95, 'marathon': 0.89}
     RACE_DISTANCES_M = {'5k': 5000, '10k': 10000, 'hm': 21097.5, 'marathon': 42195}
     TRAINING_DISCOUNT = 0.97
-    AUTO_HR_FRACTION = 0.87  # 87% of max_hr for auto-detection
+    AUTO_HR_FRACTION = 0.87
+    DEFAULT_RIEGEL_K = 0.06
+    MIN_RACES_FOR_FACTOR = 3  # Need >= 3 races at a distance to compute its factor
+    HEAT_REF_S = 5400.0       # 90 min — duration at which heat has full effect
+    HEAT_MAX_MULT = 1.5       # Cap on heat duration scaling
     
     def _classify_dist(d):
         for name, target in [('5k', 5.0), ('10k', 10.0), ('hm', 21.1), ('marathon', 42.2)]:
@@ -525,30 +538,31 @@ def bootstrap_peak_speed(df: pd.DataFrame, rfl_col: str = 'RFL_gap_Trend',
                 return name
         return None
     
-    def _calc_implied_peak_speed(candidates, use_p75=False):
-        """Shared logic: compute implied peak_speed from a set of race-like runs."""
-        implied = candidates.apply(
-            lambda r: (RACE_DISTANCES_M[r['_dc']] / r['moving_time_s']) /
-                      (r[rfl_col] * RACE_FACTORS[r['_dc']]),
-            axis=1
-        )
-        
-        # Remove outliers (>2 SD from median)
-        med = implied.median()
-        sd = implied.std()
-        if sd > 0 and len(implied) > 3:
-            implied = implied[(implied > med - 2 * sd) & (implied < med + 2 * sd)]
-        
-        if len(implied) == 0:
-            return None, 0
-        
-        # p75 for auto-detected (compensates for training contamination)
-        # median for race-flagged (already clean)
-        peak_speed = float(implied.quantile(0.75) if use_p75 else implied.median())
-        return peak_speed, len(implied)
+    def _duration_scaled_temp_adj(temp_adj, duration_s):
+        """Scale heat effect by duration (longer race = more cumulative impact)."""
+        if not np.isfinite(temp_adj) or temp_adj <= 1.0:
+            return 1.0
+        heat_part = temp_adj - 1.0
+        dur_scale = min(HEAT_MAX_MULT, duration_s / HEAT_REF_S)
+        return 1.0 + heat_part * dur_scale
+    
+    def _condition_adj(row):
+        """Compute total condition adjustment for a race row."""
+        temp_adj = float(row.get('Temp_Adj', 1.0))
+        if not np.isfinite(temp_adj):
+            temp_adj = 1.0
+        dur = float(row.get('moving_time_s', 0))
+        scaled_temp = _duration_scaled_temp_adj(temp_adj, dur)
+        terrain = float(row.get('Terrain_Adj', 1.0))
+        if not np.isfinite(terrain):
+            terrain = 1.0
+        surface = float(row.get('surface_adj', 1.0))
+        if not np.isfinite(surface):
+            surface = 1.0
+        return scaled_temp * terrain * surface
     
     def _prepare_candidates(subset):
-        """Add distance classification and filter for valid bootstrap rows."""
+        """Add distance classification, shift(1) RFL, condition adj."""
         subset = subset.copy()
         dist_col = 'official_distance_km' if 'official_distance_km' in subset.columns else 'distance_km'
         if dist_col == 'official_distance_km':
@@ -556,12 +570,113 @@ def bootstrap_peak_speed(df: pd.DataFrame, rfl_col: str = 'RFL_gap_Trend',
         else:
             subset['_bd'] = subset['distance_km']
         subset['_dc'] = subset['_bd'].apply(_classify_dist)
+        
+        # shift(1) RFL: use the previous row's RFL for consistency with predictions
+        subset['_rfl_shift1'] = df[rfl_col].shift(1).loc[subset.index]
+        
+        # Condition adjustment
+        subset['_cond_adj'] = subset.apply(_condition_adj, axis=1)
+        subset['_adj_time'] = subset['moving_time_s'] / subset['_cond_adj']
+        
         return subset[
             subset['_dc'].notna() &
-            subset[rfl_col].notna() &
+            subset['_rfl_shift1'].notna() &
+            (subset['_rfl_shift1'] > 0.5) &
             (subset['moving_time_s'] > 0) &
-            (subset[rfl_col] > 0.5)
+            (subset['_adj_time'] > 0)
         ]
+    
+    def _compute_factors_and_speed(valid):
+        """
+        Self-calibrating factor extraction from race data.
+        
+        1. For each distance with >= MIN_RACES_FOR_FACTOR races, compute
+           median RFL-normalised condition-adjusted speed (norm_speed).
+        2. Anchor on 10K (or estimate from 5K if no 10K data).
+        3. factor_d = norm_speed_d / anchor_speed.
+        4. Missing distances filled via Riegel k interpolation.
+        """
+        # Compute median norm_speed per distance
+        # norm_speed = (dist_m / adj_time) / RFL_shift1
+        norm_speeds = {}
+        n_per_dist = {}
+        for dc in ['5k', '10k', 'hm', 'marathon']:
+            c = valid[valid['_dc'] == dc]
+            if len(c) < MIN_RACES_FOR_FACTOR:
+                continue
+            dist_m = RACE_DISTANCES_M[dc]
+            ns_values = (dist_m / c['_adj_time']) / c['_rfl_shift1']
+            
+            # Remove outliers (>2 SD from median)
+            med = ns_values.median()
+            sd = ns_values.std()
+            if sd > 0 and len(ns_values) > 3:
+                ns_values = ns_values[(ns_values > med - 2 * sd) & (ns_values < med + 2 * sd)]
+            
+            if len(ns_values) >= MIN_RACES_FOR_FACTOR:
+                norm_speeds[dc] = float(ns_values.median())
+                n_per_dist[dc] = len(ns_values)
+        
+        # Anchor selection: prefer 10K, fall back to 5K with a small correction
+        if '10k' in norm_speeds:
+            anchor_speed = norm_speeds['10k']
+        elif '5k' in norm_speeds:
+            # Estimate 10K speed from 5K using default Riegel
+            anchor_speed = norm_speeds['5k'] / (5000 / 10000) ** (-DEFAULT_RIEGEL_K)
+        else:
+            return None, None, DEFAULT_FACTORS.copy()
+        
+        # Direct factors for distances with enough data
+        factors = {}
+        for dc, ns in norm_speeds.items():
+            factors[dc] = ns / anchor_speed
+        
+        # Always set 10K = 1.0 (by definition, it's the anchor)
+        if '10k' in norm_speeds:
+            factors['10k'] = 1.0
+        
+        # Fit Riegel k from available distances (for interpolating missing ones)
+        if len(norm_speeds) >= 2:
+            from scipy.optimize import minimize_scalar
+            available = [(dc, RACE_DISTANCES_M[dc], ns / anchor_speed) for dc, ns in norm_speeds.items()]
+            def k_error(k):
+                err = 0
+                for dc, d, f in available:
+                    predicted_f = (d / 10000) ** (-k)
+                    err += (f - predicted_f) ** 2
+                return err
+            result = minimize_scalar(k_error, bounds=(0.03, 0.15), method='bounded')
+            fitted_k = result.x
+        else:
+            fitted_k = DEFAULT_RIEGEL_K
+        
+        # Fill missing distances with Riegel interpolation
+        for dc, dist_m in RACE_DISTANCES_M.items():
+            if dc not in factors:
+                factors[dc] = (dist_m / 10000) ** (-fitted_k)
+        
+        # Log factor sources
+        for dc in ['5k', '10k', 'hm', 'marathon']:
+            src = f"DATA (N={n_per_dist[dc]})" if dc in n_per_dist else f"Riegel k={fitted_k:.3f}"
+            print(f"    {dc}: {factors[dc]:.4f} [{src}]")
+        
+        return anchor_speed, fitted_k, factors
+    
+    def _calc_implied_peak_speed_legacy(candidates, factors, use_p75=False):
+        """Compute peak_speed using factors (for compatibility with auto/training tiers)."""
+        implied = candidates.apply(
+            lambda r: (RACE_DISTANCES_M[r['_dc']] / r['_adj_time']) /
+                      (r['_rfl_shift1'] * factors[r['_dc']]),
+            axis=1
+        )
+        med = implied.median()
+        sd = implied.std()
+        if sd > 0 and len(implied) > 3:
+            implied = implied[(implied > med - 2 * sd) & (implied < med + 2 * sd)]
+        if len(implied) == 0:
+            return None, 0
+        peak_speed = float(implied.quantile(0.75) if use_p75 else implied.median())
+        return peak_speed, len(implied)
     
     # ---- Tier 1: Race-flagged ----
     if 'race_flag' in df.columns:
@@ -573,24 +688,59 @@ def bootstrap_peak_speed(df: pd.DataFrame, rfl_col: str = 'RFL_gap_Trend',
                 valid = valid[~valid['activity_name'].str.contains('parkrun|Parkrun|PARKRUN', na=False)]
             
             if len(valid) >= 1:
-                peak_speed, n_used = _calc_implied_peak_speed(valid, use_p75=False)
+                # Self-calibrating factors
+                print("  Race factor calibration (condition-adjusted, shift(1) RFL):")
+                anchor_speed, fitted_k, factors = _compute_factors_and_speed(valid)
+                
+                if anchor_speed is not None:
+                    # anchor_speed IS peak_speed (10K normalised speed at RFL=1.0)
+                    peak_speed = anchor_speed
+                else:
+                    # Not enough data for self-calibration — use default factors
+                    factors = DEFAULT_FACTORS.copy()
+                    ps, n = _calc_implied_peak_speed_legacy(valid, factors)
+                    if ps is None:
+                        peak_speed = None
+                    else:
+                        peak_speed = ps
+                
                 if peak_speed is not None:
                     peak_cp = peak_speed * mass_kg / re_generic
-                    return peak_speed, peak_cp, n_used, 'race'
+                    n_used = len(valid)
+                    return peak_speed, peak_cp, n_used, 'race', factors
     
     # ---- Tier 2: Auto-detected races ----
-    # Standard distance + HR > 87% max_hr = race candidate
     hr_threshold = max_hr * AUTO_HR_FRACTION
     if 'avg_hr' in df.columns and 'distance_km' in df.columns:
         high_hr = df[df['avg_hr'] >= hr_threshold]
         if len(high_hr) > 0:
             valid = _prepare_candidates(high_hr)
             
-            if len(valid) >= 3:  # Need at least 3 for p75 to be meaningful
-                peak_speed, n_used = _calc_implied_peak_speed(valid, use_p75=True)
+            if len(valid) >= 3:
+                print("  Auto-detect factor calibration:")
+                anchor_speed, fitted_k, factors = _compute_factors_and_speed(valid)
+                if anchor_speed is not None:
+                    peak_speed = anchor_speed
+                else:
+                    factors = DEFAULT_FACTORS.copy()
+                    ps, _ = _calc_implied_peak_speed_legacy(valid, factors, use_p75=True)
+                    peak_speed = ps
+                
                 if peak_speed is not None:
+                    # Apply p75 uplift for auto-detected (compensates for training contamination)
+                    implied_all = []
+                    for _, r in valid.iterrows():
+                        dc = r['_dc']
+                        ps_i = (RACE_DISTANCES_M[dc] / r['_adj_time']) / (r['_rfl_shift1'] * factors[dc])
+                        implied_all.append(ps_i)
+                    implied_arr = np.array(implied_all)
+                    med = np.median(implied_arr)
+                    sd = np.std(implied_arr)
+                    clean = implied_arr[(implied_arr > med - 2*sd) & (implied_arr < med + 2*sd)]
+                    peak_speed = float(np.percentile(clean, 75))
+                    
                     peak_cp = peak_speed * mass_kg / re_generic
-                    return peak_speed, peak_cp, n_used, 'auto'
+                    return peak_speed, peak_cp, len(valid), 'auto', factors
     
     # ---- Tier 3: Training-estimated ----
     if rfl_col == 'RFL_gap_Trend':
@@ -607,9 +757,9 @@ def bootstrap_peak_speed(df: pd.DataFrame, rfl_col: str = 'RFL_gap_Trend',
         if np.isfinite(peak_rf) and peak_rf > 0:
             peak_speed = peak_rf * lthr * re_generic / mass_kg * TRAINING_DISCOUNT
             peak_cp = peak_speed * mass_kg / re_generic
-            return peak_speed, peak_cp, 0, 'training'
+            return peak_speed, peak_cp, 0, 'training', DEFAULT_FACTORS.copy()
     
-    return None, None, 0, None
+    return None, None, 0, None, DEFAULT_FACTORS.copy()
 
 
 
@@ -5324,7 +5474,7 @@ def main() -> int:
         # so the Factor calculation uses an accurate value on the next run.
         _effective_peak_cp = PEAK_CP_WATTS
         mass_kg = args.mass_kg
-        stryd_peak_speed, stryd_peak_cp, stryd_n_races, stryd_method = bootstrap_peak_speed(
+        stryd_peak_speed, stryd_peak_cp, stryd_n_races, stryd_method, stryd_factors = bootstrap_peak_speed(
             dfm, rfl_col='RFL_Trend', mass_kg=mass_kg,
             re_generic=GAP_RE_CONSTANT,
             lthr=RF_CONSTANTS['lthr'],
@@ -5340,6 +5490,7 @@ def main() -> int:
             }.get(stryd_method, '')
             print(f"  Stryd PEAK_CP bootstrap ({stryd_method}): {_effective_peak_cp:.0f}W ({detail})")
         else:
+            stryd_factors = {'5k': 1.05, '10k': 1.0, 'hm': 0.95, 'marathon': 0.89}
             print(f"  Stryd PEAK_CP bootstrap: no data, using config value {PEAK_CP_WATTS}W")
         
         # CP = RFL_Trend * peak_CP
@@ -5360,12 +5511,19 @@ def main() -> int:
             re_p90 = recent_re.quantile(0.90) if len(recent_re) > 0 else 0.95
             print(f"  RE p90: {re_p90:.4f}")
             
-            # Race predictions (need mass_kg from args)
+            # Race predictions using data-driven factors
             mass_kg = args.mass_kg
-            pred_5k = calc_race_prediction(latest_rfl, '5k', re_p90, _effective_peak_cp, mass_kg)
-            pred_10k = calc_race_prediction(latest_rfl, '10k', re_p90, _effective_peak_cp, mass_kg)
-            pred_hm = calc_race_prediction(latest_rfl, 'hm', re_p90, _effective_peak_cp, mass_kg)
-            pred_mara = calc_race_prediction(latest_rfl, 'marathon', re_p90, _effective_peak_cp, mass_kg)
+            RACE_DISTS_PRINT = {'5k': 5000, '10k': 10000, 'hm': 21097.5, 'marathon': 42195}
+            if stryd_peak_speed:
+                pred_5k = RACE_DISTS_PRINT['5k'] / (latest_rfl * stryd_peak_speed * stryd_factors.get('5k', 1.05))
+                pred_10k = RACE_DISTS_PRINT['10k'] / (latest_rfl * stryd_peak_speed * stryd_factors.get('10k', 1.0))
+                pred_hm = RACE_DISTS_PRINT['hm'] / (latest_rfl * stryd_peak_speed * stryd_factors.get('hm', 0.95))
+                pred_mara = RACE_DISTS_PRINT['marathon'] / (latest_rfl * stryd_peak_speed * stryd_factors.get('marathon', 0.89))
+            else:
+                pred_5k = calc_race_prediction(latest_rfl, '5k', re_p90, _effective_peak_cp, mass_kg)
+                pred_10k = calc_race_prediction(latest_rfl, '10k', re_p90, _effective_peak_cp, mass_kg)
+                pred_hm = calc_race_prediction(latest_rfl, 'hm', re_p90, _effective_peak_cp, mass_kg)
+                pred_mara = calc_race_prediction(latest_rfl, 'marathon', re_p90, _effective_peak_cp, mass_kg)
             
             print(f"  Race predictions: 5K={format_time(pred_5k)}, 10K={format_time(pred_10k)}, "
                   f"HM={format_time(pred_hm)}, Mar={format_time(pred_mara)}")
@@ -5379,21 +5537,34 @@ def main() -> int:
             rfl_valid = rfl_prev.notna() & (rfl_prev > 0)
             dfm.loc[rfl_valid, 'CP'] = (rfl_prev[rfl_valid] * _effective_peak_cp).round(0)
             
+            # v53: Use data-driven race factors from bootstrap (not hardcoded)
+            RACE_DISTANCES_PRED = {'5k': 5000, '10k': 10000, 'hm': 21097.5, 'marathon': 42195}
             for dist_key, col_name in [('5k', 'pred_5k_s'), ('10k', 'pred_10k_s'), 
                                         ('hm', 'pred_hm_s'), ('marathon', 'pred_marathon_s')]:
+                _factor = stryd_factors.get(dist_key, 1.0)
+                _dist_m = RACE_DISTANCES_PRED[dist_key]
                 dfm.loc[rfl_valid, col_name] = rfl_prev[rfl_valid].apply(
-                    lambda rfl: round(calc_race_prediction(rfl, dist_key, re_p90, _effective_peak_cp, mass_kg), 0)
+                    lambda rfl, f=_factor, d=_dist_m: round(
+                        d / (rfl * stryd_peak_speed * f), 0) if stryd_peak_speed else round(
+                        calc_race_prediction(rfl, dist_key, re_p90, _effective_peak_cp, mass_kg), 0)
                 )
             
             n_pred = rfl_valid.sum()
             print(f"  Populated predictions on {n_pred} runs (all with RFL_Trend)")
+            
+            # v53: Write effective PEAK_CP and race factors to Master for dashboard consumption
+            dfm['effective_peak_cp'] = round(_effective_peak_cp)
+            dfm['race_factor_5k'] = round(stryd_factors.get('5k', 1.05), 4)
+            dfm['race_factor_10k'] = round(stryd_factors.get('10k', 1.0), 4)
+            dfm['race_factor_hm'] = round(stryd_factors.get('hm', 0.95), 4)
+            dfm['race_factor_marathon'] = round(stryd_factors.get('marathon', 0.89), 4)
             
             # Phase 2: GAP and Sim parallel predictions
             # GAP uses bootstrapped peak_speed from race results (RE-independent)
             # SIM uses Stryd PEAK_CP (same hardware basis)
             
             # Bootstrap GAP peak_speed from race data
-            gap_peak_speed, gap_peak_cp, gap_n_races, gap_method = bootstrap_peak_speed(
+            gap_peak_speed, gap_peak_cp, gap_n_races, gap_method, gap_factors = bootstrap_peak_speed(
                 dfm, rfl_col='RFL_gap_Trend', mass_kg=mass_kg,
                 re_generic=RF_CONSTANTS['gap_re_constant'],
                 lthr=RF_CONSTANTS['lthr'],
@@ -5412,10 +5583,17 @@ def main() -> int:
                 # Fallback: use Stryd PEAK_CP (only if no race data AND no training data)
                 gap_peak_cp = _effective_peak_cp
                 gap_peak_speed = _effective_peak_cp * RF_CONSTANTS['gap_re_constant'] / mass_kg
+                gap_factors = stryd_factors.copy()  # fall back to Stryd factors
                 gap_method = 'fallback'
                 print(f"  GAP bootstrap: no data, falling back to PEAK_CP={_effective_peak_cp:.0f}W")
             
-            RACE_FACTORS_BS = {'5k': 1.05, '10k': 1.0, 'hm': 0.95, 'marathon': 0.89}
+            # v53: Write GAP factors to Master
+            dfm['effective_peak_cp_gap'] = round(gap_peak_cp)
+            dfm['race_factor_5k_gap'] = round(gap_factors.get('5k', 1.05), 4)
+            dfm['race_factor_10k_gap'] = round(gap_factors.get('10k', 1.0), 4)
+            dfm['race_factor_hm_gap'] = round(gap_factors.get('hm', 0.95), 4)
+            dfm['race_factor_marathon_gap'] = round(gap_factors.get('marathon', 0.89), 4)
+            
             RACE_DISTANCES_BS = {'5k': 5000, '10k': 10000, 'hm': 21097.5, 'marathon': 42195}
             
             for mode, rfl_col in [('gap', 'RFL_gap_Trend'), ('sim', 'RFL_sim_Trend')]:
@@ -5428,24 +5606,32 @@ def main() -> int:
                 if mode == 'gap':
                     # GAP: predictions from peak_speed (RE-independent)
                     # time = distance / (RFL × peak_speed × factor)
+                    # v53: Use data-driven gap_factors
                     dfm.loc[rfl_mode_valid, f'CP_{mode}'] = (rfl_prev_mode[rfl_mode_valid] * gap_peak_cp).round(0)
                     for dist_key, col_suffix in [('5k', 'pred_5k_s'), ('10k', 'pred_10k_s'),
                                                   ('hm', 'pred_hm_s'), ('marathon', 'pred_marathon_s')]:
                         col_name = f'{col_suffix}_{mode}'
-                        factor = RACE_FACTORS_BS[dist_key]
+                        factor = gap_factors.get(dist_key, 1.0)
                         dist_m = RACE_DISTANCES_BS[dist_key]
                         dfm.loc[rfl_mode_valid, col_name] = rfl_prev_mode[rfl_mode_valid].apply(
                             lambda rfl, f=factor, d=dist_m: round(d / (rfl * gap_peak_speed * f), 0)
                         )
                 else:
-                    # SIM: uses Stryd PEAK_CP and RE_p90 (same hardware basis)
+                    # SIM: uses Stryd PEAK_CP and data-driven stryd_factors
                     dfm.loc[rfl_mode_valid, f'CP_{mode}'] = (rfl_prev_mode[rfl_mode_valid] * _effective_peak_cp).round(0)
                     for dist_key, col_suffix in [('5k', 'pred_5k_s'), ('10k', 'pred_10k_s'),
                                                   ('hm', 'pred_hm_s'), ('marathon', 'pred_marathon_s')]:
                         col_name = f'{col_suffix}_{mode}'
-                        dfm.loc[rfl_mode_valid, col_name] = rfl_prev_mode[rfl_mode_valid].apply(
-                            lambda rfl: round(calc_race_prediction(rfl, dist_key, re_p90, _effective_peak_cp, mass_kg), 0)
-                        )
+                        _sim_factor = stryd_factors.get(dist_key, 1.0)
+                        _sim_dist_m = RACE_DISTANCES_BS[dist_key]
+                        if stryd_peak_speed:
+                            dfm.loc[rfl_mode_valid, col_name] = rfl_prev_mode[rfl_mode_valid].apply(
+                                lambda rfl, f=_sim_factor, d=_sim_dist_m: round(d / (rfl * stryd_peak_speed * f), 0)
+                            )
+                        else:
+                            dfm.loc[rfl_mode_valid, col_name] = rfl_prev_mode[rfl_mode_valid].apply(
+                                lambda rfl: round(calc_race_prediction(rfl, dist_key, re_p90, _effective_peak_cp, mass_kg), 0)
+                            )
                 
                 n_mode = rfl_mode_valid.sum()
                 print(f"  {mode.upper()} predictions on {n_mode} runs")

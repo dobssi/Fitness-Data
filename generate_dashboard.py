@@ -165,18 +165,25 @@ def load_and_process_data():
         if pd.notna(cp_val):
             critical_power = int(round(float(cp_val)))
         
-        # v53: Derive effective PEAK_CP from Master's CP and RFL columns.
-        # StepB computes CP = RFL × PEAK_CP (possibly bootstrapped from race data).
-        # The Master value is authoritative — it reflects bootstrap results and
-        # era-adjusted calculations that config.py's static value doesn't have.
+        # v53: Read effective PEAK_CP directly from Master (written by bootstrap).
+        # This eliminates the shift(1)/current RFL mismatch bug that occurred when
+        # reverse-engineering PEAK_CP from CP/RFL_Trend.
         global PEAK_CP_WATTS_DASH, _PEAK_CP_OVERRIDDEN
-        if pd.notna(cp_val):
+        _epcp = latest.get('effective_peak_cp')
+        if pd.notna(_epcp) and float(_epcp) > 200:
+            _new_peak = round(float(_epcp))
+            if abs(_new_peak - PEAK_CP_WATTS_DASH) > 5:
+                print(f"  PEAK_CP from Master: {_new_peak}W (config: {_cfg_cp}W)")
+                PEAK_CP_WATTS_DASH = _new_peak
+                _PEAK_CP_OVERRIDDEN = True
+        elif pd.notna(cp_val):
+            # Fallback for older Master files without effective_peak_cp column
             _rfl_col = 'RFL_Trend'
             _rfl_val = float(latest.get(_rfl_col, 0))
             if _rfl_val > 0.3:
                 _derived_peak = round(float(cp_val) / _rfl_val)
                 if _derived_peak > 200 and abs(_derived_peak - PEAK_CP_WATTS_DASH) > 5:
-                    print(f"  PEAK_CP derived from Master: {_derived_peak}W (config: {_cfg_cp}W)")
+                    print(f"  PEAK_CP derived from Master (legacy): {_derived_peak}W (config: {_cfg_cp}W)")
                     PEAK_CP_WATTS_DASH = _derived_peak
                     _PEAK_CP_OVERRIDDEN = True
         
@@ -2049,6 +2056,35 @@ RACE_POWER_FACTORS_DASH = {
 RACE_DISTANCES_KM_DASH = {
     'Sub-5K': 3.0, '5K': 5.0, '10K': 10.0, 'HM': 21.097, 'Mara': 42.195,
 }
+# v53: Override with data-driven factors from Master if available
+# These are populated by bootstrap_peak_speed in StepB
+def _load_race_factors_from_master(df_in):
+    """Read data-driven race factors from Master (written by StepB bootstrap)."""
+    global RACE_POWER_FACTORS_DASH
+    if df_in is None or len(df_in) == 0:
+        return
+    latest = df_in.iloc[-1]
+    _mode_suffix = {'gap': '_gap', 'sim': '_sim'}.get(_cfg_power_mode, '')
+    _factor_map = {
+        '5K': f'race_factor_5k{_mode_suffix}',
+        '10K': f'race_factor_10k{_mode_suffix}',
+        'HM': f'race_factor_hm{_mode_suffix}',
+        'Mara': f'race_factor_marathon{_mode_suffix}',
+    }
+    updated = False
+    for key, col in _factor_map.items():
+        val = latest.get(col)
+        if val is None and _mode_suffix:
+            # Fallback to Stryd factors if mode-specific not available
+            val = latest.get(col.replace(_mode_suffix, ''))
+        if pd.notna(val) and float(val) > 0.5 and float(val) < 1.5:
+            RACE_POWER_FACTORS_DASH[key] = round(float(val), 4)
+            updated = True
+    if updated:
+        # Extrapolate Sub-5K: slightly above 5K factor
+        _f5k = RACE_POWER_FACTORS_DASH.get('5K', 1.05)
+        RACE_POWER_FACTORS_DASH['Sub-5K'] = round(_f5k * 1.02, 4)  # ~2% above 5K
+        print(f"  Data-driven race factors: {RACE_POWER_FACTORS_DASH}")
 def _distance_km_to_key(km):
     """Map distance_km to race category key."""
     if km <= 3.5: return 'Sub-5K'
@@ -2771,8 +2807,15 @@ def _generate_zone_html(zone_data, stats=None):
     }
     # Continuous power-duration curve: piecewise linear in log-distance space
     # Exact at anchor points, interpolated between them
+    # v53: Uses data-driven factors from bootstrap (via RACE_POWER_FACTORS_DASH)
     import math as _math
-    _pd_anchors = [(3.0, 1.07), (5.0, 1.05), (10.0, 1.00), (21.097, 0.95), (42.195, 0.90)]
+    _pd_anchors = [
+        (3.0, RACE_POWER_FACTORS_DASH.get('Sub-5K', 1.07)),
+        (5.0, RACE_POWER_FACTORS_DASH.get('5K', 1.05)),
+        (10.0, RACE_POWER_FACTORS_DASH.get('10K', 1.00)),
+        (21.097, RACE_POWER_FACTORS_DASH.get('HM', 0.95)),
+        (42.195, RACE_POWER_FACTORS_DASH.get('Mara', 0.90)),
+    ]
     def _road_cp_factor(dist_km):
         d = max(dist_km, 1.0)
         ld = _math.log(d)
@@ -6870,6 +6913,9 @@ def main():
     
     # Load data
     df, ctl, atl, tsb, weight, age_grade, critical_power, race_predictions = load_and_process_data()
+    
+    # v53: Load data-driven race factors from Master (overrides hardcoded defaults)
+    _load_race_factors_from_master(df)
     
     # Process data
     print("Processing stats...")
