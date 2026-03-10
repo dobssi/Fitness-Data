@@ -437,6 +437,11 @@ def format_time(seconds: float) -> str:
     """Format seconds as HH:MM:SS or MM:SS."""
     if seconds is None:
         return "-"
+    try:
+        if not (seconds == seconds):  # NaN check without importing math
+            return "-"
+    except (TypeError, ValueError):
+        return "-"
     hours = int(seconds // 3600)
     minutes = int((seconds % 3600) // 60)
     secs = int(seconds % 60)
