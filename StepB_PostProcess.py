@@ -5606,10 +5606,10 @@ def main() -> int:
                     re_adj = _re_ref / re_avg_col
                     re_adj = re_adj.clip(0.85, 1.20)
                     # Only set where RE_avg is valid AND power is from Stryd (not simulated)
-                    # Simulated power RE is model-derived and doesn't capture real biomechanical
-                    # variation (race shoes, hills, fatigue) — RE_Adj would be meaningless.
+                    # AND Stryd power wasn't substituted with GAP (bogus power → bogus RE)
                     _has_real_power = dfm.get('power_source', pd.Series('', index=dfm.index)) == 'stryd'
-                    _valid = re_avg_col.notna() & (re_avg_col > 0.5) & _has_real_power
+                    _not_substituted = dfm.get('rf_stryd_gap_sub', pd.Series(False, index=dfm.index)) != True
+                    _valid = re_avg_col.notna() & (re_avg_col > 0.5) & _has_real_power & _not_substituted
                     dfm['RE_Adj'] = np.where(_valid, re_adj, np.nan)
                     dfm['re_p90'] = round(re_p90, 4)
                     dfm['re_race_ref'] = round(_re_ref, 4)
