@@ -493,7 +493,7 @@ function raceAnnotations(dates) {
 }catch(e){console.warn('Chart.js not loaded:',e);}
 </script>
     <h1>🏃 Paul Test</h1>
-    <div class="dash-sub">Tuesday 10 March 2026, 14:07</div>
+    <div class="dash-sub">Tuesday 10 March 2026, 15:52</div>
     
     <!-- Phase 2: Mode Toggle -->
     <div class="mode-toggle" style="display:flex;gap:6px;margin:10px 0 8px;align-items:center;display:none;">
@@ -1252,7 +1252,7 @@ function raceAnnotations(dates) {
     
     
     <div class="footer">
-        Updated: 2026-03-10 14:07<br>
+        Updated: 2026-03-10 15:52<br>
         Data through: 2026-03-10
     </div>
     
@@ -2024,6 +2024,7 @@ function raceAnnotations(dates) {
             const isParkrun = indices.map(i => d.is_parkrun[i]);
             const tempAdjs = indices.map(i => (d.temp_adjs || [])[i] || 1.0);
             const surfaceAdjs = indices.map(i => (d.surface_adjs || [])[i] || 1.0);
+            const reAdjs = indices.map(i => (d.re_adjs || [])[i] || 1.0);
             const predSolar = indices.map(i => (d.solar || [])[i]);
             const predElev = indices.map(i => (d.elev_gain || [])[i]);
             const predUnd = indices.map(i => (d.undulation || [])[i]);
@@ -2039,7 +2040,9 @@ function raceAnnotations(dates) {
                     const heatMult = Math.min(HEAT_MAX_MULT, estMins / HEAT_REF_MINS);
                     const tempFactor = 1.0 + (tempAdjs[i] - 1.0) * heatMult;
                     const surfFactor = surfaceAdjs[i];
-                    return Math.round(p * tempFactor * surfFactor);
+                    // RE_Adj: accounts for race-day RE vs prediction RE (Stryd only, 1.0 for GAP)
+                    const reFactor = reAdjs[i];
+                    return Math.round(p * tempFactor * surfFactor * reFactor);
                 });
             }
             
@@ -2179,7 +2182,7 @@ function raceAnnotations(dates) {
                                         }
                                     }
                                     // Condition adjustments breakdown
-                                    if (adjustConditions && (tempAdjs[i] !== 1.0 || surfaceAdjs[i] !== 1.0)) {
+                                    if (adjustConditions && (tempAdjs[i] !== 1.0 || surfaceAdjs[i] !== 1.0 || reAdjs[i] !== 1.0)) {
                                         const parts = [];
                                         if (tempAdjs[i] !== 1.0 && predicted[i]) {
                                             const estMins = predicted[i] / 60.0;
@@ -2190,6 +2193,10 @@ function raceAnnotations(dates) {
                                         if (surfaceAdjs[i] !== 1.0) {
                                             const surfPct = ((surfaceAdjs[i] - 1.0) * 100).toFixed(1);
                                             parts.push('surface +' + surfPct + '%');
+                                        }
+                                        if (reAdjs[i] !== 1.0) {
+                                            const rePct = ((reAdjs[i] - 1.0) * 100).toFixed(1);
+                                            parts.push('RE ' + (reAdjs[i] > 1 ? '+' : '') + rePct + '%');
                                         }
                                         if (parts.length > 0) lines.push('Adj: ' + parts.join(', '));
                                     }
