@@ -53,7 +53,7 @@ RACE_KEYWORDS = re.compile(
 
 # Keywords that indicate training (not a race)
 ANTI_KEYWORDS = re.compile(
-    r'tempo|recovery|recover|steady|easy|\bwarm.?up\b|cool.?down|treadmill|'
+    r'tempo|recovery|recover|steady|easy|\bwarm.?up\b|cool.?down|treadmill|löpband|'
     r'\bjog\b|fartlek|interval|threshold|long run|out and back|club run|'
     r'zwift|progression|hills?\b|repeat|session|drill|commute|travel|'
     r'shakeout|pre.?match|lunch run|morning run|\bWU\b|\bCD\b|'
@@ -456,6 +456,20 @@ def detect_candidates_from_master(master_df: pd.DataFrame, lthr: float,
         if strava_km is not None and (strava_km != strava_km or strava_km <= 0):
             strava_km = None
 
+        # ── Fix B: Treadmill exclusion ──
+        # Treadmill runs have no GPS trace. Keyword + no GPS → skip entirely.
+        # Indoor track races (real events indoors) are NOT excluded — they still
+        # have race keywords and get classified normally with distance from watch.
+        _is_treadmill = False
+        if gps_km is None and strava_km is None:
+            _treadmill_kw = re.search(
+                r'treadmill|\bTM\b|löpband|\bLB\b',
+                name, re.I)
+            if _treadmill_kw:
+                _is_treadmill = True
+        if _is_treadmill:
+            continue
+
         # Fallback: if neither GPS nor Strava available, use distance_km
         # (may be corrected on re-runs but better than skipping entirely)
         dist_km = row.get('distance_km')
@@ -481,6 +495,22 @@ def detect_candidates_from_master(master_df: pd.DataFrame, lthr: float,
         matched = False
         official_dist = None
         race_type = None
+
+        # ── Fix A: Assembly League → always bespoke distance ──
+        # Assembly League courses are nominally ~5K but actual distances vary
+        # significantly (4.7-5.5km). Forcing them to standard 5K distorts
+        # the athlete's race data. Use actual GPS distance instead.
+        _is_assembly = bool(re.search(r'assembly', name, re.I))
+        if _is_assembly:
+            best_dist_km = gps_km or strava_km or dist_km or 0
+            if best_dist_km >= 1.0:
+                candidates.append({
+                    'file': row['file'],
+                    'official_distance_km': round(best_dist_km, 3),
+                    'race_type': 'Bespoke',
+                })
+            continue
+
         for km in [gps_km, strava_km]:
             if km is None:
                 continue
@@ -722,11 +752,17 @@ def enrich_and_classify(master_path: str, overrides_path: str,
             ov.at[i, 'notes'] = f"REVIEW: {row['reason']}"
     
     # ── Demote races with large elapsed/moving ratio ──
-    # If elapsed_time >> moving_time, the activity is a session containing
-    # a fast effort (e.g. track TT within a training session), not a
-    # standalone race. The moving_time may yield a valid AG but the
-    # activity as a whole is not a race.
-    ELAPSED_MOVING_MAX_RATIO = 1.5
+    # If elapsed_time >> moving_time, the activity has significant pauses
+    # (rest intervals, relay exchanges, etc.), suggesting reps not a race.
+    #
+    # Two thresholds:
+    #   - Named races (keywords): generous 1.50 ratio (relay exchanges, split recordings)
+    #   - Unnamed runs: strict 1.20 ratio (no keywords = higher evidence bar)
+    # Plus bbox guard: if bbox < 100,000m² for dist >= 3km, the run is on
+    # a tiny loop (reps, track session) regardless of elapsed/moving ratio.
+    ELAPSED_MOVING_MAX_RATIO = 1.50        # for named races
+    ELAPSED_MOVING_UNNAMED_RATIO = 1.20    # for unnamed runs (no keywords)
+    BBOX_MIN_FOR_RACE_M2 = 100_000         # minimum bbox for a real race >= 3km
     demoted_count = 0
     for i, row in ov.iterrows():
         if row.get('race_flag', 0) != 1:
@@ -735,10 +771,29 @@ def enrich_and_classify(master_path: str, overrides_path: str,
         m = master_lookup.get(fname, {})
         elapsed = m.get('elapsed_time_s', 0) or 0
         moving = m.get('moving_time_s', 0) or 0
-        if moving > 0 and elapsed / moving > ELAPSED_MOVING_MAX_RATIO:
+        name_for_demote = str(m.get('activity_name', '') or '')
+        _has_kw = bool(RACE_KEYWORDS.search(name_for_demote) or
+                       RACE_NAME_OVERRIDES.search(name_for_demote))
+        
+        # Elapsed/moving ratio check
+        if moving > 0 and elapsed > 0:
+            ratio = elapsed / moving
+            threshold = ELAPSED_MOVING_MAX_RATIO if _has_kw else ELAPSED_MOVING_UNNAMED_RATIO
+            if ratio > threshold:
+                ov.at[i, 'race_flag'] = 0
+                ov.at[i, 'notes'] = f"REVIEW: elapsed/moving ratio {ratio:.2f}x > {threshold:.2f} ({'named' if _has_kw else 'unnamed'}) — likely reps/session"
+                demoted_count += 1
+                continue
+        
+        # Bbox guard: tiny area + medium distance = reps on a loop
+        bbox = m.get('gps_bbox_m2')
+        dist_km = m.get('distance_km', 0) or 0
+        if (bbox is not None and pd.notna(bbox) and bbox < BBOX_MIN_FOR_RACE_M2
+                and dist_km >= 3.0 and not _has_kw):
             ov.at[i, 'race_flag'] = 0
-            ov.at[i, 'notes'] = f"REVIEW: elapsed/moving ratio {elapsed/moving:.1f}x — session, not race"
+            ov.at[i, 'notes'] = f"REVIEW: bbox {bbox:.0f}m² < {BBOX_MIN_FOR_RACE_M2} for {dist_km:.1f}km — likely reps on loop"
             demoted_count += 1
+            continue
     if demoted_count:
         print(f"  Demoted {demoted_count} race(s) with elapsed/moving > {ELAPSED_MOVING_MAX_RATIO}x")
     

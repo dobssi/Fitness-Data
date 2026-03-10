@@ -1733,7 +1733,10 @@ def get_prediction_trend_data(df):
     for dist_key, info in distances.items():
         pred_col = info['pred_col']
         dist_km = info['official_km']
-        tolerance = dist_km * 0.05
+        # v53: Tight tolerance — only include races at genuinely standard distances.
+        # Bespoke races (Kvartsmarathon 10.356km, Assembly 4.78km) should NOT appear
+        # on the 10K or 5K prediction tabs. They show in Race History "Other" instead.
+        tolerance = max(dist_km * 0.02, 0.3)  # max(2%, 300m) — matches classify_races
         empty = {'dates': [], 'dates_iso': [], 'predicted': [], 'actual': [], 'is_parkrun': [], 'names': [], 'temps': [], 'surfaces': [], 'temp_adjs': [], 'surface_adjs': []}
         
         if pred_col not in df.columns:
