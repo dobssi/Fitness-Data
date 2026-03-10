@@ -3896,8 +3896,9 @@ def main() -> int:
         "surface",
         "Temp_Adj",
         "Terrain_Adj",
-        "RE_Adj",         # v53: RE condition adjustment (Stryd only): RE_p90 / RE_avg
+        "RE_Adj",         # v53: RE condition adjustment (Stryd only): race_median_RE / RE_avg
         "re_p90",         # v53: RE percentile used for predictions
+        "re_race_ref",    # v53: Race median RE used as RE_Adj reference
         "Era_Adj",
         "Total_Adj",
         "Intensity_Adj",  # v44: intensity-based RF adjustment
@@ -5587,25 +5588,41 @@ def main() -> int:
             dfm['race_factor_marathon'] = round(stryd_factors.get('marathon', 0.89), 4)
             
             # v53: RE_Adj — running economy condition adjustment (Stryd mode only)
-            # RE_Adj = RE_p90 / RE_avg: how much the prediction over/underpredicts
-            # due to race-day RE differing from the P90 used in calibration.
-            # RE_Adj > 1 = bad RE day (shoes, fatigue, surface) → prediction was optimistic
-            # RE_Adj < 1 = good RE day (race shoes, fresh legs) → prediction was pessimistic
-            # Only meaningful for Stryd (real power → real RE). GAP RE is derived from
-            # speed so it would double-count terrain/surface adjustments.
-            if POWER_MODE == 'stryd' and re_p90 > 0:
-                re_avg_col = dfm['RE_avg']
-                re_adj = re_p90 / re_avg_col
-                # Clamp to reasonable range (0.85-1.20) to avoid junk from bad power data
-                re_adj = re_adj.clip(0.85, 1.20)
-                # Only set where RE_avg is valid
-                dfm['RE_Adj'] = np.where(re_avg_col.notna() & (re_avg_col > 0.5), re_adj, np.nan)
-                dfm['re_p90'] = round(re_p90, 4)  # Store for dashboard reference
-                n_re_adj = dfm['RE_Adj'].notna().sum()
-                print(f"  RE_Adj: computed for {n_re_adj} runs (RE_p90={re_p90:.4f})")
+            # Compares this run's RE to the MEDIAN RE across flagged races.
+            # The bootstrap calibrates peak_speed from race performances, so the
+            # "expected" RE is whatever races typically produce — the race median.
+            # Using training P90 would double-remove the race-day RE bonus.
+            #
+            # RE_Adj > 1 = worse RE than typical race → prediction was optimistic
+            # RE_Adj < 1 = better RE than typical race → prediction was pessimistic
+            # Only meaningful for Stryd (real power → real RE).
+            if POWER_MODE == 'stryd':
+                _stryd_races = dfm[(dfm.get('race_flag', pd.Series(False, index=dfm.index)) == True) &
+                                   (dfm.get('power_source', pd.Series('', index=dfm.index)) == 'stryd')]
+                _race_re = _stryd_races['RE_avg'].dropna()
+                _re_ref = float(_race_re.median()) if len(_race_re) >= 5 else re_p90
+                if _re_ref > 0:
+                    re_avg_col = dfm['RE_avg']
+                    re_adj = _re_ref / re_avg_col
+                    re_adj = re_adj.clip(0.85, 1.20)
+                    # Only set where RE_avg is valid AND power is from Stryd (not simulated)
+                    # Simulated power RE is model-derived and doesn't capture real biomechanical
+                    # variation (race shoes, hills, fatigue) — RE_Adj would be meaningless.
+                    _has_real_power = dfm.get('power_source', pd.Series('', index=dfm.index)) == 'stryd'
+                    _valid = re_avg_col.notna() & (re_avg_col > 0.5) & _has_real_power
+                    dfm['RE_Adj'] = np.where(_valid, re_adj, np.nan)
+                    dfm['re_p90'] = round(re_p90, 4)
+                    dfm['re_race_ref'] = round(_re_ref, 4)
+                    n_re_adj = dfm['RE_Adj'].notna().sum()
+                    print(f"  RE_Adj: computed for {n_re_adj} runs (race median RE={_re_ref:.4f}, training P90={re_p90:.4f})")
+                else:
+                    dfm['RE_Adj'] = np.nan
+                    dfm['re_p90'] = round(re_p90, 4)
+                    dfm['re_race_ref'] = np.nan
             else:
                 dfm['RE_Adj'] = np.nan
                 dfm['re_p90'] = np.nan
+                dfm['re_race_ref'] = np.nan
             
             # Phase 2: GAP and Sim parallel predictions
             # GAP uses bootstrapped peak_speed from race results (RE-independent)
