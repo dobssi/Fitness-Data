@@ -1814,6 +1814,7 @@ def get_prediction_trend_data(df):
         # Condition adjustment factors for "adjust for conditions" toggle
         race_temp_adjs = []
         race_surface_adjs = []
+        race_re_adjs = []
         race_solar = []
         race_elev = []
         race_undulation = []
@@ -1823,6 +1824,9 @@ def get_prediction_trend_data(df):
             race_temp_adjs.append(round(float(ta), 4) if pd.notna(ta) else 1.0)
             sa = race_row.get('surface_adj')
             race_surface_adjs.append(round(float(sa), 4) if pd.notna(sa) else 1.0)
+            # v53: RE condition adjustment (Stryd mode only)
+            ra = race_row.get('RE_Adj')
+            race_re_adjs.append(round(float(ra), 4) if pd.notna(ra) and 0.5 < float(ra) < 2.0 else 1.0)
             sol = race_row.get('avg_solar_rad_wm2')
             race_solar.append(round(float(sol)) if pd.notna(sol) else None)
             eg = race_row.get('elev_gain_m')
@@ -1848,6 +1852,7 @@ def get_prediction_trend_data(df):
             'surfaces': race_surfaces,
             'temp_adjs': race_temp_adjs,
             'surface_adjs': race_surface_adjs,
+            're_adjs': race_re_adjs,
             'solar': race_solar,
             'elev_gain': race_elev,
             'undulation': race_undulation,
@@ -6178,6 +6183,7 @@ function raceAnnotations(dates) {{
             const isParkrun = indices.map(i => d.is_parkrun[i]);
             const tempAdjs = indices.map(i => (d.temp_adjs || [])[i] || 1.0);
             const surfaceAdjs = indices.map(i => (d.surface_adjs || [])[i] || 1.0);
+            const reAdjs = indices.map(i => (d.re_adjs || [])[i] || 1.0);
             const predSolar = indices.map(i => (d.solar || [])[i]);
             const predElev = indices.map(i => (d.elev_gain || [])[i]);
             const predUnd = indices.map(i => (d.undulation || [])[i]);
@@ -6193,7 +6199,9 @@ function raceAnnotations(dates) {{
                     const heatMult = Math.min(HEAT_MAX_MULT, estMins / HEAT_REF_MINS);
                     const tempFactor = 1.0 + (tempAdjs[i] - 1.0) * heatMult;
                     const surfFactor = surfaceAdjs[i];
-                    return Math.round(p * tempFactor * surfFactor);
+                    // RE_Adj: accounts for race-day RE vs prediction RE (Stryd only, 1.0 for GAP)
+                    const reFactor = reAdjs[i];
+                    return Math.round(p * tempFactor * surfFactor * reFactor);
                 }});
             }}
             
@@ -6333,7 +6341,7 @@ function raceAnnotations(dates) {{
                                         }}
                                     }}
                                     // Condition adjustments breakdown
-                                    if (adjustConditions && (tempAdjs[i] !== 1.0 || surfaceAdjs[i] !== 1.0)) {{
+                                    if (adjustConditions && (tempAdjs[i] !== 1.0 || surfaceAdjs[i] !== 1.0 || reAdjs[i] !== 1.0)) {{
                                         const parts = [];
                                         if (tempAdjs[i] !== 1.0 && predicted[i]) {{
                                             const estMins = predicted[i] / 60.0;
@@ -6344,6 +6352,10 @@ function raceAnnotations(dates) {{
                                         if (surfaceAdjs[i] !== 1.0) {{
                                             const surfPct = ((surfaceAdjs[i] - 1.0) * 100).toFixed(1);
                                             parts.push('surface +' + surfPct + '%');
+                                        }}
+                                        if (reAdjs[i] !== 1.0) {{
+                                            const rePct = ((reAdjs[i] - 1.0) * 100).toFixed(1);
+                                            parts.push('RE ' + (reAdjs[i] > 1 ? '+' : '') + rePct + '%');
                                         }}
                                         if (parts.length > 0) lines.push('Adj: ' + parts.join(', '));
                                     }}

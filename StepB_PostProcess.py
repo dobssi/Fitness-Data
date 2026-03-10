@@ -3896,6 +3896,8 @@ def main() -> int:
         "surface",
         "Temp_Adj",
         "Terrain_Adj",
+        "RE_Adj",         # v53: RE condition adjustment (Stryd only): RE_p90 / RE_avg
+        "re_p90",         # v53: RE percentile used for predictions
         "Era_Adj",
         "Total_Adj",
         "Intensity_Adj",  # v44: intensity-based RF adjustment
@@ -5583,6 +5585,27 @@ def main() -> int:
             dfm['race_factor_10k'] = round(stryd_factors.get('10k', 1.0), 4)
             dfm['race_factor_hm'] = round(stryd_factors.get('hm', 0.95), 4)
             dfm['race_factor_marathon'] = round(stryd_factors.get('marathon', 0.89), 4)
+            
+            # v53: RE_Adj — running economy condition adjustment (Stryd mode only)
+            # RE_Adj = RE_p90 / RE_avg: how much the prediction over/underpredicts
+            # due to race-day RE differing from the P90 used in calibration.
+            # RE_Adj > 1 = bad RE day (shoes, fatigue, surface) → prediction was optimistic
+            # RE_Adj < 1 = good RE day (race shoes, fresh legs) → prediction was pessimistic
+            # Only meaningful for Stryd (real power → real RE). GAP RE is derived from
+            # speed so it would double-count terrain/surface adjustments.
+            if POWER_MODE == 'stryd' and re_p90 > 0:
+                re_avg_col = dfm['RE_avg']
+                re_adj = re_p90 / re_avg_col
+                # Clamp to reasonable range (0.85-1.20) to avoid junk from bad power data
+                re_adj = re_adj.clip(0.85, 1.20)
+                # Only set where RE_avg is valid
+                dfm['RE_Adj'] = np.where(re_avg_col.notna() & (re_avg_col > 0.5), re_adj, np.nan)
+                dfm['re_p90'] = round(re_p90, 4)  # Store for dashboard reference
+                n_re_adj = dfm['RE_Adj'].notna().sum()
+                print(f"  RE_Adj: computed for {n_re_adj} runs (RE_p90={re_p90:.4f})")
+            else:
+                dfm['RE_Adj'] = np.nan
+                dfm['re_p90'] = np.nan
             
             # Phase 2: GAP and Sim parallel predictions
             # GAP uses bootstrapped peak_speed from race results (RE-independent)
