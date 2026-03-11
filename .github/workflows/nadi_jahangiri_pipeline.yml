@@ -84,6 +84,14 @@ jobs:
         id: mode
         run: echo "mode=${{ env.PIPELINE_MODE }}" >> $GITHUB_OUTPUT
 
+      - name: Extract athlete mass from YAML
+        id: athlete
+        run: |
+          MASS=$(python3 -c "import yaml; print(yaml.safe_load(open('${{ env.ATHLETE_CONFIG_PATH }}'))['athlete']['mass_kg'])")
+          echo "mass_kg=$MASS" >> $GITHUB_OUTPUT
+          echo "  Athlete mass: ${MASS} kg"
+
+
       - name: Always continue (FIT-only mode)
         id: gate
         run: echo "continue=true" >> $GITHUB_OUTPUT
@@ -138,7 +146,7 @@ jobs:
             --pending-activities ${{ env.ATHLETE_DIR }}/pending_activities.csv \
             --override-file ${{ env.ATHLETE_DIR }}/activity_overrides.xlsx \
             --tz ${{ env.TZ_LOCAL }} \
-            --weight 66.0
+            --weight ${{ steps.athlete.outputs.mass_kg }}
 
       - name: Rebuild from FIT files (UPDATE — append only)
         if: ${{ env.PIPELINE_MODE == 'UPDATE' }}
@@ -157,7 +165,7 @@ jobs:
             --pending-activities ${{ env.ATHLETE_DIR }}/pending_activities.csv \
             --override-file ${{ env.ATHLETE_DIR }}/activity_overrides.xlsx \
             --tz ${{ env.TZ_LOCAL }} \
-            --weight 66.0
+            --weight ${{ steps.athlete.outputs.mass_kg }}
 
       - name: Add GAP power
         if: ${{ env.PIPELINE_MODE == 'FULL' || env.PIPELINE_MODE == 'INITIAL' || env.PIPELINE_MODE == 'UPDATE' }}
@@ -166,7 +174,7 @@ jobs:
             --master ${{ env.ATHLETE_DIR }}/output/Master_A003_FULL.xlsx \
             --cache-dir ${{ env.ATHLETE_DIR }}/persec_cache \
             --out ${{ env.ATHLETE_DIR }}/output/Master_A003_FULL.xlsx \
-            --mass-kg 66.0 \
+            --mass-kg ${{ steps.athlete.outputs.mass_kg }} \
             --re-constant 0.92
 
       - name: Classify races
@@ -193,7 +201,7 @@ jobs:
             --model-json re_model_generic.json \
             --override-file ${{ env.ATHLETE_DIR }}/activity_overrides.xlsx \
             --athlete-data ${{ env.ATHLETE_DIR }}/athlete_data.csv \
-            --mass-kg 66.0 \
+            --mass-kg ${{ steps.athlete.outputs.mass_kg }} \
             --tz ${{ env.TZ_LOCAL }} \
             --runner-dob "1961-07-08" \
             --runner-gender male \
@@ -350,6 +358,13 @@ jobs:
           mkdir -p ${{ env.ATHLETE_DIR }}/output/dashboard
           mkdir -p ${{ env.ATHLETE_DIR }}/output/_weather_cache_openmeteo
 
+      - name: Extract athlete mass from YAML
+        id: athlete
+        run: |
+          MASS=$(python3 -c "import yaml; print(yaml.safe_load(open('${{ env.ATHLETE_CONFIG_PATH }}'))['athlete']['mass_kg'])")
+          echo "mass_kg=$MASS" >> $GITHUB_OUTPUT
+          echo "  Athlete mass: ${MASS} kg"
+
       - name: Restore persec cache
         uses: actions/cache/restore@v4
         with:
@@ -383,7 +398,7 @@ jobs:
             --model-json re_model_generic.json \
             --override-file ${{ env.ATHLETE_DIR }}/activity_overrides.xlsx \
             --athlete-data ${{ env.ATHLETE_DIR }}/athlete_data.csv \
-            --mass-kg 66.0 \
+            --mass-kg ${{ steps.athlete.outputs.mass_kg }} \
             --tz ${{ env.TZ_LOCAL }} \
             --runner-dob "1961-07-08" \
             --runner-gender male \
@@ -409,7 +424,7 @@ jobs:
             --model-json re_model_generic.json \
             --override-file ${{ env.ATHLETE_DIR }}/activity_overrides.xlsx \
             --athlete-data ${{ env.ATHLETE_DIR }}/athlete_data.csv \
-            --mass-kg 66.0 \
+            --mass-kg ${{ steps.athlete.outputs.mass_kg }} \
             --tz ${{ env.TZ_LOCAL }} \
             --runner-dob "1961-07-08" \
             --runner-gender male \
