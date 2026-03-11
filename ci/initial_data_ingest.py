@@ -119,22 +119,49 @@ def main():
         names = zf.namelist()
         has_activities_folder = any("activities/" in n for n in names)
         fit_files = [n for n in names if n.lower().endswith(".fit")]
+        polar_sessions = [n for n in names if "training-session-" in n and n.endswith(".json")]
 
     if has_activities_folder:
         export_type = "strava"
+    elif polar_sessions:
+        export_type = "polar"
     elif fit_files:
         export_type = "garmin"
     else:
         print(f"  WARNING: Could not detect export type. Trying as Garmin/FIT.")
         export_type = "garmin"
 
-    print(f"  Detected: {export_type} export ({len(fit_files)} FIT files in zip)")
+    print(f"  Detected: {export_type} export", end="")
+    if export_type == "polar":
+        print(f" ({len(polar_sessions)} training-session JSON files)")
+    else:
+        print(f" ({len(fit_files)} FIT files in zip)")
 
     # ── Step 3: Ingest ────────────────────────────────────────────────────
     fits_zip_path = os.path.join(data_dir, "fits.zip")
     activities_csv = os.path.join(data_dir, "activities.csv")
 
-    if export_type == "strava":
+    if export_type == "polar":
+        # Use polar_ingest.py to convert Polar JSON to FIT files
+        import subprocess
+        cmd = [
+            sys.executable, "ci/polar_ingest.py",
+            "--polar-zip", local_zip,
+            "--out-dir", data_dir,
+            "--tz", args.tz,
+        ]
+        print(f"\n  Running polar_ingest.py...")
+        result = subprocess.run(cmd, capture_output=False)
+        if result.returncode != 0:
+            print(f"  ERROR: polar_ingest.py failed with code {result.returncode}")
+            return 1
+        # polar_ingest.py produces fits.zip + activities.csv in out-dir
+        if os.path.isfile(fits_zip_path):
+            print(f"  ✓ fits.zip ready")
+        if os.path.isfile(activities_csv):
+            print(f"  ✓ activities.csv ready")
+
+    elif export_type == "strava":
         # Use strava_ingest.py for full Strava processing
         import subprocess
         strava_out = os.path.join(data_dir, "strava_data")
