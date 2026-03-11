@@ -327,15 +327,26 @@ jobs:
       - name: Fetch intervals.icu FITs after ingest (INITIAL only)
         if: ${{ steps.gate.outputs.continue == 'true' && env.PIPELINE_MODE == 'INITIAL' }}
         run: |
-          echo "Fetching intervals.icu FITs to pick up runs after Strava export date..."
-          rm -f ${{ env.ATHLETE_DIR }}/fit_sync_state.json
-          python fetch_fit_files.py \
-            --fit-dir ${{ env.ATHLETE_DIR }}/data/FIT_downloads \
-            --zip ${{ env.ATHLETE_DIR }}/data/fits.zip \
-            --state-file ${{ env.ATHLETE_DIR }}/fit_sync_state.json \
-            --pending-csv ${{ env.ATHLETE_DIR }}/pending_activities.csv \
-            --refresh-names 14 \
-            --full
+          # Check if athlete uses curated local FIT history only
+          INIT_SRC=$(python3 -c "
+          import yaml
+          with open('${{ env.ATHLETE_CONFIG_PATH }}') as f:
+              cfg = yaml.safe_load(f)
+          print(cfg.get('data', {}).get('initial_fit_source', 'intervals'))
+          ")
+          if [ "$INIT_SRC" = "local_only" ]; then
+            echo "  Skipping intervals.icu fetch — initial_fit_source: local_only (curated TotalHistory.zip)"
+          else
+            echo "Fetching intervals.icu FITs to pick up runs after Strava export date..."
+            rm -f ${{ env.ATHLETE_DIR }}/fit_sync_state.json
+            python fetch_fit_files.py \
+              --fit-dir ${{ env.ATHLETE_DIR }}/data/FIT_downloads \
+              --zip ${{ env.ATHLETE_DIR }}/data/fits.zip \
+              --state-file ${{ env.ATHLETE_DIR }}/fit_sync_state.json \
+              --pending-csv ${{ env.ATHLETE_DIR }}/pending_activities.csv \
+              --refresh-names 14 \
+              --full
+          fi
         continue-on-error: true
 
       - name: Rebuild from FIT files (FULL / INITIAL)

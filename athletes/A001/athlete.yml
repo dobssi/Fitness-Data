@@ -120,6 +120,8 @@ power:
 # Data sources
 data:
   source: "intervals"     # Options: "intervals", "fit_folder", "strava_export"
+  initial_fit_source: "local_only"  # "local_only" = INITIAL uses TotalHistory.zip only, no intervals.icu backfill
+                                     # "intervals" = INITIAL also fetches all history from intervals.icu (default)
   
   # intervals.icu settings (when source = "intervals")
   intervals:
@@ -146,7 +148,7 @@ pipeline:
   # RF calculation
   rf_window_duration_s: 2400      # 40 minutes
   rf_trend_window_days: 42        # 6 weeks
-  rf_trend_min_periods: 5
+  rf_trend_min_periods: 10
   
   # CTL/ATL (Banister model)
   ctl_time_constant: 42           # Chronic load (days)
