@@ -175,8 +175,21 @@ def main():
             print("  %s (%s bytes)" % (f, format(size, ",")))
         return
 
+    # Read version from CLAUDE_RUNNING_PROJECT_OVERVIEW.md if available
+    version = "v53"
+    overview_path = os.path.join(base_dir, "CLAUDE_RUNNING_PROJECT_OVERVIEW.md")
+    if os.path.exists(overview_path):
+        with open(overview_path) as f:
+            for line in f:
+                if "Current version:" in line:
+                    import re as _re
+                    m = _re.search(r'v(\d+)', line)
+                    if m:
+                        version = "v" + m.group(1)
+                    break
+
     date_str = datetime.now().strftime("%Y%m%d_%H%M")
-    zip_name = "checkpoint_v53_%s_%s.zip" % (args.tag, date_str)
+    zip_name = "checkpoint_%s_%s_%s.zip" % (version, args.tag, date_str)
     output_dir = args.output or base_dir
     zip_path = os.path.join(output_dir, zip_name)
 

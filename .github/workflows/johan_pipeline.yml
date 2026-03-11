@@ -236,6 +236,10 @@ jobs:
       - name: Rebuild from FIT files (FULL / INITIAL)
         if: ${{ steps.gate.outputs.continue == 'true' && (env.PIPELINE_MODE == 'FULL' || env.PIPELINE_MODE == 'INITIAL') }}
         run: |
+          EXTRA_SUMMARIES_FLAG=""
+          if [ -f "${{ env.ATHLETE_DIR }}/data/gpx_tcx_summaries.csv" ]; then
+            EXTRA_SUMMARIES_FLAG="--extra-summaries ${{ env.ATHLETE_DIR }}/data/gpx_tcx_summaries.csv"
+          fi
           python rebuild_from_fit_zip.py \
             --fit-zip ${{ env.ATHLETE_DIR }}/data/fits.zip \
             --template master_template.xlsx \
@@ -245,7 +249,8 @@ jobs:
             --pending-activities ${{ env.ATHLETE_DIR }}/pending_activities.csv \
             --override-file ${{ env.ATHLETE_DIR }}/activity_overrides.xlsx \
             --tz ${{ env.TZ_LOCAL }} \
-            --weight 75
+            --weight 75 \
+            $EXTRA_SUMMARIES_FLAG
 
       - name: Rebuild from FIT files (UPDATE — append only)
         if: ${{ steps.gate.outputs.continue == 'true' && env.PIPELINE_MODE == 'UPDATE' }}

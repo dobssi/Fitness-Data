@@ -3252,6 +3252,7 @@ def main():
     ap.add_argument("--pending-activities", default="", help="Optional CSV for temporary activity names (file,activity_name,shoe). Used when no Strava match. If blank, auto-uses pending_activities.csv if present.")
     ap.add_argument("--weight", type=float, default=WEIGHT_KG_DEFAULT, help="Default weight kg used for W/kg calculations")
     ap.add_argument("--gps-outlier-speed", type=float, default=7.0, help="Speed threshold (m/s) for gps_outlier_frac (default 7.0)")
+    ap.add_argument("--extra-summaries", default="", help="CSV of extra summary rows (from strava_ingest GPX/TCX processing) to merge into master. Deduplicates by start_time_utc (±120s).")
     args = ap.parse_args()
     if getattr(args, "activities", "") and not getattr(args, "strava", ""):
         args.strava = args.activities
@@ -3624,11 +3625,19 @@ def main():
 
     if not rows:
         if append_mode and base_master_df is not None:
-            print(f"No new running activities found. Using existing master ({len(base_master_df)} rows).")
-            out_path = args.out
-            base_master_df.to_excel(out_path, index=False, sheet_name="Master")
-            print(f"Output (unchanged): {out_path}")
-            return 0
+            # Check if extra summaries might provide data before bailing out
+            _has_extra = (getattr(args, "extra_summaries", "") 
+                         and os.path.isfile(args.extra_summaries))
+            if not _has_extra:
+                print(f"No new running activities found. Using existing master ({len(base_master_df)} rows).")
+                out_path = args.out
+                base_master_df.to_excel(out_path, index=False, sheet_name="Master")
+                print(f"Output (unchanged): {out_path}")
+                return 0
+            else:
+                print(f"No FIT files found, but extra summaries available — continuing.")
+                df = pd.DataFrame(rows)
+                df = pd.concat([base_master_df, df], ignore_index=True)
         else:
             print("WARNING: No running activities found in FIT files.")
             df = pd.DataFrame(rows)
@@ -3651,6 +3660,56 @@ def main():
             df = pd.concat([base_master_df, df], ignore_index=True)
 
     df_fail = pd.DataFrame(failures) if failures else pd.DataFrame(columns=['file','reason'])
+
+    # ---------- Merge extra summaries (GPX/TCX from strava_ingest) ----------
+    if getattr(args, "extra_summaries", "") and os.path.isfile(args.extra_summaries):
+        try:
+            df_extra = pd.read_csv(args.extra_summaries, parse_dates=["date"])
+            n_extra_raw = len(df_extra)
+            if n_extra_raw > 0 and "start_time_utc" in df_extra.columns:
+                df_extra["start_time_utc"] = pd.to_datetime(df_extra["start_time_utc"], errors="coerce", utc=True)
+                # Deduplicate against existing rows by start_time_utc (±120s tolerance)
+                existing_starts = pd.to_datetime(df.get("start_time_utc"), errors="coerce", utc=True)
+                existing_starts = existing_starts.dropna()
+                keep_mask = pd.Series([True] * n_extra_raw, index=df_extra.index)
+                for idx, row in df_extra.iterrows():
+                    ext_ts = row.get("start_time_utc")
+                    if pd.isna(ext_ts):
+                        continue
+                    # Check if any existing row is within 120s
+                    if len(existing_starts) > 0:
+                        diffs = (existing_starts - ext_ts).abs()
+                        if diffs.min() <= pd.Timedelta(seconds=120):
+                            keep_mask.at[idx] = False
+                df_extra = df_extra[keep_mask]
+                n_dedup = n_extra_raw - len(df_extra)
+                if len(df_extra) > 0:
+                    df = pd.concat([df, df_extra], ignore_index=True)
+                    df = df.sort_values("date").reset_index(drop=True)
+                print(f"Extra summaries: {n_extra_raw} rows in CSV, {n_dedup} duplicates removed, {len(df_extra)} merged into master")
+            else:
+                print(f"Extra summaries: {n_extra_raw} rows but missing start_time_utc column — skipped")
+        except Exception as e:
+            print(f"WARNING: Failed to load extra summaries from {args.extra_summaries}: {repr(e)}")
+
+    # Safety: if df was empty (no FIT files) and extra summaries provided all the data,
+    # ensure essential columns exist so downstream weather/Strava/era code doesn't crash.
+    if len(df) > 0:
+        _essential_cols = [
+            "date", "file", "distance_km", "elapsed_time_s", "moving_time_s",
+            "avg_hr", "max_hr", "avg_pace_min_per_km", "avg_speed_mps",
+            "avg_power_w", "npower_w", "gps_distance_km", "gps_coverage",
+            "gps_distance_ratio", "gps_lat_med", "gps_lon_med", "gps_outlier_frac",
+            "gps_max_seg_m", "gps_p99_speed_mps", "gps_bbox_m2",
+            "elev_gain_m", "elev_loss_m", "grade_mean_pct",
+            "start_time_utc", "RE_avg", "RE_normalised", "nPower_HR",
+            "stryd_manufacturer", "stryd_product", "stryd_serial_number",
+            "stryd_ant_device_number", "speed_source", "alt_quality",
+            "hr_corrected", "RF_dead_frac", "notes",
+        ]
+        for col in _essential_cols:
+            if col not in df.columns:
+                df[col] = np.nan
 
     # ---------- Weather (Open-Meteo, zero setup) ----------
     # Speed: group runs by rounded location and fetch one hourly block per location (cached on disk).
