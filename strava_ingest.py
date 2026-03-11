@@ -213,7 +213,7 @@ def parse_tcx_to_df(tcx_path: str) -> pd.DataFrame:
     root = tree.getroot()
     
     rows = []
-    prev_lat = prev_lon = prev_ts = None
+    prev_lat = prev_lon = prev_ts = prev_dist = None
     
     # Find all trackpoints
     trkpts = root.findall(f'.//{{{TCX_NS["tcx"]}}}Trackpoint')
@@ -275,16 +275,27 @@ def parse_tcx_to_df(tcx_path: str) -> pd.DataFrame:
         if np.isnan(cad):
             cad = _tcx_extension_float(pt, 'RunCadence')
         
-        # Speed from position delta
+        # Speed: prefer GPS haversine; fall back to cumulative DistanceMeters delta
+        # (essential for treadmill runs with no GPS)
         speed = np.nan
-        if prev_lat is not None and prev_ts is not None and ts > prev_ts:
-            d = _haversine_m(prev_lat, prev_lon, lat, lon)
+        if prev_ts is not None and ts > prev_ts:
             dt = ts - prev_ts
             if 0 < dt < 30:
-                speed = d / dt
+                # Try GPS first
+                if (prev_lat is not None and np.isfinite(prev_lat)
+                        and np.isfinite(prev_lon) and np.isfinite(lat) and np.isfinite(lon)):
+                    d = _haversine_m(prev_lat, prev_lon, lat, lon)
+                    speed = d / dt
+                # Fall back to cumulative distance delta (footpod / accelerometer)
+                elif (prev_dist is not None and np.isfinite(prev_dist)
+                        and np.isfinite(dist_m)):
+                    d = dist_m - prev_dist
+                    if d >= 0:
+                        speed = d / dt
         
         rows.append((ts, hr, cad, np.nan, speed, dist_m, elev, lat, lon))
         prev_lat, prev_lon, prev_ts = lat, lon, ts
+        prev_dist = dist_m
     
     if not rows:
         return pd.DataFrame(columns=["ts", "hr", "cadence", "power_w", "speed", "dist_m", "elev_m", "lat", "lon"])
@@ -825,15 +836,25 @@ def build_summary_from_df(df: pd.DataFrame, source_file: str, tz_local: str = "E
     
     lat_med = float(np.nanmedian(lat[gps_valid])) if gps_valid.any() else np.nan
     lon_med = float(np.nanmedian(lon[gps_valid])) if gps_valid.any() else np.nan
+
+    # Detect treadmill / no-GPS
+    is_treadmill = gps_coverage < 0.1
+    if is_treadmill:
+        _speed_source = 'footpod'
+        _notes_suffix = 'tcx_treadmill'
+    else:
+        _speed_source = 'gps'
+        _notes_suffix = 'gpx_import' if source_file.lower().endswith('.gpx') else 'tcx_import'
     
     return {
         'date': start_local,
         'file': source_file,
-        'notes': 'gpx_import' if source_file.lower().endswith('.gpx') else 'tcx_import',
+        'notes': _notes_suffix,
         'distance_km': round(dist_km, 3),
-        'gps_distance_km': round(dist_km, 3),
+        'gps_distance_km': round(dist_km, 3) if not is_treadmill else np.nan,
+        'strava_distance_km': round(dist_km, 3),
         'gps_coverage': round(gps_coverage, 3),
-        'gps_distance_ratio': 1.0,
+        'gps_distance_ratio': 1.0 if not is_treadmill else np.nan,
         'elapsed_time_s': elapsed_s,
         'moving_time_s': moving_s,
         'avg_pace_min_per_km': round(pace, 2) if np.isfinite(pace) else np.nan,
@@ -857,7 +878,7 @@ def build_summary_from_df(df: pd.DataFrame, source_file: str, tz_local: str = "E
         'stryd_product': '',
         'stryd_serial_number': '',
         'stryd_ant_device_number': '',
-        'speed_source': 'gps',
+        'speed_source': _speed_source,
         'alt_quality': '',
     }
 
