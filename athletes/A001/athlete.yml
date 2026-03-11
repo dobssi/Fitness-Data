@@ -35,16 +35,6 @@ zones:
 # Priority: A = goal race (full taper), B = important (light taper), C = training race (no taper)
 # Surface: road, trail, undulating_trail, track, indoor_track
 planned_races:
-  - name: "Battersea parkrun"
-    date: "2026-02-21"
-    distance_km: 5.0
-    priority: C
-    surface: road
-  - name: "LFOTM 5K"
-    date: "2026-02-27"
-    distance_km: 5.0
-    priority: B
-    surface: road
   - name: "Premiärhalvan"
     date: "2026-04-25"
     distance_km: 21.097
@@ -137,6 +127,12 @@ data:
 # Optional: Override default pipeline parameters
 # (Most athletes can leave these at defaults)
 pipeline:
+  # Race classification mode:
+  #   "auto"  — run classify_races.py on every FULL/INITIAL (default for new athletes)
+  #   "skip"  — trust activity_overrides.xlsx only; never auto-classify
+  #             Use this when you have a curated override file with years of manual edits
+  classify_races_mode: "skip"
+
   # RF calculation
   rf_window_duration_s: 2400      # 40 minutes
   rf_trend_window_days: 42        # 6 weeks
