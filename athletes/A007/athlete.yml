@@ -49,7 +49,7 @@ power:
     re_reference_era: "s4"
 
   gap:
-    peak_cp_watts: 1817  # Auto-updated by StepB bootstrap
+    peak_cp_watts: 484  # Auto-updated by StepB bootstrap
     re_constant: 0.92
 
 data:

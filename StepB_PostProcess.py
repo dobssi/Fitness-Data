@@ -5274,9 +5274,12 @@ def main() -> int:
             rf_gap_adj = min(rf_gap_adj, max_rf_gap)
         
         # PS floor: GAP Power Score / divisor (same logic as Stryd PS floor)
+        # Cap: floor can't exceed 1.5× raw RF (prevents rogue session-level
+        # distances from inflating RF_gap_adj via enormous PS_gap values)
         ps_gap = pd.to_numeric(row.get('PS_gap', np.nan), errors='coerce')
         if pd.notna(ps_gap) and ps_gap > 0:
             rf_gap_floor = ps_gap / ps_rf_divisor
+            rf_gap_floor = min(rf_gap_floor, rf_gap_raw * 1.5)
             if rf_gap_adj < rf_gap_floor:
                 rf_gap_adj = rf_gap_floor
         

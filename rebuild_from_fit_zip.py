@@ -522,9 +522,10 @@ class SkipFitFile(Exception):
     pass
 
 try:
-    from config import ATHLETE_MASS_KG as _CFG_MASS
+    from config import ATHLETE_MASS_KG as _CFG_MASS, ATHLETE_LTHR as _CFG_LTHR
     WEIGHT_KG_DEFAULT = _CFG_MASS
 except (ImportError, FileNotFoundError):
+    _CFG_LTHR = None
     WEIGHT_KG_DEFAULT = 76.0  # Only used if run standalone without config
 PWR_DEAD_WKG = 2.5
 SPD_DEAD_MS = 0.3
@@ -1170,6 +1171,60 @@ def time_bucket(dt: pd.Timestamp) -> str:
     if h < 17:
         return "Afternoon run"
     return "Evening run"
+
+
+def auto_name_run(row, lthr: float = None) -> str:
+    """Generate a descriptive fallback name from run data.
+    
+    Format: "{Intensity} {time-of-day} {distance}" 
+    e.g. "Easy morning 7km", "Tempo afternoon 12km", "Long morning 21km"
+    """
+    dt = pd.Timestamp(row.get("date"))
+    h = dt.hour + dt.minute / 60.0
+    if h < 12:
+        tod = "morning"
+    elif h < 17:
+        tod = "afternoon"
+    else:
+        tod = "evening"
+    
+    # Distance
+    dist = pd.to_numeric(row.get("distance_km", np.nan), errors="coerce")
+    if np.isfinite(dist) and dist >= 0.5:
+        dist_str = f" {dist:.0f}km" if dist >= 1.0 else f" {dist*1000:.0f}m"
+    else:
+        dist_str = ""
+    
+    # Intensity from HR relative to LTHR (if available)
+    avg_hr = pd.to_numeric(row.get("avg_hr", np.nan), errors="coerce")
+    _lthr = lthr or pd.to_numeric(row.get("lthr", np.nan), errors="coerce")
+    elapsed = pd.to_numeric(row.get("elapsed_time_s", np.nan), errors="coerce")
+    
+    intensity = ""
+    if np.isfinite(avg_hr) and _lthr is not None and np.isfinite(_lthr) and _lthr > 0:
+        hr_pct = avg_hr / _lthr
+        if hr_pct < 0.82:
+            intensity = "Easy"
+        elif hr_pct < 0.90:
+            intensity = "Steady"
+        elif hr_pct < 0.97:
+            intensity = "Tempo"
+        else:
+            intensity = "Hard"
+    elif np.isfinite(dist) and np.isfinite(elapsed) and elapsed > 0:
+        # No LTHR — use distance as a proxy
+        if dist >= 18:
+            intensity = "Long"
+        elif dist >= 12:
+            intensity = "Medium-long"
+    
+    # Long run override by distance
+    if np.isfinite(dist) and dist >= 18 and intensity in ("Easy", "Steady", ""):
+        intensity = "Long"
+    
+    parts = [p for p in [intensity, tod, dist_str.strip()] if p]
+    name = " ".join(parts)
+    return name.capitalize() if name else time_bucket(dt)
 
 
 def filter_gps_speed_spikes(t: np.ndarray, v: np.ndarray, max_speed: float = 7.5, max_accel: float = 3.0) -> np.ndarray:
@@ -2975,7 +3030,10 @@ def match_strava(master: pd.DataFrame, act: pd.DataFrame, tz_local: str, pending
         if pending_used > 0:
             print(f"  Applied {pending_used} pending activity names")
 
-    out["activity_name"] = out["activity_name"].fillna(out["date"].apply(lambda x: time_bucket(pd.Timestamp(x))))
+    # Auto-generate descriptive names for runs without Strava/pending names
+    _name_mask = out["activity_name"].isna() | (out["activity_name"] == "")
+    if _name_mask.any():
+        out.loc[_name_mask, "activity_name"] = out[_name_mask].apply(lambda r: auto_name_run(r, lthr=_CFG_LTHR), axis=1)
     return out
 
 
@@ -3065,7 +3123,7 @@ def write_master(template_xlsx: str, out_xlsx: str, df: pd.DataFrame, df_fail: p
 
     # Ensure Strava join columns exist
     if "activity_name" not in df.columns:
-        df["activity_name"] = df["date"].apply(lambda x: time_bucket(pd.Timestamp(x)))
+        df["activity_name"] = df.apply(lambda r: auto_name_run(r, lthr=_CFG_LTHR), axis=1)
     if "shoe" not in df.columns:
         df["shoe"] = ""
 
