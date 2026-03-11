@@ -469,7 +469,7 @@ def generate_athlete_yml(cfg: dict) -> str:
     
     # Planned races section
     if cfg.get("planned_races"):
-        races_yaml = "\n".join([
+        races_yaml = "\n" + "\n".join([
             f'  - name: "{r["name"]}"\n'
             f'    date: "{r["date"]}"\n'
             f'    distance_km: {r["distance_km"]}\n'
@@ -531,8 +531,7 @@ athlete:
   #   Marathon: 0.88
 
 {_generate_zones_yaml(cfg)}\
-planned_races:
-{races_yaml}
+planned_races: {races_yaml}
 
 power:
   mode: "{mode}"

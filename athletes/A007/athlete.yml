@@ -33,7 +33,11 @@ zones:
   hr_zones: [136, 151, 160, 168]
 
 planned_races:
-[]
+  - name: "Hannover Half Marathon"
+    date: "2026-04-12"
+    distance_km: 21.097
+    priority: A
+    surface: road
 
 power:
   mode: "gap"
