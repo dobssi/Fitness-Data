@@ -84,15 +84,16 @@ MESG_EVENT = 21
 MESG_DEVICE_INFO = 23
 
 # FIT base types (per FIT SDK specification)
-FIT_ENUM = 0
-FIT_SINT8 = 1
-FIT_UINT8 = 2
-FIT_SINT16 = 3
-FIT_UINT16 = 4
-FIT_SINT32 = 5
-FIT_UINT32 = 6
-FIT_STRING = 7
-FIT_UINT32Z = 12
+# Multi-byte types use 0x80 flag (endian-aware)
+FIT_ENUM = 0x00
+FIT_SINT8 = 0x01
+FIT_UINT8 = 0x02
+FIT_SINT16 = 0x83    # sint16 with endian flag
+FIT_UINT16 = 0x84    # uint16 with endian flag
+FIT_SINT32 = 0x85    # sint32 with endian flag
+FIT_UINT32 = 0x86    # uint32 with endian flag
+FIT_STRING = 0x07
+FIT_UINT32Z = 0x8C   # uint32z with endian flag
 
 
 def _fit_timestamp(dt: datetime) -> int:
