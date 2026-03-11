@@ -1,0 +1,203 @@
+
+======================================================================
+POLAR SPORT ID SCAN — 2446 total sessions
+======================================================================
+
+   ID   Count  In pipeline?  Known name
+-----  ------  ------------  ------------------------------
+    1    1469         ✓ YES  Running
+   12     223          ✗ NO  ???
+   17     186          ✗ NO  Road cycling
+   20     142          ✗ NO  ???
+   15     130          ✗ NO  ???
+    2      41          ✗ NO  Cycling
+   57      39          ✗ NO  ???
+    6      25          ✗ NO  ???
+   27      24         ✓ YES  Trail running / Jogging
+   34      21          ✗ NO  ???
+   36      20          ✗ NO  ???
+   25      20          ✗ NO  ???
+   23      20          ✗ NO  ???
+   55      12          ✗ NO  ???
+  111       9          ✗ NO  ???
+   11       7          ✗ NO  Hiking
+   38       7          ✗ NO  ???
+   95       6         ✓ YES  Treadmill running
+  118       6          ✗ NO  ???
+   83       5          ✗ NO  ???
+  103       5          ✗ NO  Indoor rowing
+  105       5          ✗ NO  ???
+    7       5          ✗ NO  ???
+   82       3          ✗ NO  ???
+  126       2          ✗ NO  Mobility / Recovery
+   58       2          ✗ NO  ???
+   13       2          ✗ NO  Strength training
+   39       2          ✗ NO  Yoga
+    3       2          ✗ NO  Swimming
+    8       1          ✗ NO  ???
+  178       1          ✗ NO  ???
+   18       1          ✗ NO  ???
+   96       1          ✗ NO  ???
+   68       1          ✗ NO  Indoor running / Treadmill (V800 era)  ← CANDIDATE?
+   33       1          ✗ NO  ???
+
+======================================================================
+CANDIDATE RUNNING SPORTS (not currently in RUNNING_SPORT_IDS)
+======================================================================
+
+  Sport ID 103 (Indoor rowing) — 5 sessions:
+    2019-02-11 |   0.0km | no HR | no samples | 
+    2019-02-13 |   0.0km | no HR | no samples | 
+    2019-03-12 |   0.0km | no HR | no samples | Simmade längre än på länge. Kändes som att det gic
+    2019-03-14 |   0.0km | no HR | no samples | 
+    2019-01-30 |   0.0km | no HR | no samples | 
+
+  Sport ID 105 (???) — 5 sessions:
+    2015-08-15 |   0.0km | no HR | no samples | Öppet vatten
+    2018-07-25 |   0.0km | no HR | no samples | Öppet vatten
+    2018-07-25 |   0.0km | no HR | no samples | Öppet vatten
+    2018-07-26 |   0.0km | no HR | no samples | Öppet vatten
+    2025-08-03 |   0.0km | no HR | no samples | 
+
+  Sport ID 111 (???) — 9 sessions:
+    2020-02-16 |   0.0km | no HR | no samples | 
+    2020-02-17 |   0.0km | no HR | no samples | 
+    2020-01-12 |   0.0km | no HR | no samples | 
+    2020-10-14 |   0.0km | no HR | no samples | tufft rörlighetspass med svåra övningar.
+    2020-02-03 |   0.0km | no HR | no samples | 
+
+  Sport ID 118 (???) — 6 sessions:
+    2026-02-14 |   0.0km | no HR | no samples | 
+    2026-02-07 |   0.0km | no HR | no samples | 
+    2018-03-14 |   0.0km | no HR | no samples | Annan innesport
+    2026-02-28 |   0.0km | no HR | no samples | 
+    2016-04-04 |   0.0km | no HR | no samples | Annan innesport
+
+  Sport ID 12 (???) — 223 sessions:
+    2021-11-02 |   0.0km | no HR | no samples | 
+    2023-10-31 |   0.0km | no HR | no samples | 
+    2021-11-07 |   0.0km | no HR | no samples | 
+    2022-07-27 |   0.0km | no HR | no samples | 
+    2023-01-05 |   0.0km | no HR | no samples | PT med Dion 
+Avslappnad forehand
+Ont i armbåge och
+
+  Sport ID 15 (???) — 130 sessions:
+    2020-10-19 |   0.0km | no HR | no samples | Ryck från höften, box jumps. 25 kg?, 5 reps per se
+    2020-11-09 |   0.0km | no HR | no samples | Explosiva saker.
+Ryck, stöt 5 x 5 rep
+Hopp med s
+    2018-01-16 |   0.0km | no HR | no samples | 
+    2022-11-28 |   0.0km | no HR | no samples | PT-pass med Micke
+Knäböj med stång och hopp, 3x3, 
+    2020-01-21 |   0.0km | no HR | no samples | Styrketräning
+
+  Sport ID 178 (???) — 1 sessions:
+    2024-10-19 |   0.0km | no HR | no samples | Brons i terräng-DM
+
+  Sport ID 18 (???) — 1 sessions:
+    2018-11-07 |   0.0km | no HR | no samples | 20 min tempo norr pm 200W. Lugn uppvärmning och av
+
+  Sport ID 20 (???) — 142 sessions:
+    2014-03-09 |   0.0km | no HR | no samples | Cirkelträning
+    2013-12-04 |   0.0km | no HR | no samples | Emma
+    2014-01-30 |   0.0km | no HR | no samples | Sjövillan Fys
+    2013-11-22 |   0.0km | no HR | no samples | Emma
+    2012-10-07 |   0.0km | no HR | no samples | Cirkelträning
+
+  Sport ID 23 (???) — 20 sessions:
+    2014-11-05 |   0.0km | no HR | no samples | Teknikintervaller
+    2014-11-06 |   0.0km | no HR | no samples | Free
+    2013-01-03 |   0.0km | no HR | no samples | 1200m
+    2012-10-30 |   0.0km | no HR | no samples | 12x50m?
+    2012-12-14 |   0.0km | no HR | no samples | Simma innan frukost
+
+  Sport ID 25 (???) — 20 sessions:
+    2017-03-27 |   0.0km | no HR | no samples | Klassisk längdskidåkning
+    2018-03-31 |   0.0km | no HR | no samples | Klass. l.skidåkn.
+    2018-02-10 |   0.0km | no HR | no samples | Klassisk längdskidåkning
+    2017-02-12 |   0.0km | no HR | no samples | Klass. l.skidåkn.
+    2016-12-11 |   0.0km | no HR | no samples | Klass. l.skidåkn.
+
+  Sport ID 33 (???) — 1 sessions:
+    2025-12-12 |   0.0km | no HR | no samples | 
+
+  Sport ID 34 (???) — 21 sessions:
+    2020-02-18 |   0.0km | no HR | no samples | 
+    2020-02-04 |   0.0km | no HR | no samples | 
+    2024-07-05 |   0.0km | no HR | no samples | 
+    2022-02-18 |   0.0km | no HR | no samples | Metcon 
+    2020-02-13 |   0.0km | no HR | no samples | 
+
+  Sport ID 36 (???) — 20 sessions:
+    2025-12-11 |   0.0km | no HR | no samples | 
+    2025-12-11 |   0.0km | no HR | no samples | 
+    2026-01-20 |   0.0km | no HR | no samples | 
+    2025-01-21 |   0.0km | no HR | no samples | 
+    2024-12-17 |   0.0km | no HR | no samples | 
+
+  Sport ID 38 (???) — 7 sessions:
+    2023-06-28 |   0.0km | no HR | no samples | Cykling med June :)
+    2025-08-06 |   0.0km | no HR | no samples | 
+    2023-07-07 |   0.0km | no HR | no samples | 
+    2020-08-03 |   0.0km | no HR | no samples | Mysig tur!
+    2023-07-02 |   0.0km | no HR | no samples | Cykel med June
+
+  Sport ID 55 (???) — 12 sessions:
+    2024-12-11 |   0.0km | no HR | no samples | 
+    2020-01-23 |   0.0km | no HR | no samples | 
+    2016-12-13 |   0.0km | no HR | no samples | Cross- trainer
+    2021-02-25 |   0.0km | no HR | no samples | Crosstrainer och stretch. Väldigt hungrig  .
+    2020-02-03 |   0.0km | no HR | no samples | Skidmaskin och löpband
+
+  Sport ID 57 (???) — 39 sessions:
+    2025-11-05 |   0.0km | no HR | no samples | 
+    2016-02-10 |   0.0km | no HR | no samples | Knäböj, marklyft och rodd med Emma 
+
+Marklyft 5x
+    2015-10-29 |   0.0km | no HR | no samples | Funktionell träning
+    2021-04-06 |   0.0km | no HR | no samples | Power conditioning med jogg till och från SPR Söde
+    2015-10-09 |   0.0km | no HR | no samples | Funktionell trän.
+
+  Sport ID 58 (???) — 2 sessions:
+    2018-06-11 |   0.0km | no HR | no samples | Bootcamp
+    2018-06-13 |   0.0km | no HR | no samples | Bootcamp
+
+  Sport ID 6 (???) — 25 sessions:
+    2019-03-07 |   0.0km | no HR | no samples | 
+    2012-12-28 |   0.0km | no HR | no samples | Mellandagsloppet
+    2015-10-29 |   0.0km | no HR | no samples | Skidåkning
+    2022-01-12 |   0.0km | no HR | no samples | 
+    2022-01-10 |   0.0km | no HR | no samples | 
+
+  Sport ID 68 (Indoor running / Treadmill (V800 era)) — 1 sessions:
+    2023-06-17 |   0.0km | no HR | no samples | Triathlon
+
+  Sport ID 7 (???) — 5 sessions:
+    2017-02-17 |   0.0km | no HR | no samples | Utförsåkning
+    2017-02-17 |   0.0km | no HR | no samples | Klass. l.skidåkn.
+    2017-02-18 |   0.0km | no HR | no samples | Utförsåkning
+    2017-02-19 |   0.0km | no HR | no samples | Utförsåkning
+    2017-02-17 |   0.0km | no HR | no samples | Utförsåkning
+
+  Sport ID 8 (???) — 1 sessions:
+    2018-04-05 |   0.0km | no HR | no samples | Annan innesport
+
+  Sport ID 82 (???) — 3 sessions:
+    2024-07-21 |   0.0km | no HR | no samples | Tennis och annat kul
+    2021-01-15 |   0.0km | no HR | no samples | Multisport
+    2024-07-22 |   0.0km | no HR | no samples | 
+
+  Sport ID 83 (???) — 5 sessions:
+    2019-02-18 |   0.0km | no HR | no samples | 12 minuter stakmaskin, 18 minuter crosstrainer
+    2015-12-28 |   0.0km | no HR | no samples | Annan sport, inomhus
+    2018-09-19 |   0.0km | no HR | no samples | Annan innesport
+    2016-01-13 |   0.0km | no HR | no samples | Annan innesport
+    2015-12-20 |   0.0km | no HR | no samples | Annan innesport
+
+  Sport ID 96 (???) — 1 sessions:
+    2022-08-13 |   0.0km | no HR | no samples | Paddling
+
+======================================================================
+SUMMARY: 1499 running sessions, 947 skipped
+======================================================================

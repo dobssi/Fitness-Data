@@ -1728,11 +1728,25 @@ def get_prediction_trend_data(df):
     Returns dict keyed by distance."""
     result = {}
     
+    # Mode-aware prediction columns: GAP athletes have pred_5k_s_gap, not pred_5k_s
+    def _pred_col(base):
+        """Return best available prediction column for current power mode."""
+        mode_col = f'{base}_{_cfg_power_mode}' if _cfg_power_mode else base
+        if mode_col in df.columns and df[mode_col].notna().any():
+            return mode_col
+        if base in df.columns and df[base].notna().any():
+            return base
+        for m in ('gap', 'sim'):
+            c = f'{base}_{m}'
+            if c in df.columns and df[c].notna().any():
+                return c
+        return base
+
     distances = {
-        '5k': {'pred_col': 'pred_5k_s', 'official_km': 5.0},
-        '10k': {'pred_col': 'pred_10k_s', 'official_km': 10.0},
-        'hm': {'pred_col': 'pred_hm_s', 'official_km': 21.097},
-        'marathon': {'pred_col': 'pred_marathon_s', 'official_km': 42.195},
+        '5k': {'pred_col': _pred_col('pred_5k_s'), 'official_km': 5.0},
+        '10k': {'pred_col': _pred_col('pred_10k_s'), 'official_km': 10.0},
+        'hm': {'pred_col': _pred_col('pred_hm_s'), 'official_km': 21.097},
+        'marathon': {'pred_col': _pred_col('pred_marathon_s'), 'official_km': 42.195},
     }
     
     for dist_key, info in distances.items():

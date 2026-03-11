@@ -306,7 +306,7 @@ from config import (PEAK_CP_WATTS, POWER_SCORE_RIEGEL_K, POWER_SCORE_REFERENCE_D
                     POWER_SCORE_AIR_THRESHOLD, POWER_SCORE_AIR_EXCESS_FACTOR,
                     STRYD_GAP_RE_Z_THRESHOLD, STRYD_GAP_RATIO_EMA_SPAN, STRYD_GAP_EXCESS_THRESHOLD,
                     CTL_TIME_CONSTANT, ATL_TIME_CONSTANT, CTL_ALPHA, ATL_ALPHA,
-                    RF_TREND_WINDOW,
+                    RF_TREND_WINDOW, RF_TREND_MIN_PERIODS,
                     RF_WINDOW_DURATION_S,
                     TERRAIN_LINEAR_SLOPE, TERRAIN_LINEAR_CAP, TERRAIN_STRAVA_ELEV_MIN,
                     DURATION_PENALTY_DAMPING,
@@ -5193,7 +5193,7 @@ def main() -> int:
                 rf_adjs = window_df['RF_adj'].fillna(0)
                 
                 valid = (factors > 0) & (rf_adjs > 0)
-                if valid.any():
+                if valid.sum() >= RF_TREND_MIN_PERIODS:
                     # Combined weight = Factor * time_decay
                     combined_weights = factors[valid] * time_decay[valid]
                     numerator = (combined_weights * rf_adjs[valid]).sum()
@@ -5311,7 +5311,7 @@ def main() -> int:
                 rf_gap_adjs = window_df['RF_gap_adj'].fillna(0)
                 
                 valid = (factors > 0) & (rf_gap_adjs > 0)
-                if valid.any():
+                if valid.sum() >= RF_TREND_MIN_PERIODS:
                     combined_weights = factors[valid] * time_decay[valid]
                     numerator = (combined_weights * rf_gap_adjs[valid]).sum()
                     denominator = combined_weights.sum()
@@ -5398,7 +5398,7 @@ def main() -> int:
                 rf_sim_adjs = window_df['RF_sim_adj'].fillna(0)
                 
                 valid = (factors > 0) & (rf_sim_adjs > 0)
-                if valid.any():
+                if valid.sum() >= RF_TREND_MIN_PERIODS:
                     combined_weights = factors[valid] * time_decay[valid]
                     numerator = (combined_weights * rf_sim_adjs[valid]).sum()
                     denominator = combined_weights.sum()

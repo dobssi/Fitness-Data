@@ -63,7 +63,7 @@ data:
 pipeline:
   rf_window_duration_s: 2400
   rf_trend_window_days: 42
-  rf_trend_min_periods: 5
+  rf_trend_min_periods: 10
   ctl_time_constant: 42
   atl_time_constant: 7
   temp_baseline_c: 10.0
