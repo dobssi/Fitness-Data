@@ -207,53 +207,92 @@ class FITWriter:
                    hr_bpm: int | None = None, speed_ms: float | None = None,
                    distance_m: float | None = None, cadence: int | None = None,
                    power_w: int | None = None):
-        """Write a record (per-second data point)."""
-        # Build field list dynamically based on what data is available
-        fields = [(253, 4, FIT_UINT32)]  # timestamp always present
-        values = [struct.pack('<I', _fit_timestamp(timestamp))]
+        """Write a record (per-second data point).
 
+        Uses a fixed field definition with all 9 fields always present.
+        Missing values are written as FIT invalid markers so fitparse
+        returns None for them (same as a real Garmin/Polar FIT file).
+        """
+        # FIT "invalid" sentinel values per type
+        INVALID_SINT32 = 0x7FFFFFFF
+        INVALID_UINT32 = 0xFFFFFFFF
+        INVALID_UINT16 = 0xFFFF
+        INVALID_UINT8  = 0xFF
+
+        # Fixed definition — write once, reuse for all records
+        if not hasattr(self, '_record_def_written'):
+            fields = [
+                (253, 4, FIT_UINT32),   # timestamp
+                (0,   4, FIT_SINT32),   # position_lat
+                (1,   4, FIT_SINT32),   # position_long
+                (2,   2, FIT_UINT16),   # altitude
+                (3,   1, FIT_UINT8),    # heart_rate
+                (6,   2, FIT_UINT16),   # speed
+                (5,   4, FIT_UINT32),   # distance
+                (4,   1, FIT_UINT8),    # cadence
+                (7,   2, FIT_UINT16),   # power
+            ]
+            self._write_definition(2, MESG_RECORD, fields)
+            self._record_def_written = True
+
+        # Timestamp (always valid)
+        ts_val = _fit_timestamp(timestamp)
+
+        # Lat/lon
         if lat is not None and lon is not None:
-            # FIT stores lat/lon as semicircles: degrees * (2^31 / 180)
-            fields.append((0, 4, FIT_SINT32))  # position_lat
-            fields.append((1, 4, FIT_SINT32))  # position_long
             lat_semi = int(lat * (2**31 / 180.0))
             lon_semi = int(lon * (2**31 / 180.0))
-            values.append(struct.pack('<i', lat_semi))
-            values.append(struct.pack('<i', lon_semi))
+        else:
+            lat_semi = INVALID_SINT32
+            lon_semi = INVALID_SINT32
 
+        # Altitude
         if altitude_m is not None and np.isfinite(altitude_m):
-            # FIT altitude: (value + 500) * 5, stored as uint16
-            fields.append((2, 2, FIT_UINT16))
-            alt_fit = int((altitude_m + 500.0) * 5.0)
-            alt_fit = max(0, min(65534, alt_fit))
-            values.append(struct.pack('<H', alt_fit))
+            alt_fit = max(0, min(65534, int((altitude_m + 500.0) * 5.0)))
+        else:
+            alt_fit = INVALID_UINT16
 
+        # Heart rate
         if hr_bpm is not None and hr_bpm > 0:
-            fields.append((3, 1, FIT_UINT8))
-            values.append(struct.pack('<B', min(255, max(0, int(hr_bpm)))))
+            hr_val = min(255, max(0, int(hr_bpm)))
+        else:
+            hr_val = INVALID_UINT8
 
+        # Speed
         if speed_ms is not None and np.isfinite(speed_ms) and speed_ms >= 0:
-            # FIT speed: m/s * 1000, stored as uint16
-            fields.append((6, 2, FIT_UINT16))
-            values.append(struct.pack('<H', min(65534, int(speed_ms * 1000))))
+            spd_val = min(65534, int(speed_ms * 1000))
+        else:
+            spd_val = INVALID_UINT16
 
+        # Distance
         if distance_m is not None and np.isfinite(distance_m):
-            # FIT distance: metres * 100, stored as uint32
-            fields.append((5, 4, FIT_UINT32))
-            values.append(struct.pack('<I', int(distance_m * 100)))
+            dist_val = int(distance_m * 100)
+        else:
+            dist_val = INVALID_UINT32
 
+        # Cadence
         if cadence is not None and cadence > 0:
-            # FIT cadence for running: strides/min (Polar reports steps/min)
-            fields.append((4, 1, FIT_UINT8))
-            values.append(struct.pack('<B', min(255, max(0, int(cadence)))))
+            cad_val = min(255, max(0, int(cadence)))
+        else:
+            cad_val = INVALID_UINT8
 
+        # Power
         if power_w is not None and power_w > 0:
-            fields.append((7, 2, FIT_UINT16))
-            values.append(struct.pack('<H', min(65534, max(0, int(power_w)))))
+            pwr_val = min(65534, max(0, int(power_w)))
+        else:
+            pwr_val = INVALID_UINT16
 
-        # Use local message 2 for records, redefine each time
-        # (simpler than tracking field changes)
-        self._write_definition(2, MESG_RECORD, fields)
+        values = [
+            struct.pack('<I', ts_val),
+            struct.pack('<i', lat_semi),
+            struct.pack('<i', lon_semi),
+            struct.pack('<H', alt_fit),
+            struct.pack('<B', hr_val),
+            struct.pack('<H', spd_val),
+            struct.pack('<I', dist_val),
+            struct.pack('<B', cad_val),
+            struct.pack('<H', pwr_val),
+        ]
         self._write_data(2, values)
 
     def build(self) -> bytes:
