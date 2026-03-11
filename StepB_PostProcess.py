@@ -3956,6 +3956,31 @@ def main() -> int:
     # Runs BEFORE overrides so manual factor=0 overrides are additive.
     dfm = apply_auto_excludes(dfm)
 
+    # ─── v53: Sanitise rogue session-level distances ───────────────────────
+    # Some Polar non-GPS runs have wildly inflated session distance (stride sensor
+    # at wrong scale). This corrupts PS_gap, TSS, Factor, and CTL.
+    # Fix: when session-level speed disagrees with per-second avg_pace by >50%,
+    # replace distance_km with pace-derived distance (per-second data is reliable).
+    _pace_s = pd.to_numeric(dfm.get('avg_pace_min_per_km'), errors='coerce')
+    _dist_s = pd.to_numeric(dfm.get('distance_km'), errors='coerce')
+    _movt_s = pd.to_numeric(dfm.get('moving_time_s'), errors='coerce')
+    # Per-second pace → expected distance
+    _pace_speed_mps = 1000.0 / (_pace_s * 60.0)  # m/s from per-sec pace
+    _pace_dist_km = (_pace_speed_mps * _movt_s) / 1000.0  # km
+    # Session-level speed
+    _sess_speed_mps = (_dist_s * 1000.0) / _movt_s
+    # Flag: session speed > 1.5× per-second speed (rogue distance)
+    _rogue = (
+        _pace_s.notna() & (_pace_s > 1.5) &  # has sane per-sec pace
+        _dist_s.notna() & _movt_s.notna() & (_movt_s > 0) &
+        (_sess_speed_mps > _pace_speed_mps * 1.5)  # session is 50%+ faster than per-sec
+    )
+    _n_rogue = int(_rogue.sum())
+    if _n_rogue > 0:
+        dfm.loc[_rogue, 'distance_km'] = _pace_dist_km[_rogue].round(3)
+        print(f"Distance sanitise: corrected {_n_rogue} runs with rogue session-level distance "
+              f"(session speed > 1.5× per-second pace)")
+
     # v43: Era adjusters calculated after main loop (when RE_avg is fresh)
     era_csv_path = os.path.join(os.path.dirname(args.out), "stryd_era_adjusters.csv")
 
