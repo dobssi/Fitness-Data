@@ -59,6 +59,8 @@ PIPELINE_FILES = [
     # CI
     "ci/dropbox_sync.py",
     "ci/apply_run_metadata.py",
+    "ci/initial_data_ingest.py",
+    "ci/polar_ingest.py",
     # Config
     "requirements.txt",
     "activity_overrides.yml",
