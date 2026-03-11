@@ -3634,6 +3634,19 @@ def main():
             df = pd.DataFrame(rows)
     else:
         df = pd.DataFrame(rows).sort_values("date").reset_index(drop=True)
+        
+        # Discard all runs before the first run with GPS data.
+        # Pre-GPS Polar/old-watch data has unreliable distance and speed from
+        # stride sensors, which corrupts PS_gap, RF_gap_adj, and RFL.
+        _gps_dist = pd.to_numeric(df.get("gps_distance_km", pd.Series(dtype=float)), errors="coerce")
+        _has_gps = _gps_dist.notna() & (_gps_dist > 0)
+        if _has_gps.any():
+            _first_gps_idx = _has_gps.idxmax()
+            _n_pre_gps = int(_first_gps_idx)
+            if _n_pre_gps > 0:
+                print(f"  Excluding {_n_pre_gps} pre-GPS runs (before {df.at[_first_gps_idx, 'date']})")
+                df = df.loc[_first_gps_idx:].reset_index(drop=True)
+        
         if append_mode and base_master_df is not None:
             df = pd.concat([base_master_df, df], ignore_index=True)
 
