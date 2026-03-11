@@ -323,6 +323,8 @@ from config import (PEAK_CP_WATTS, POWER_SCORE_RIEGEL_K, POWER_SCORE_REFERENCE_D
                     STRYD_ERA_DATES,
                     # Athlete parameters
                     ATHLETE_MASS_KG, ATHLETE_LTHR, ATHLETE_MAX_HR,
+                    # Speed cap for PS_gap
+                    MAX_AVG_SPEED_MPS,
                     # Planned training
                     PLANNED_SESSIONS, PLANNED_RACES)
 
@@ -4942,6 +4944,7 @@ def main() -> int:
             
             # Phase 2: GAP Power Score (same formula but using speed-based power, no era adj)
             avg_speed_mps = (distance_km * 1000) / moving_time_s if moving_time_s > 0 else 0
+            avg_speed_mps = min(avg_speed_mps, MAX_AVG_SPEED_MPS)  # Cap rogue session-level distances
             gap_avg_power = avg_speed_mps * float(args.mass_kg) / GAP_RE_CONSTANT
             # Add air resistance: P_air = 0.5 * CdA * rho * v^3
             _ps_rho = air_density_kg_m3(float(temp_adj), 1013.25, 0.6)  # approximate

@@ -153,6 +153,7 @@ class PipelineConfig:
     alert2_window: int = 5
     alert3b_z_threshold: float = -2.0
     alert5_gap_threshold: float = -0.03
+    max_avg_speed_mps: float = 6.0  # Cap for session-level avg speed in PS_gap calc (2:47/km)
     
     @classmethod
     def from_dict(cls, d: Dict[str, Any]) -> PipelineConfig:
@@ -183,7 +184,8 @@ class PipelineConfig:
             alert2_count=int(alerts.get("alert2_count", 3)),
             alert2_window=int(alerts.get("alert2_window", 5)),
             alert3b_z_threshold=float(alerts.get("alert3b_z_threshold", -2.0)),
-            alert5_gap_threshold=float(alerts.get("alert5_gap_threshold", -0.03))
+            alert5_gap_threshold=float(alerts.get("alert5_gap_threshold", -0.03)),
+            max_avg_speed_mps=float(d.get("max_avg_speed_mps", 6.0))
         )
 
 

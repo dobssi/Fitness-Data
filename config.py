@@ -203,6 +203,7 @@ ALERT2_COUNT = _ATHLETE_CONFIG.pipeline.alert2_count
 ALERT2_WINDOW = _ATHLETE_CONFIG.pipeline.alert2_window
 ALERT3B_Z_THRESHOLD = _ATHLETE_CONFIG.pipeline.alert3b_z_threshold
 ALERT5_GAP_THRESHOLD = _ATHLETE_CONFIG.pipeline.alert5_gap_threshold
+MAX_AVG_SPEED_MPS = _ATHLETE_CONFIG.pipeline.max_avg_speed_mps
 
 # =============================================================================
 # TEMPERATURE ADJUSTMENT PARAMETERS
