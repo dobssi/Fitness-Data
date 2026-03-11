@@ -3561,6 +3561,8 @@ def main():
         except Exception as e:
             failures.append({"file": os.path.basename(fp), "reason": f"ERROR: {repr(e)}"})
             print(f"Failed  ({i}/{total}): {os.path.basename(fp)}  |  {repr(e)}")
+            if len(failures) <= 3:
+                import traceback; traceback.print_exc()
 
     if not rows:
         if append_mode and base_master_df is not None:
