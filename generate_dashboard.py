@@ -6236,8 +6236,8 @@ function raceAnnotations(dates) {{
             // Colour actual dots: parkruns lighter, non-parkrun races darker
             const dotColors = isParkrun.map(p => p === 1 ? 'rgba(252, 165, 165, 0.8)' : 'rgba(239, 68, 68, 0.9)');
             
-            // Build data points for time axis
-            const predPoints = datesISO.map((dt, i) => displayPredicted[i] !== null ? ({{ x: dt, y: displayPredicted[i] }}) : null).filter(p => p !== null);
+            // Build data points for time axis (fall back to actual time if prediction missing)
+            const predPoints = datesISO.map((dt, i) => ({{ x: dt, y: displayPredicted[i] !== null ? displayPredicted[i] : actual[i] }}));
             const actualPoints = datesISO.map((dt, i) => ({{ x: dt, y: actual[i] }}));
             
             // Full prediction trend line (weekly smoothed, for distances with few races)
