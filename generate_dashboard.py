@@ -7013,16 +7013,15 @@ def main():
     stats['race_predictions'] = race_predictions
     
     # AG RFL: current predicted AG / best ever race AG
-    # Current = max predicted AG across distances (from race_predictions dict)
+    # Current = predicted AG from the athlete's configured power mode
     # Best = max age_grade_pct across all races in master
-    _current_ag_candidates = []
+    _current_ag = None
     if age_grade and age_grade > 30:
-        _current_ag_candidates.append(age_grade)
-    for mode in ('gap', 'sim'):
-        _mode_ag = race_predictions.get(f'_ag_{mode}')
+        _current_ag = age_grade
+    elif _cfg_power_mode in ('gap', 'sim'):
+        _mode_ag = race_predictions.get(f'_ag_{_cfg_power_mode}')
         if _mode_ag and _mode_ag > 30:
-            _current_ag_candidates.append(_mode_ag)
-    _current_ag = max(_current_ag_candidates) if _current_ag_candidates else None
+            _current_ag = _mode_ag
     
     _best_race_ag = None
     race_col = 'race_flag' if 'race_flag' in df.columns else 'Race'
