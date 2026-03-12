@@ -2843,6 +2843,7 @@ def match_strava(master: pd.DataFrame, act: pd.DataFrame, tz_local: str, pending
     names, shoes, ids = [], [], []
     mt_s, et_s, eg_m, el_m = [], [], [], []
     dist_km = []  # v41: Strava distance
+    act_type = []  # v53: Strava activity type (for virtual run detection)
     mtype = []
 
     # Precompute numpy arrays for dt to speed up repeated operations
@@ -2862,7 +2863,7 @@ def match_strava(master: pd.DataFrame, act: pd.DataFrame, tz_local: str, pending
             if t_local is None or (isinstance(t_local, float) and not np.isfinite(t_local)):
                 names.append(r.get("activity_name", None)); shoes.append(r.get("shoe", "")); ids.append(None)
                 mt_s.append(np.nan); et_s.append(np.nan); eg_m.append(np.nan); el_m.append(np.nan)
-                dist_km.append(np.nan)  # v42
+                dist_km.append(np.nan); act_type.append(None)
                 mtype.append("unmatched")
                 continue
             t_local = pd.Timestamp(t_local)
@@ -2903,7 +2904,7 @@ def match_strava(master: pd.DataFrame, act: pd.DataFrame, tz_local: str, pending
         if cand_idx.size == 0:
             names.append(r.get("activity_name", None)); shoes.append(r.get("shoe", "")); ids.append(None)
             mt_s.append(np.nan); et_s.append(np.nan); eg_m.append(np.nan); el_m.append(np.nan)
-            dist_km.append(np.nan)  # v42
+            dist_km.append(np.nan); act_type.append(None)
             mtype.append("unmatched")
             continue
 
@@ -2944,6 +2945,7 @@ def match_strava(master: pd.DataFrame, act: pd.DataFrame, tz_local: str, pending
         eg_m.append(float(best.get("ElevGain_m", np.nan)))
         el_m.append(float(best.get("ElevLoss_m", np.nan)))
         dist_km.append(float(best.get("Distance_km", np.nan)))  # v41: Strava distance
+        act_type.append(best.get("Activity Type Lower", None))  # v53: for virtual run detection
         mtype.append(match_type)
 
     out = master.copy()
@@ -2955,6 +2957,7 @@ def match_strava(master: pd.DataFrame, act: pd.DataFrame, tz_local: str, pending
     out["strava_elev_gain_m"] = eg_m
     out["strava_elev_loss_m"] = el_m
     out["strava_distance_km"] = dist_km  # v41: Strava corrected distance
+    out["strava_activity_type"] = act_type  # v53: for virtual run detection
     out["strava_match_type"] = mtype
 
     # Tag merged components (multiple master rows map to same Strava activity id)

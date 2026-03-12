@@ -7026,7 +7026,20 @@ def main():
     _best_race_ag = None
     race_col = 'race_flag' if 'race_flag' in df.columns else 'Race'
     if 'age_grade_pct' in df.columns and race_col in df.columns:
-        _race_ags = df.loc[df[race_col] == 1, 'age_grade_pct'].dropna()
+        _ag_races = df[df[race_col] == 1].copy()
+        # Exclude virtual/Zwift races — unreliable treadmill distance
+        if 'strava_activity_type' in _ag_races.columns:
+            _virtual = _ag_races['strava_activity_type'].str.contains('virtual', case=False, na=False)
+        elif 'activity_name' in _ag_races.columns:
+            # Fallback: name-based detection for masters without strava_activity_type
+            _virtual = _ag_races['activity_name'].str.contains(
+                r'\bzwift\b|virtual|\(E\)\s*$|ZLDR|watopia', case=False, na=False, regex=True)
+        else:
+            _virtual = pd.Series(False, index=_ag_races.index)
+            if _virtual.any():
+                print(f"  AG RFL: excluded {_virtual.sum()} virtual/Zwift races from peak AG")
+                _ag_races = _ag_races[~_virtual]
+        _race_ags = _ag_races['age_grade_pct'].dropna()
         _race_ags = _race_ags[(_race_ags >= 30) & (_race_ags < 120)]
         if len(_race_ags) > 0:
             _best_race_ag = round(float(_race_ags.max()), 2)
