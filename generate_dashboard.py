@@ -6248,18 +6248,20 @@ function raceAnnotations(dates) {{
             const trendPoints = trendDates.map((dt, i) => ({{ x: dt, y: trendVals[i] }}));
             const fewRaces = actualPoints.length < 5;
             
-            // Compute x-axis bounds: race dates (+ trend dates when fewRaces shows the trend fill)
-            const allXDates = datesISO.map(d => new Date(d).getTime());
-            if (fewRaces && trendDates.length > 0) {{
-                allXDates.push(new Date(trendDates[0]).getTime());
-                allXDates.push(new Date(trendDates[trendDates.length - 1]).getTime());
+            // Compute x-axis bounds from race dates
+            const raceTimes = datesISO.map(d => new Date(d).getTime());
+            const firstRace = Math.min(...raceTimes);
+            const lastRace = Math.max(...raceTimes);
+            let xDataMin = firstRace;
+            let xDataMax = lastRace;
+            if (fewRaces) {{
+                // Extend to present so you see current fitness relative to sparse races
+                xDataMax = Math.max(xDataMax, Date.now());
             }}
-            const xDataMin = Math.min(...allXDates);
-            const xDataMax = Math.max(...allXDates);
-            const xSpan = Math.max(xDataMax - xDataMin, 90 * 86400000);  // minimum 90 days
-            const xPad = xSpan * 0.08;  // 8% padding each side
+            const xSpan = Math.max(xDataMax - xDataMin, 180 * 86400000);  // minimum 6 months
+            const xPad = xSpan * 0.05;
             const xMin = new Date(xDataMin - xPad).toISOString().slice(0, 10);
-            const xMax = new Date(Math.min(xDataMax + xPad, Date.now() + 30 * 86400000)).toISOString().slice(0, 10);
+            const xMax = new Date(xDataMax + xPad).toISOString().slice(0, 10);
             
             // Compute stable y-axis range covering both adjusted and unadjusted data
             const allYVals = [];
