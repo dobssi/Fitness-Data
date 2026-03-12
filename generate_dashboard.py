@@ -6247,6 +6247,7 @@ function raceAnnotations(dates) {{
             const trendVals = (d[trendValKey] && d[trendValKey].length > 0) ? d[trendValKey] : (d.trend_values || []);
             const trendPoints = trendDates.map((dt, i) => ({{ x: dt, y: trendVals[i] }}));
             const fewRaces = actualPoints.length < 5;
+            const singleRace = actualPoints.length < 2;
             
             // Compute x-axis bounds from race dates
             const raceTimes = datesISO.map(d => new Date(d).getTime());
@@ -6327,15 +6328,15 @@ function raceAnnotations(dates) {{
                             return modeBase + ' 0.05)';
                         }})(),
                         borderDash: adjustConditions ? [4, 3] : [],
-                        borderWidth: fewRaces ? 0 : 2,
-                        pointRadius: fewRaces ? 3 : 0,
+                        borderWidth: singleRace ? 0 : 2,
+                        pointRadius: singleRace ? 3 : 0,
                         pointBackgroundColor: (function() {{
                             const modeBase = currentMode === 'gap' ? 'rgba(74, 222, 128,' : currentMode === 'sim' ? 'rgba(249, 115, 22,' : 'rgba(129, 140, 248,';
                             return modeBase + ' 0.8)';
                         }})(),
                         fill: !fewRaces,
                         tension: 0.3,
-                        showLine: !fewRaces,
+                        showLine: !singleRace,
                     }}, {{
                         label: 'Actual',
                         data: actualPoints,
