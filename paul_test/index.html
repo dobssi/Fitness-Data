@@ -493,7 +493,7 @@ function raceAnnotations(dates) {
 }catch(e){console.warn('Chart.js not loaded:',e);}
 </script>
     <h1>🏃 Paul Test</h1>
-    <div class="dash-sub">Thursday 12 March 2026, 17:14</div>
+    <div class="dash-sub">Thursday 12 March 2026, 18:29</div>
     
     <!-- Phase 2: Mode Toggle -->
     <div class="mode-toggle" style="display:flex;gap:6px;margin:10px 0 8px;align-items:center;display:none;">
@@ -1278,7 +1278,7 @@ function raceAnnotations(dates) {
     
     
     <div class="footer">
-        Updated: 2026-03-12 17:14<br>
+        Updated: 2026-03-12 18:29<br>
         Data through: 2026-03-12
     </div>
     
@@ -2076,8 +2076,8 @@ function raceAnnotations(dates) {
             // Colour actual dots: parkruns lighter, non-parkrun races darker
             const dotColors = isParkrun.map(p => p === 1 ? 'rgba(252, 165, 165, 0.8)' : 'rgba(239, 68, 68, 0.9)');
             
-            // Build data points for time axis
-            const predPoints = datesISO.map((dt, i) => displayPredicted[i] !== null ? ({ x: dt, y: displayPredicted[i] }) : null).filter(p => p !== null);
+            // Build data points for time axis (fall back to actual time if prediction missing)
+            const predPoints = datesISO.map((dt, i) => ({ x: dt, y: displayPredicted[i] !== null ? displayPredicted[i] : actual[i] }));
             const actualPoints = datesISO.map((dt, i) => ({ x: dt, y: actual[i] }));
             
             // Full prediction trend line (weekly smoothed, for distances with few races)
@@ -2086,13 +2086,28 @@ function raceAnnotations(dates) {
             const trendDates = (d[trendKey] && d[trendKey].length > 0) ? d[trendKey] : (d.trend_dates_iso || []);
             const trendVals = (d[trendValKey] && d[trendValKey].length > 0) ? d[trendValKey] : (d.trend_values || []);
             const trendPoints = trendDates.map((dt, i) => ({ x: dt, y: trendVals[i] }));
-            const fewRaces = actualPoints.length < 5;
+            const singleRace = actualPoints.length < 2;
+            
+            // Compute x-axis bounds from race dates
+            const raceTimes = datesISO.map(d => new Date(d).getTime());
+            const firstRace = Math.min(...raceTimes);
+            const lastRace = Math.max(...raceTimes);
+            let xDataMin = firstRace;
+            let xDataMax = lastRace;
+            if (singleRace) {
+                // Extend to present so you see current fitness relative to sparse races
+                xDataMax = Math.max(xDataMax, Date.now());
+            }
+            const xSpan = Math.max(xDataMax - xDataMin, 180 * 86400000);  // minimum 6 months
+            const xPad = xSpan * 0.05;
+            const xMin = new Date(xDataMin - xPad).toISOString().slice(0, 10);
+            const xMax = new Date(xDataMax + xPad).toISOString().slice(0, 10);
             
             // Compute stable y-axis range covering both adjusted and unadjusted data
             const allYVals = [];
             for (let i = 0; i < actual.length; i++) { if (actual[i]) allYVals.push(actual[i]); }
             for (let i = 0; i < predicted.length; i++) { if (predicted[i]) allYVals.push(predicted[i]); }
-            if (fewRaces) { for (let i = 0; i < trendVals.length; i++) { if (trendVals[i]) allYVals.push(trendVals[i]); } }
+            if (singleRace) { for (let i = 0; i < trendVals.length; i++) { if (trendVals[i]) allYVals.push(trendVals[i]); } }
             // Also include worst-case adjusted predictions
             for (let i = 0; i < predicted.length; i++) {
                 if (predicted[i] === null) continue;
@@ -2121,8 +2136,8 @@ function raceAnnotations(dates) {
                 type: 'line',
                 data: {
                     datasets: [
-                    // Background trend line (only for distances with < 5 races)
-                    ...(fewRaces && trendPoints.length > 0 ? [{
+                    // Background trend line (only for single-race distances)
+                    ...(singleRace && trendPoints.length > 0 ? [{
                         label: 'Fitness trend',
                         data: trendPoints,
                         borderColor: (function() {
@@ -2152,10 +2167,15 @@ function raceAnnotations(dates) {
                             return modeBase + ' 0.05)';
                         })(),
                         borderDash: adjustConditions ? [4, 3] : [],
-                        borderWidth: 2,
-                        pointRadius: 0,
-                        fill: !fewRaces,
+                        borderWidth: singleRace ? 0 : 2,
+                        pointRadius: 3,
+                        pointBackgroundColor: (function() {
+                            const modeBase = currentMode === 'gap' ? 'rgba(74, 222, 128,' : currentMode === 'sim' ? 'rgba(249, 115, 22,' : 'rgba(129, 140, 248,';
+                            return modeBase + ' 0.8)';
+                        })(),
+                        fill: false,
                         tension: 0.3,
+                        showLine: !singleRace,
                     }, {
                         label: 'Actual',
                         data: actualPoints,
@@ -2245,6 +2265,8 @@ function raceAnnotations(dates) {
                     scales: {
                         x: {
                             type: 'time',
+                            min: xMin,
+                            max: xMax,
                             time: { unit: 'year', displayFormats: { year: 'yyyy' } },
                             ticks: { maxTicksLimit: 10, font: { size: 10 } }
                         },
