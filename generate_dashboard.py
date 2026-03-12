@@ -6246,7 +6246,6 @@ function raceAnnotations(dates) {{
             const trendDates = (d[trendKey] && d[trendKey].length > 0) ? d[trendKey] : (d.trend_dates_iso || []);
             const trendVals = (d[trendValKey] && d[trendValKey].length > 0) ? d[trendValKey] : (d.trend_values || []);
             const trendPoints = trendDates.map((dt, i) => ({{ x: dt, y: trendVals[i] }}));
-            const fewRaces = actualPoints.length < 5;
             const singleRace = actualPoints.length < 2;
             
             // Compute x-axis bounds from race dates
@@ -6255,7 +6254,7 @@ function raceAnnotations(dates) {{
             const lastRace = Math.max(...raceTimes);
             let xDataMin = firstRace;
             let xDataMax = lastRace;
-            if (fewRaces) {{
+            if (singleRace) {{
                 // Extend to present so you see current fitness relative to sparse races
                 xDataMax = Math.max(xDataMax, Date.now());
             }}
@@ -6268,7 +6267,7 @@ function raceAnnotations(dates) {{
             const allYVals = [];
             for (let i = 0; i < actual.length; i++) {{ if (actual[i]) allYVals.push(actual[i]); }}
             for (let i = 0; i < predicted.length; i++) {{ if (predicted[i]) allYVals.push(predicted[i]); }}
-            if (fewRaces) {{ for (let i = 0; i < trendVals.length; i++) {{ if (trendVals[i]) allYVals.push(trendVals[i]); }} }}
+            if (singleRace) {{ for (let i = 0; i < trendVals.length; i++) {{ if (trendVals[i]) allYVals.push(trendVals[i]); }} }}
             // Also include worst-case adjusted predictions
             for (let i = 0; i < predicted.length; i++) {{
                 if (predicted[i] === null) continue;
@@ -6297,8 +6296,8 @@ function raceAnnotations(dates) {{
                 type: 'line',
                 data: {{
                     datasets: [
-                    // Background trend line (only for distances with < 5 races)
-                    ...(fewRaces && trendPoints.length > 0 ? [{{
+                    // Background trend line (only for single-race distances)
+                    ...(singleRace && trendPoints.length > 0 ? [{{
                         label: 'Fitness trend',
                         data: trendPoints,
                         borderColor: (function() {{
@@ -6334,7 +6333,7 @@ function raceAnnotations(dates) {{
                             const modeBase = currentMode === 'gap' ? 'rgba(74, 222, 128,' : currentMode === 'sim' ? 'rgba(249, 115, 22,' : 'rgba(129, 140, 248,';
                             return modeBase + ' 0.8)';
                         }})(),
-                        fill: !fewRaces,
+                        fill: !singleRace,
                         tension: 0.3,
                         showLine: !singleRace,
                     }}, {{
