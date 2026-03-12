@@ -1,11 +1,11 @@
 # Pipeline TODO — v53
-## Updated: 2026-03-11
+## Updated: 2026-03-12
 
 ---
 
 ## Current State Summary
 
-v53 is a mature multi-athlete running analytics pipeline (Stryd/GAP/SIM modes) processing 3,900+ runs from 2013–2026. Seven athletes: Paul (A001, Stryd), Ian (A002, GAP), Nadi (A003, GAP, dormant), Steve (A004, GAP), PaulTest (A005, GAP), Paul Stryd (A006, Stryd portability test), Johan (A007, GAP, Polar JSON ingest). Dark theme dashboard with training zones, race readiness cards, race history comparison, milestones, mode switching. CI via GitHub Actions + Dropbox. All active athletes now on two-job workflow template.
+v53 is a mature multi-athlete running analytics pipeline (Stryd/GAP/SIM modes) processing 3,900+ runs from 2013–2026. Seven athletes: Paul (A001, Stryd), Ian (A002, GAP), Nadi (A003, GAP, dormant), Steve (A004, GAP), PaulTest (A005, GAP), Paul Stryd (A006, Stryd portability test), Johan (A007, GAP, Polar + Strava TCX ingest). Dark theme dashboard with training zones, race readiness cards, race history comparison, milestones, mode switching. CI via GitHub Actions + Dropbox. All active athletes now on two-job workflow template.
 
 ### What's working
 - Three parallel RF models (Stryd/GAP/SIM), >0.989 correlation
@@ -16,16 +16,22 @@ v53 is a mature multi-athlete running analytics pipeline (Stryd/GAP/SIM modes) p
 - Banister CTL/ATL with HR normalization across athletes
 - Safety upload in CI (weather cache + Master survive timeouts)
 - INITIAL: two-job workflow (rebuild job → auto-chains stepb_deploy)
-- A001 migrated to `paul_collyer_pipeline.yml` with two-job template
+- A001 migrated to `paul_collyer_pipeline.yml` — INITIAL validated (3,125 rows, 328 races, RFL 87.2%, 5K 20:22). Dashboard at `docs/paul_collyer/`
 - classify_races_mode: "skip" / "auto" per athlete.yml
 - initial_fit_source: "local_only" protects curated FIT history on INITIAL
 - RF_Trend min_periods: 10 (prevents sparse early data inflating peak)
-- Mode-aware prediction charts for GAP athletes
+- Mode-aware prediction charts and headline stats for GAP athletes
 - Polar JSON → FIT ingest (ci/polar_ingest.py) with custom FIT binary writer
+- Strava TCX ingest: treadmill speed from distance deltas, encoding-safe CSV parsing
+- Multi-source ingest: initial_data_ingest.py processes Polar + Strava zips together
+- Rebuild timestamp dedup: ±600s + distance match, prefers FIT over TCX
+- RE_Adj era-normalised (divides by power_adjuster_to_S4 before comparison)
+- StepB distance sanitisation: per-second pace cross-check for rogue Polar distances
 - NPZ incremental upload to Dropbox in A001 workflow
+- s4/s5 eras merged for A001 (firmware shift <1.2%, below noise floor)
 
 ### What's in progress
-- **A001 INITIAL rebuild** — running on paul_collyer_pipeline.yml. Monitor for completion, verify row count (~3125), check dashboard at `docs/paul_collyer/`.
+- **Johan A007 INITIAL** — rebuilding with dedup fix. Previous runs had 59 duplicate pairs (Polar FIT + Strava TCX), inflating volume/CTL. Dashboard predictions and headline stats also being fixed.
 
 ---
 
@@ -37,7 +43,7 @@ v53 is a mature multi-athlete running analytics pipeline (Stryd/GAP/SIM modes) p
 `onboard_athlete.py` builds workflow YAML from inline f-strings — produces broken single-job workflow missing: two-job INITIAL split, `--full` fetch, `--cache-full`, `--weight-oldest`, weather cache dir, classify_races step, safety uploads, correct bash `${EXIT_CODE:-0}`. Fix: use Paul Test (A005) workflow as a template file with placeholder substitution. Test with Johan A007 re-onboarding.
 
 **Retire old `pipeline.yml`**
-Legacy A001 single-job workflow. Keep as backup until `paul_collyer_pipeline.yml` INITIAL is validated, then remove.
+Legacy A001 single-job workflow. A001 INITIAL validated on new workflow — safe to remove.
 
 **Ian/Nadi/Steve folder renames**
 `IanLilley/` → `A002/`, `NadiJahangiri/` → `A003/`, `SteveDavies/` → `A004/`. Requires: Dropbox folder move, workflow YAML updates (`ATHLETE_DIR`, `DB_BASE`), GH Pages path updates, cache key updates. Also rename workflow files to match (`a002_pipeline.yml` etc.).
@@ -45,10 +51,13 @@ Legacy A001 single-job workflow. Keep as backup until `paul_collyer_pipeline.yml
 **Ian/Steve/Nadi INITIAL rebuild**
 Need full INITIAL with fresh NPZ cache to get `gps_bbox_m2` and other new columns. Migrate to Paul Test two-job workflow template first.
 
-**Remove root-level `athlete.yml`**
-After A001 migration is validated, the root `athlete.yml` is redundant — A001's workflow reads from `athletes/A001/athlete.yml`. Remove to avoid confusion.
+**Rename `power_adjuster_to_S4` → `power_era_adjuster`**
+Current name references a specific era (s4) that may not exist for all athletes. Cross-codebase rename: rebuild, StepB, config, detect_eras, master columns. Own session.
 
 ### Dashboard features
+
+**RE condition-adjusted prediction scaling**
+RE_Adj era bias fixed (era-normalised). But RE% still maps ~1:1 to time%, which may be too aggressive even after normalisation. A 4.7% RE improvement on flat Battersea gave adjusted 5K of ~17:00 (pre-fix). Monitor after next rebuild to see if era normalisation alone is sufficient, or if attenuation (×0.5?) is still needed.
 
 **Race History — move effort/tail to StepB** *(performance + mode toggle)*
 Currently effort mins and long run tail are computed at dashboard build time by loading NPZ files for every race's 42d window (~2 min for 328 races). Move to StepB: pre-compute per-run columns (`effort_14d_pw`, `effort_42d_pw`, `effort_14d_hr`, `lr_tail_14d`, `lr_z3_tail_14d` etc.). Dashboard reads master columns instead of scanning NPZ. Enables JS mode toggle to switch power vs HR effort client-side.
@@ -58,9 +67,6 @@ Currently effort mins and long run tail are computed at dashboard build time by 
 
 **Race History — short race 60+ min zone bug**
 Short races showing last row with 60+ min zone data. Needs troubleshooting.
-
-**Prediction chart "adjust for conditions"**
-Condition-adjusted prediction columns likely need same `_pred_col()` mode-aware treatment added for Johan.
 
 **Activity search + override editor** *(own session)*
 In-dashboard search of activity log, edit modal for overrides, connects to existing GitHub Actions override dispatch. Replaces spreadsheet editing.
@@ -88,6 +94,8 @@ Missing 2× track mile, 1× track 1500, 1× road mile, 1× road 1000m in Paul Te
 **Rename nAG%**
 Cleaner column name.
 
+**GAP equiv time** — `gap_equiv_time_s` from Minetti integral.
+
 **Stryd outlier auto-flag**
 RE z < −2.5σ vs speed → set factor=0, use GAP RF instead.
 
@@ -103,17 +111,12 @@ Add to athlete.yml as separate field from `mass_kg`. Pipeline uses `stryd_mass_k
 **A006 RE p90 dilution fix**
 Combined s4+s5 anchor era diluting RE p90 → slightly slow 5K prediction (19:59 vs 19:41 actual).
 
-**detect_eras.py for A001**
-Integrate into A001 workflow. Separate session.
-
 **Info sheet in Master from athlete.yml**
 Add athlete config summary as first sheet in Master XLSX. Separate session.
 
 ### Low priority / backlog
 
 **PS Floor bias** — still ~0.7% generous. 64%→~40% of races trigger floor. Not urgent.
-
-**GAP equiv time** — `gap_equiv_time_s` from Minetti integral.
 
 **Simulation power 3-4% too low** in pre-Stryd/v1_late eras. Mitigated by GAP era overrides.
 
@@ -127,12 +130,15 @@ Add athlete config summary as first sheet in Master XLSX. Separate session.
 
 **Main pipeline `--refresh-weather-solar`** — run once then remove. Consider removing VLM 25°C temp override now solar boost handles it.
 
-**Johan Strava export** — waiting on Johan to request from Strava. ~110km of treadmill runs missing from Polar export (known Polar limitation). Pipeline will deduplicate by timestamp.
+**detect_eras.py for A001** — ran detection this session: 5 eras detected vs 7 manual. Key finding: era_3 sub-split (Feb-Jul 2019) not in manual config. s4/s5 merged (shift below noise floor). Not urgent — manual eras working well, detection is validation only.
 
 ### Cleanup / housekeeping
 
+**Remove root-level `athlete.yml`**
+A001 migration validated. Root `athlete.yml` is redundant — remove to avoid confusion.
+
 **Handover file consolidation**
-40 handover markdown files in repo root from Feb 7 – Mar 11. Consider archiving older ones into a `docs/handovers/` folder, keeping only the most recent.
+40+ handover markdown files in repo root from Feb 7 – Mar 12. Archive older ones into `docs/handovers/`, keeping only recent.
 
 **Delete stale files**
 Candidates: `cleanup_v51.bat`, `cleanup_v52.bat`, `automation_plan.md`, `handover_portability_session.md`, `multi_athlete_planning.md` (superseded by implementation), `PATCHES_A007_FIXES.md` (applied), `PREDICTION_BIAS_ANALYSIS.md` (done), `DESIGN_MILESTONES.md` (shipped).
@@ -142,24 +148,31 @@ Candidates: `cleanup_v51.bat`, `cleanup_v52.bat`, `automation_plan.md`, `handove
 
 ---
 
+## Recently completed (2026-03-12)
+
+- **A001 INITIAL validated** — 3,125 rows, 328 curated races preserved (classify_races_mode: skip), PEAK_CP bootstrapped 368W from 102 races. Dashboard deployed to `docs/paul_collyer/`.
+- **s4/s5 era merge** — Removed s5 boundary from A001 athlete.yml. Firmware shift <1.2%, below detect_eras noise floor (~3%). Both eras now get adjuster 1.0.
+- **detect_eras.py analysis on A001** — 5 eras detected (vs 7 manual). Compared with A006 (4 eras). Differences traced to mass corrections in A001 affecting nPower_HR ratios. Manual eras retained.
+- **TCX/Strava pipeline support** — `strava_ingest.py`: treadmill speed from distance deltas, UTF-8 encoding fix. `rebuild_from_fit_zip.py`: `--extra-summaries` merge, NaT weather fix, zero-FIT pipeline support. `initial_data_ingest.py`: multi-zip support (Polar primary + Strava supplementary).
+- **Rebuild timestamp dedup** — ±600s + distance match (±10%), prefers FIT over TCX/summary rows. Uses `date` column (always present) instead of `start_time_utc` (dropped in final master).
+- **RE_Adj era normalisation** — Divides RE_avg by `power_adjuster_to_S4` before comparing to race median reference. Removes systematic era bias (v1 was 4% off, now ~1.5%).
+- **StepB distance sanitisation** — When session-level speed exceeds per-second pace by >50%, replaces `distance_km` with pace-derived value. Fixes rogue Polar stride sensor distances.
+- **StepB zero division fix** — `moving_time_s = 0` guard in RF window distance calculation.
+- **Dashboard GAP headline predictions** — Falls back to `pred_5k_s_gap` etc. when Stryd columns are NaN.
+- **Dashboard GAP mode CP** — Race readiness and modeStats now read `CP_gap` / `effective_peak_cp_gap` from master instead of using Stryd PEAK_CP × GAP RFL.
+
 ## Recently completed (2026-03-11)
 
-- **A001 two-job workflow** — `paul_collyer_pipeline.yml` created, INITIAL rebuild triggered. New fields: `classify_races_mode: skip`, `initial_fit_source: local_only`.
-- **RF_Trend min_periods** — Changed from `valid.any()` to `valid.sum() >= RF_TREND_MIN_PERIODS` (10) in Stryd/GAP/Sim trend blocks. Fixes Johan's inflated 2015 peak.
-- **Prediction chart mode-awareness** — `_pred_col()` helper resolves mode-specific prediction columns for GAP athletes.
-- **Stryd firmware analysis** — ~1.2% power calibration shift identified (Feb 28 firmware update), below detect_eras.py 3% threshold. 2.3% genuine fitness dip from accumulated load post-5K race.
-- **v53 factor boost** — Additive `1000 × (min((PS/CP)^25, 4) - 1)` replacing flat multiplicative boost, merged into StepB.
+- **A001 two-job workflow** — `paul_collyer_pipeline.yml` created, INITIAL rebuild completed.
+- **RF_Trend min_periods** — Changed to `valid.sum() >= 10`. Fixes Johan's inflated 2015 peak.
+- **Prediction chart mode-awareness** — `_pred_col()` helper for GAP athletes.
+- **Stryd firmware analysis** — ~1.2% power calibration shift (Feb 28 firmware), below detect_eras 3% threshold.
+- **v53 factor boost** — Additive formula merged into StepB.
+- **Johan A007 Polar ingest** — 1,439 FIT files from Polar JSON. Three rounds of FIT binary format debugging.
 
 ## Recently completed (2026-03-08 – 2026-03-10)
 
-- **classify_races.py overhaul** — data-driven `max(2%, 300m)` GPS tolerance, 1500m/Mile added, `gps_distance_km`, bespoke distance detection, pace override for named short races, per-run 5K prediction lookup. 262 races classified for PaulTest.
-- **Planned sessions feature** — `PlannedSession` dataclass, YAML block, Banister forward projection, dashed CTL/ATL/TSB lines, projected race-day arrival card.
-- **Race History** — two-card comparison with effort zones, long run tail, delta panel, NPZ caching.
-- **A006 Stryd portability** — `detect_eras.py` created, PEAK_CP bootstrapped from 95 races, multi-sport filtering automatic.
-
-## Recently completed (2026-03-04 – 2026-03-06)
-
-- **Stat card tooltips** — all 16 dashboard stat cards have hover tooltips.
-- **Onboarding HR zone preview** — live zone preview, editable boundaries, exports to YAML.
-- **Onboarding data uploads** — any file combination, weight CSV, return visit panel.
-- **Race HR thresholds in templates** — commented-out block in generated YAML.
+- **classify_races.py overhaul** — data-driven GPS tolerance, 1500m/Mile added, per-run 5K prediction lookup.
+- **Planned sessions feature** — Banister forward projection, dashed CTL/ATL/TSB lines.
+- **Race History** — two-card comparison with effort zones, long run tail, delta panel.
+- **A006 Stryd portability** — `detect_eras.py`, PEAK_CP bootstrap from 95 races.
