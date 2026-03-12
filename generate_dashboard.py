@@ -6328,12 +6328,12 @@ function raceAnnotations(dates) {{
                         }})(),
                         borderDash: adjustConditions ? [4, 3] : [],
                         borderWidth: singleRace ? 0 : 2,
-                        pointRadius: singleRace ? 3 : 0,
+                        pointRadius: 3,
                         pointBackgroundColor: (function() {{
                             const modeBase = currentMode === 'gap' ? 'rgba(74, 222, 128,' : currentMode === 'sim' ? 'rgba(249, 115, 22,' : 'rgba(129, 140, 248,';
                             return modeBase + ' 0.8)';
                         }})(),
-                        fill: !singleRace,
+                        fill: false,
                         tension: 0.3,
                         showLine: !singleRace,
                     }}, {{
