@@ -2746,7 +2746,29 @@ def load_strava(activities_csv: str, tz_local: str) -> pd.DataFrame:
     """
     act = pd.read_csv(activities_csv, encoding='latin-1')
 
-    dt_naive = pd.to_datetime(act.get("Activity Date"), errors="coerce")
+    # Build case-insensitive column lookup (handles both original Strava and normalised formats)
+    _col_lookup = {}
+    for c in act.columns:
+        _col_lookup[c.strip().lower().replace(' ', '_').replace('(', '').replace(')', '')] = c
+
+    def _col(name):
+        """Find column by normalised name, returns original column name or None."""
+        key = name.strip().lower().replace(' ', '_').replace('(', '').replace(')', '')
+        return _col_lookup.get(key)
+
+    _act_date_col = _col('Activity Date')
+    if _act_date_col is None:
+        print(f"  WARNING: 'Activity Date' column not found in {activities_csv}")
+        print(f"  Available columns: {list(act.columns[:15])}")
+        act["ActivityDate_utc_assume_utc"] = pd.NaT
+        act["ActivityDate_utc_assume_local"] = pd.NaT
+        act["Distance_km"] = np.nan
+        act["MovingTime_s"] = np.nan
+        act["ElapsedTime_s"] = np.nan
+        act["ElevGain_m"] = np.nan
+        return act
+
+    dt_naive = pd.to_datetime(act[_act_date_col], errors="coerce")
 
     # Interpretation 1: assume UTC
     act["ActivityDate_utc_assume_utc"] = dt_naive.dt.tz_localize("UTC", ambiguous="NaT", nonexistent="NaT")
@@ -2758,42 +2780,32 @@ def load_strava(activities_csv: str, tz_local: str) -> pd.DataFrame:
         tz = ZoneInfo("Europe/Stockholm")
     act["ActivityDate_utc_assume_local"] = dt_naive.dt.tz_localize(tz, ambiguous="NaT", nonexistent="NaT").dt.tz_convert("UTC")
 
-    act["Distance_km"] = pd.to_numeric(act.get("Distance"), errors="coerce")
+    _dist_col = _col('Distance')
+    act["Distance_km"] = pd.to_numeric(act[_dist_col] if _dist_col else np.nan, errors="coerce")
     if act["Distance_km"].median(skipna=True) > 1000:
         act["Distance_km"] = act["Distance_km"] / 1000.0
 
     def _to_seconds(x):
         return pd.to_numeric(x, errors="coerce")
 
-    if "Moving Time" in act.columns:
-        act["MovingTime_s"] = _to_seconds(act["Moving Time"])
-    elif "Moving Time (seconds)" in act.columns:
-        act["MovingTime_s"] = _to_seconds(act["Moving Time (seconds)"])
-    else:
-        act["MovingTime_s"] = np.nan
+    _mt_col = _col('Moving Time') or _col('Moving Time seconds')
+    act["MovingTime_s"] = _to_seconds(act[_mt_col]) if _mt_col else np.nan
 
-    if "Elapsed Time" in act.columns:
-        act["ElapsedTime_s"] = _to_seconds(act["Elapsed Time"])
-    elif "Elapsed Time (seconds)" in act.columns:
-        act["ElapsedTime_s"] = _to_seconds(act["Elapsed Time (seconds)"])
-    else:
-        act["ElapsedTime_s"] = np.nan
+    _et_col = _col('Elapsed Time') or _col('Elapsed Time seconds')
+    act["ElapsedTime_s"] = _to_seconds(act[_et_col]) if _et_col else np.nan
 
-    if "Elevation Gain" in act.columns:
-        act["ElevGain_m"] = pd.to_numeric(act["Elevation Gain"], errors="coerce")
-    elif "Total Elevation Gain" in act.columns:
-        act["ElevGain_m"] = pd.to_numeric(act["Total Elevation Gain"], errors="coerce")
-    else:
-        act["ElevGain_m"] = np.nan
+    _eg_col = _col('Elevation Gain') or _col('Total Elevation Gain')
+    act["ElevGain_m"] = pd.to_numeric(act[_eg_col], errors="coerce") if _eg_col else np.nan
 
-    if "Elevation Loss" in act.columns:
-        act["ElevLoss_m"] = pd.to_numeric(act["Elevation Loss"], errors="coerce")
-    else:
-        act["ElevLoss_m"] = np.nan
+    _el_col = _col('Elevation Loss')
+    act["ElevLoss_m"] = pd.to_numeric(act[_el_col], errors="coerce") if _el_col else np.nan
 
-    act["Activity Name Clean"] = act.get("Activity Name", "").map(sanitize_text)
-    act["Activity Gear Clean"] = act.get("Activity Gear", pd.Series([None] * len(act))).map(sanitize_text)
-    act["Activity Type Lower"] = act.get("Activity Type", "").astype(str).str.lower()
+    _name_col = _col('Activity Name')
+    _gear_col = _col('Activity Gear')
+    _type_col = _col('Activity Type')
+    act["Activity Name Clean"] = act[_name_col].map(sanitize_text) if _name_col else ""
+    act["Activity Gear Clean"] = act[_gear_col].map(sanitize_text) if _gear_col else None
+    act["Activity Type Lower"] = act[_type_col].astype(str).str.lower() if _type_col else "run"
     act = act[act["Activity Type Lower"].str.contains("run")].copy()
 
     # Prefer rows with any usable timestamp
