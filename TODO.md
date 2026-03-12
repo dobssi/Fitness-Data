@@ -40,7 +40,7 @@ v53 is a mature multi-athlete running analytics pipeline (Stryd/GAP/SIM modes) p
 ### High priority
 
 **Onboard workflow generation refactor** *(PRIORITY)*
-`onboard_athlete.py` builds workflow YAML from inline f-strings — produces broken single-job workflow missing: two-job INITIAL split, `--full` fetch, `--cache-full`, `--weight-oldest`, weather cache dir, classify_races step, safety uploads, correct bash `${EXIT_CODE:-0}`. Fix: use Paul Test (A005) workflow as a template file with placeholder substitution. Test with Johan A007 re-onboarding.
+`onboard_athlete.py` builds workflow YAML from inline f-strings — produces broken single-job workflow missing: two-job INITIAL split, `--full` fetch, `--cache-full`, `--weight-oldest`, weather cache dir, classify_races step, safety uploads, correct bash `${EXIT_CODE:-0}`. Also missing: `data/gpx_tcx_summaries.csv` in Dropbox download items (needed for dual-source Polar+Strava athletes — without it, FULL/UPDATE modes lose TCX-only runs). Also fix operator precedence in `if` conditions: `gate && MODE == 'X' || MODE == 'Y'` needs parentheses `gate && (MODE == 'X' || MODE == 'Y')` — bug found in Ian/Steve workflows. Fix: use Paul Test (A005) workflow as a template file with placeholder substitution. Test with Johan A007 re-onboarding.
 
 **Ian/Nadi/Steve folder renames**
 `IanLilley/` → `A002/`, `NadiJahangiri/` → `A003/`, `SteveDavies/` → `A004/`. Requires: Dropbox folder move, workflow YAML updates (`ATHLETE_DIR`, `DB_BASE`), GH Pages path updates, cache key updates. Also rename workflow files to match (`a002_pipeline.yml` etc.). Note: Ian/Steve/Nadi INITIAL rebuilds already completed (two-job template, fresh NPZ cache).
