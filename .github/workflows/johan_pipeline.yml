@@ -193,6 +193,7 @@ jobs:
             --dropbox-base "${{ env.DB_BASE }}" \
             --local-prefix "${{ env.ATHLETE_DIR }}" \
             --items data/activities.csv \
+                    data/gpx_tcx_summaries.csv \
                     athlete.yml \
                     activity_overrides.xlsx \
                     athlete_data.csv \
@@ -494,6 +495,7 @@ jobs:
             --dropbox-base "${{ env.DB_BASE }}" \
             --local-prefix "${{ env.ATHLETE_DIR }}" \
             --items data/activities.csv \
+                    data/gpx_tcx_summaries.csv \
                     athlete.yml \
                     activity_overrides.xlsx \
                     athlete_data.csv \
