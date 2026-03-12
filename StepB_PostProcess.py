@@ -5148,14 +5148,15 @@ def main() -> int:
             factor = calc_factor(distance_m, avg_hr, rf_adj, prev_rf_trend, days_since_last_run)
             
             # v53: Additive Factor bonus for above-CP efforts
-            # PS > current CP means genuine race-quality output
-            # Additive bonus is distance-independent: a 5K race and HM race at
-            # the same PS/CP ratio get the same absolute bonus, preventing
-            # longer distances from dominating the trend
+            # Races get full ^25 exponent (sharp threshold for genuine race output).
+            # Training gets ^5 (gentle boost for hard sessions, prevents track reps
+            # from inflating trend — e.g. 2.6km interval session was getting Factor 3000+).
             if pd.notna(power_score) and pd.notna(prev_rf_trend) and peak_rf_trend > 0:
                 current_cp = PEAK_CP_WATTS * (prev_rf_trend / peak_rf_trend)
                 if current_cp > 0 and power_score > current_cp:
-                    mult = min((power_score / current_cp) ** ps_factor_exponent, ps_factor_max_mult)
+                    _is_race_row = bool(row.get('race_flag', False))
+                    _exp = ps_factor_exponent if _is_race_row else 5
+                    mult = min((power_score / current_cp) ** _exp, ps_factor_max_mult)
                     factor += ps_factor_bonus * (mult - 1)
             
             if np.isfinite(factor):
