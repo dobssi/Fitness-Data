@@ -53,6 +53,9 @@ Current name references a specific era (s4) that may not exist for all athletes.
 **Age Grade Rating / AG-relative RFL** *(favourite feature idea)*
 Continuously updated age grade rating on the dashboard (already have AG% on stat card). Express age-adjusted RFL as current AG% divided by peak AG%. Gives a "how fit am I relative to my age-adjusted best" metric that's more meaningful than raw RFL for ageing athletes. The AG% trend already exists — this is presenting it as a relative fitness signal.
 
+**Prediction chart trend line missing for GAP athletes** *(bug)*
+No green prediction line or dashed adjusted line on Race Predictions chart for GAP athletes (A005, A007, etc.). Root cause: JS looks for `trend_values_gap` key and `predicted_gap` array in predData JSON — both are null/missing. The `_pred_col()` fix in `generate_dashboard.py` resolved headline stats and master columns, but the prediction chart JS dataset builder at line ~2084 needs the same fallback: if `trend_values_gap` is empty/missing, use `trend_values` (which contains the Stryd-based trend). Similarly `predicted_gap` needs to fall back to `predicted`. Reproducing on A005 and likely all GAP mode dashboards.
+
 **RE condition-adjusted prediction scaling**
 RE_Adj era bias fixed (era-normalised). But RE% still maps ~1:1 to time%, which may be too aggressive even after normalisation. A 4.7% RE improvement on flat Battersea gave adjusted 5K of ~17:00 (pre-fix). Monitor after next rebuild to see if era normalisation alone is sufficient, or if attenuation (×0.5?) is still needed.
 

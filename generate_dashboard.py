@@ -1755,10 +1755,10 @@ def get_prediction_trend_data(df):
         return base
 
     distances = {
-        '5k': {'pred_col': _pred_col('pred_5k_s'), 'official_km': 5.0},
-        '10k': {'pred_col': _pred_col('pred_10k_s'), 'official_km': 10.0},
-        'hm': {'pred_col': _pred_col('pred_hm_s'), 'official_km': 21.097},
-        'marathon': {'pred_col': _pred_col('pred_marathon_s'), 'official_km': 42.195},
+        '5k': {'pred_col': _pred_col('pred_5k_s'), 'base_col': 'pred_5k_s', 'official_km': 5.0},
+        '10k': {'pred_col': _pred_col('pred_10k_s'), 'base_col': 'pred_10k_s', 'official_km': 10.0},
+        'hm': {'pred_col': _pred_col('pred_hm_s'), 'base_col': 'pred_hm_s', 'official_km': 21.097},
+        'marathon': {'pred_col': _pred_col('pred_marathon_s'), 'base_col': 'pred_marathon_s', 'official_km': 42.195},
     }
     
     for dist_key, info in distances.items():
@@ -1886,8 +1886,9 @@ def get_prediction_trend_data(df):
         }
         
         # Phase 2: GAP and Sim predicted times at each race date
+        base_col = info['base_col']
         for mode in ('gap', 'sim'):
-            mode_col = f'{pred_col}_{mode}'
+            mode_col = f'{base_col}_{mode}'
             mode_preds = []
             for _, race_row in dist_match.iterrows():
                 pv = race_row.get(mode_col)
@@ -1920,7 +1921,7 @@ def get_prediction_trend_data(df):
             result[dist_key]['trend_values'] = [round(v, 0) for v in pred_series[pred_col].tolist()]
             # GAP/Sim trend lines
             for mode in ('gap', 'sim'):
-                mode_col = f'{pred_col}_{mode}'
+                mode_col = f'{base_col}_{mode}'
                 if mode_col in df.columns:
                     mode_series = df[[mode_col, 'date']].dropna(subset=[mode_col])
                     mode_series = mode_series[mode_series[mode_col] > 0].copy()
@@ -6201,7 +6202,8 @@ function raceAnnotations(dates) {{
             const datesISO = indices.map(i => d.dates_iso[i]);
             // Mode-dependent prediction source
             const predKey = currentMode === 'gap' ? 'predicted_gap' : currentMode === 'sim' ? 'predicted_sim' : 'predicted';
-            const predicted = indices.map(i => (d[predKey] || d.predicted)[i]);
+            const predArr = d[predKey] && d[predKey].some(v => v !== null) ? d[predKey] : d.predicted;
+            const predicted = indices.map(i => predArr[i]);
             const actual = indices.map(i => d.actual[i]);
             const names = indices.map(i => d.names[i]);
             const temps = indices.map(i => d.temps[i]);
@@ -6241,8 +6243,8 @@ function raceAnnotations(dates) {{
             // Full prediction trend line (weekly smoothed, for distances with few races)
             const trendKey = currentMode === 'gap' ? 'trend_dates_iso_gap' : currentMode === 'sim' ? 'trend_dates_iso_sim' : 'trend_dates_iso';
             const trendValKey = currentMode === 'gap' ? 'trend_values_gap' : currentMode === 'sim' ? 'trend_values_sim' : 'trend_values';
-            const trendDates = d[trendKey] || d.trend_dates_iso || [];
-            const trendVals = d[trendValKey] || d.trend_values || [];
+            const trendDates = (d[trendKey] && d[trendKey].length > 0) ? d[trendKey] : (d.trend_dates_iso || []);
+            const trendVals = (d[trendValKey] && d[trendValKey].length > 0) ? d[trendValKey] : (d.trend_values || []);
             const trendPoints = trendDates.map((dt, i) => ({{ x: dt, y: trendVals[i] }}));
             const fewRaces = actualPoints.length < 5;
             
