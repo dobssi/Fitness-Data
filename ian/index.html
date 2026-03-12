@@ -493,7 +493,7 @@ function raceAnnotations(dates) {
 }catch(e){console.warn('Chart.js not loaded:',e);}
 </script>
     <h1>🏃 Ian Lilley</h1>
-    <div class="dash-sub">Thursday 12 March 2026, 18:00</div>
+    <div class="dash-sub">Thursday 12 March 2026, 18:05</div>
     
     <!-- Phase 2: Mode Toggle -->
     <div class="mode-toggle" style="display:flex;gap:6px;margin:10px 0 8px;align-items:center;display:none;">
@@ -1246,7 +1246,7 @@ function raceAnnotations(dates) {
     
     
     <div class="footer">
-        Updated: 2026-03-12 18:00<br>
+        Updated: 2026-03-12 18:05<br>
         Data through: 2026-03-12
     </div>
     
@@ -2135,10 +2135,15 @@ function raceAnnotations(dates) {
                             return modeBase + ' 0.05)';
                         })(),
                         borderDash: adjustConditions ? [4, 3] : [],
-                        borderWidth: 2,
-                        pointRadius: 0,
+                        borderWidth: fewRaces ? 0 : 2,
+                        pointRadius: fewRaces ? 3 : 0,
+                        pointBackgroundColor: (function() {
+                            const modeBase = currentMode === 'gap' ? 'rgba(74, 222, 128,' : currentMode === 'sim' ? 'rgba(249, 115, 22,' : 'rgba(129, 140, 248,';
+                            return modeBase + ' 0.8)';
+                        })(),
                         fill: !fewRaces,
                         tension: 0.3,
+                        showLine: !fewRaces,
                     }, {
                         label: 'Actual',
                         data: actualPoints,
