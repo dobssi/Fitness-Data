@@ -500,7 +500,7 @@ def load_strava_activities(csv_path: str) -> pd.DataFrame:
         distance_km, moving_time_s, elapsed_time_s, elev_gain_m,
         is_race, workout_type
     """
-    df = pd.read_csv(csv_path, encoding='utf-8', encoding_errors='replace')
+    df = pd.read_csv(csv_path, encoding='latin-1')
     
     # Normalise column names (Strava format varies slightly across exports)
     col_map = {}
