@@ -4507,7 +4507,8 @@ def main() -> int:
                     
                     # Calculate RF window distance (approximate from time and overall pace)
                     rf_duration_s = rf_end_s - rf_start_s
-                    overall_pace = dist_km / (pd.to_numeric(row.get('moving_time_s', 1), errors='coerce') / 1000)
+                    _mt_s = pd.to_numeric(row.get('moving_time_s', 0), errors='coerce')
+                    overall_pace = dist_km / (_mt_s / 1000) if _mt_s > 0 else 0
                     rf_dist_km = rf_duration_s / 1000 * overall_pace if overall_pace > 0 else rf_duration_s / 1000 * 3.0
                     
                     # Calculate RF window elev gain (approximate from grade)
