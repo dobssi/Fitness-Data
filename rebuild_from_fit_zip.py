@@ -2887,6 +2887,9 @@ def match_strava(master: pd.DataFrame, act: pd.DataFrame, tz_local: str, pending
             tol_km = max(0.35, 0.05 * float(dist))
 
         # Compute minimal dt across both timestamp interpretations
+        # Safety: ensure t_utc is tz-aware (some TCX/Polar timestamps may lose tz)
+        if hasattr(t_utc, 'tzinfo') and t_utc.tzinfo is None:
+            t_utc = t_utc.tz_localize("UTC")
         dt1 = (a_utc - t_utc).abs().dt.total_seconds()
         dt2 = (a_loc - t_utc).abs().dt.total_seconds()
         dt = np.nanmin(np.vstack([dt1.to_numpy(dtype=float), dt2.to_numpy(dtype=float)]), axis=0)
