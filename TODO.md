@@ -42,19 +42,16 @@ v53 is a mature multi-athlete running analytics pipeline (Stryd/GAP/SIM modes) p
 **Onboard workflow generation refactor** *(PRIORITY)*
 `onboard_athlete.py` builds workflow YAML from inline f-strings — produces broken single-job workflow missing: two-job INITIAL split, `--full` fetch, `--cache-full`, `--weight-oldest`, weather cache dir, classify_races step, safety uploads, correct bash `${EXIT_CODE:-0}`. Fix: use Paul Test (A005) workflow as a template file with placeholder substitution. Test with Johan A007 re-onboarding.
 
-**Retire old `pipeline.yml`**
-Legacy A001 single-job workflow. A001 INITIAL validated on new workflow — safe to remove.
-
 **Ian/Nadi/Steve folder renames**
-`IanLilley/` → `A002/`, `NadiJahangiri/` → `A003/`, `SteveDavies/` → `A004/`. Requires: Dropbox folder move, workflow YAML updates (`ATHLETE_DIR`, `DB_BASE`), GH Pages path updates, cache key updates. Also rename workflow files to match (`a002_pipeline.yml` etc.).
-
-**Ian/Steve/Nadi INITIAL rebuild**
-Need full INITIAL with fresh NPZ cache to get `gps_bbox_m2` and other new columns. Migrate to Paul Test two-job workflow template first.
+`IanLilley/` → `A002/`, `NadiJahangiri/` → `A003/`, `SteveDavies/` → `A004/`. Requires: Dropbox folder move, workflow YAML updates (`ATHLETE_DIR`, `DB_BASE`), GH Pages path updates, cache key updates. Also rename workflow files to match (`a002_pipeline.yml` etc.). Note: Ian/Steve/Nadi INITIAL rebuilds already completed (two-job template, fresh NPZ cache).
 
 **Rename `power_adjuster_to_S4` → `power_era_adjuster`**
 Current name references a specific era (s4) that may not exist for all athletes. Cross-codebase rename: rebuild, StepB, config, detect_eras, master columns. Own session.
 
 ### Dashboard features
+
+**Age Grade Rating / AG-relative RFL** *(favourite feature idea)*
+Continuously updated age grade rating on the dashboard (already have AG% on stat card). Express age-adjusted RFL as current AG% divided by peak AG%. Gives a "how fit am I relative to my age-adjusted best" metric that's more meaningful than raw RFL for ageing athletes. The AG% trend already exists — this is presenting it as a relative fitness signal.
 
 **RE condition-adjusted prediction scaling**
 RE_Adj era bias fixed (era-normalised). But RE% still maps ~1:1 to time%, which may be too aggressive even after normalisation. A 4.7% RE improvement on flat Battersea gave adjusted 5K of ~17:00 (pre-fix). Monitor after next rebuild to see if era normalisation alone is sufficient, or if attenuation (×0.5?) is still needed.
@@ -89,7 +86,7 @@ Leaflet.js + OpenStreetMap, no API key. Per-second lat/lon from NPZ. Show route 
 Currently only handles HR spikes at session start. Extend to detect timestamp gaps > 60s in per-second array and apply spike cleanup after each resume. Found during F9 session analysis (11-min pause caused HR 101→186 spike).
 
 **classify_races.py < 3km**
-Missing 2× track mile, 1× track 1500, 1× road mile, 1× road 1000m in Paul Test.
+Only missing Golden Stag track mile (2019) in Paul Test. Other sub-3km races now classified.
 
 **Rename nAG%**
 Cleaner column name.
@@ -134,17 +131,8 @@ Add athlete config summary as first sheet in Master XLSX. Separate session.
 
 ### Cleanup / housekeeping
 
-**Remove root-level `athlete.yml`**
-A001 migration validated. Root `athlete.yml` is redundant — remove to avoid confusion.
-
-**Handover file consolidation**
-40+ handover markdown files in repo root from Feb 7 – Mar 12. Archive older ones into `docs/handovers/`, keeping only recent.
-
-**Delete stale files**
-Candidates: `cleanup_v51.bat`, `cleanup_v52.bat`, `automation_plan.md`, `handover_portability_session.md`, `multi_athlete_planning.md` (superseded by implementation), `PATCHES_A007_FIXES.md` (applied), `PREDICTION_BIAS_ANALYSIS.md` (done), `DESIGN_MILESTONES.md` (shipped).
-
-**Consolidate CLAUDE.md → CLAUDE_RUNNING_PROJECT_OVERVIEW.md**
-`CLAUDE.md` is a stale subset. Delete it and rename `CLAUDE_RUNNING_PROJECT_OVERVIEW.md` back to `CLAUDE.md`, or add a pointer.
+**Delete stale `CLAUDE.md`**
+Stale subset of `CLAUDE_RUNNING_PROJECT_OVERVIEW.md`. Delete if still present — the overview doc is the canonical reference.
 
 ---
 
