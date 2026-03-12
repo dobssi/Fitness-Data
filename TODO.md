@@ -93,8 +93,7 @@ Cleaner column name.
 
 **GAP equiv time** — `gap_equiv_time_s` from Minetti integral.
 
-**Stryd outlier auto-flag**
-RE z < −2.5σ vs speed → set factor=0, use GAP RF instead.
+**Stryd outlier auto-flag** — DONE (`rf_stryd_gap_sub` in StepB). RE z < −2.0 + Stryd/GAP ratio >2% above EMA → substitutes GAP RF for Stryd RF. 59 runs flagged on A006 including Battersea parkrun. Threshold is −2.0 not −2.5 as originally spec'd.
 
 **Surface-specific trail specificity**
 Race readiness long run metrics: count only hilly runs (undulation_score > threshold) for trail race cards.
