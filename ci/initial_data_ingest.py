@@ -162,22 +162,21 @@ def ingest_strava(local_zip: str, data_dir: str, athlete_dir: str, tz: str,
             except Exception:
                 print(f"  ✓ gpx_tcx_summaries.csv ready")
 
-        # Merge activities.csv (append Strava names to existing)
+        # Activities.csv: Strava version replaces Polar version (different schemas)
+        # Strava CSV has proper activity names; Polar CSV names are mostly empty
         if os.path.isfile(strava_csv):
             if os.path.isfile(activities_csv):
-                # Append Strava activities to existing CSV
+                # Back up Polar CSV, replace with Strava
+                polar_backup = activities_csv + ".polar_backup"
+                shutil.copy2(activities_csv, polar_backup)
+                print(f"  ✓ Polar activities.csv backed up to {os.path.basename(polar_backup)}")
+            shutil.copy2(strava_csv, activities_csv)
+            try:
                 import pandas as pd
-                try:
-                    df_existing = pd.read_csv(activities_csv)
-                    df_strava = pd.read_csv(strava_csv)
-                    df_merged = pd.concat([df_existing, df_strava], ignore_index=True)
-                    df_merged.to_csv(activities_csv, index=False)
-                    print(f"  ✓ activities.csv merged ({len(df_strava)} Strava entries added)")
-                except Exception as e:
-                    print(f"  WARNING: Could not merge activities.csv: {e}")
-            else:
-                shutil.copy2(strava_csv, activities_csv)
-                print(f"  ✓ activities.csv ready (from Strava)")
+                _n = len(pd.read_csv(strava_csv, encoding='utf-8', encoding_errors='replace'))
+                print(f"  ✓ activities.csv replaced with Strava version ({_n} entries)")
+            except Exception:
+                print(f"  ✓ activities.csv replaced with Strava version")
     else:
         # Primary Strava ingest — just copy outputs
         if os.path.isfile(strava_fits):
