@@ -4745,7 +4745,7 @@ def generate_html(stats, rf_data, volume_data, ctl_atl_data, ctl_atl_lookup, rfl
         .ws .tip {{ display: none; position: absolute; bottom: 100%; left: 50%; transform: translateX(-50%); background: var(--surface2); border: 1px solid var(--border); padding: 3px 7px; border-radius: 4px; font-size: 0.68rem; white-space: nowrap; z-index: 10; color: var(--text); pointer-events: none; margin-bottom: 4px; }}
         .ws:hover .tip {{ display: block; }}
         .ws-tip {{ position: relative; cursor: default; }}
-        .ws-tip .tip {{ display: none; position: absolute; bottom: 100%; left: 50%; transform: translateX(-50%); background: #1e2130; border: 1px solid var(--border); padding: 5px 9px; border-radius: 5px; font-size: 0.67rem; white-space: nowrap; z-index: 20; color: var(--text); pointer-events: none; margin-bottom: 4px; max-width: 280px; white-space: normal; text-align: center; line-height: 1.4; }}
+        .ws-tip .tip {{ display: none; position: fixed; background: #1e2130; border: 1px solid var(--border); padding: 5px 9px; border-radius: 5px; font-size: 0.67rem; z-index: 9999; color: var(--text); pointer-events: none; max-width: 280px; white-space: normal; text-align: center; line-height: 1.4; }}
         .ws-tip:hover .tip {{ display: block; }}
         .wt {{ font-size: 0.72rem; font-family: 'JetBrains Mono'; color: var(--text-dim); width: 48px; text-align: right; flex-shrink: 0; }}
         
@@ -5119,16 +5119,16 @@ function raceAnnotations(dates) {{
             <div class="tip">Change in RFL over the last 14 days. Positive = fitness improving. Negative = fitness declining.</div>
         </div>
         <div class="stat-card ws-tip">
-            <div class="stat-value" id="ag-rfl-value">{f"{stats['ag_rfl']}%" if stats.get('ag_rfl') is not None else '-%'}</div>
-            <div class="stat-label">AG RFL</div>
-            <div class="stat-sub">vs peak</div>
-            <div class="tip">Age-graded Relative Fitness Level — your current predicted age grade ({stats.get('current_pred_ag', '-')}%) divided by your best ever race age grade ({stats.get('best_race_ag', '-')}%). 100% = you are at your age-adjusted peak.</div>
-        </div>
-        <div class="stat-card ws-tip">
             <div class="stat-value" id="ag-value">{_init_ag if _init_ag else '-'}%</div>
             <div class="stat-label">Age Grade</div>
             <div class="stat-sub">5k estimate</div>
             <div class="tip">Age-graded performance — compares your estimated 5K to the world record for your age and sex. 60%+ is good club level, 70%+ is competitive.</div>
+        </div>
+        <div class="stat-card ws-tip">
+            <div class="stat-value" id="ag-rfl-value">{f"{stats['ag_rfl']}%" if stats.get('ag_rfl') is not None else '-%'}</div>
+            <div class="stat-label">AG RFL</div>
+            <div class="stat-sub">vs peak</div>
+            <div class="tip">Age-graded Relative Fitness Level — your current predicted age grade ({stats.get('current_pred_ag', '-')}%) divided by your best ever race age grade ({stats.get('best_race_ag', '-')}%). 100% = you are at your age-adjusted peak.</div>
         </div>
     </div>
     
@@ -6952,6 +6952,22 @@ function raceAnnotations(dates) {{
     const _DOW = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
     _rwpPlans.forEach(p => {{ if (p.canvas) drawRWPChart(p.canvas, p); }});
     window.addEventListener('resize', () => _rwpPlans.forEach(p => {{ if (p.canvas) drawRWPChart(p.canvas, p); }}));
+    
+    // Tooltip positioning — flip below if too close to top of viewport
+    document.querySelectorAll('.ws-tip').forEach(el => {{
+        el.addEventListener('mouseenter', function() {{
+            const tip = this.querySelector('.tip');
+            if (!tip) return;
+            const rect = this.getBoundingClientRect();
+            const tipH = tip.offsetHeight || 60;
+            let top = rect.top - tipH - 6;
+            let left = rect.left + rect.width / 2 - 140;
+            if (top < 4) top = rect.bottom + 6;
+            left = Math.max(4, Math.min(left, window.innerWidth - 284));
+            tip.style.top = top + 'px';
+            tip.style.left = left + 'px';
+        }});
+    }});
     
     </script>
 </body>
