@@ -2744,7 +2744,7 @@ def load_strava(activities_csv: str, tz_local: str) -> pd.DataFrame:
 
     This makes matching robust to differing Strava export behaviors across years.
     """
-    act = pd.read_csv(activities_csv)
+    act = pd.read_csv(activities_csv, encoding='latin-1')
 
     dt_naive = pd.to_datetime(act.get("Activity Date"), errors="coerce")
 
