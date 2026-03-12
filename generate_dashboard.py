@@ -6345,7 +6345,8 @@ function raceAnnotations(dates) {{
                                             const heatMult = Math.min(HEAT_MAX_MULT, estMins / HEAT_REF_MINS);
                                             const tempFactor = 1.0 + (tempAdjs[i] - 1.0) * heatMult;
                                             const surfFactor = surfaceAdjs[i];
-                                            compPred = Math.round(predicted[i] * tempFactor * surfFactor);
+                                            const reFactor = reAdjs[i];
+                                            compPred = Math.round(predicted[i] * tempFactor * surfFactor * reFactor);
                                         }}
                                         const gap = actual[i] - compPred;
                                         if (Math.abs(gap) < 2) {{

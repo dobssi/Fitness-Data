@@ -5652,11 +5652,19 @@ def main() -> int:
             if POWER_MODE == 'stryd':
                 _stryd_races = dfm[(dfm.get('race_flag', pd.Series(False, index=dfm.index)) == True) &
                                    (dfm.get('power_source', pd.Series('', index=dfm.index)) == 'stryd')]
-                _race_re = _stryd_races['RE_avg'].dropna()
+                # Era-normalise race RE before taking median (so reference isn't era-biased)
+                _race_re_raw = _stryd_races['RE_avg'].copy()
+                _race_era_adj = pd.to_numeric(_stryd_races.get('power_adjuster_to_S4', 1.0), errors='coerce').fillna(1.0)
+                _race_re = (_race_re_raw / _race_era_adj).dropna()
                 _re_ref = float(_race_re.median()) if len(_race_re) >= 5 else re_p90
                 if _re_ref > 0:
                     re_avg_col = dfm['RE_avg']
-                    re_adj = _re_ref / re_avg_col
+                    # Era-normalise: RE = speed×mass/power. power_adjuster_to_S4 scales
+                    # raw power to s4-equivalent (multiply). So era-normalised RE = RE / adjuster.
+                    # This removes systematic era bias from RE_Adj comparisons.
+                    era_adj_col = pd.to_numeric(dfm.get('power_adjuster_to_S4', 1.0), errors='coerce').fillna(1.0)
+                    re_normalised = re_avg_col / era_adj_col
+                    re_adj = _re_ref / re_normalised
                     re_adj = re_adj.clip(0.85, 1.20)
                     # Only set where RE_avg is valid AND power is from Stryd (not simulated)
                     # AND Stryd power wasn't substituted with GAP (bogus power → bogus RE)
