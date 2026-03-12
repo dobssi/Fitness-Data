@@ -85,7 +85,7 @@ power:
   
   # Stryd-specific settings (only used when mode = "stryd")
   stryd:
-    peak_cp_watts: 368    # Peak Critical Power at 100% RFL (tuned to race results, was 372)
+    peak_cp_watts: 370    # Peak Critical Power at 100% RFL (tuned to race results, was 372)
     
     # Era transition dates (hardware changes)
     # Format: era_name: "YYYY-MM-DD"
@@ -95,8 +95,7 @@ power:
       v1: "2017-05-05"          # First Stryd pod
       repl: "2017-09-12"        # Replacement pod
       air: "2019-09-07"         # Air power model
-      s4: "2023-01-03"          # Stryd 4.0
-      s5: "2025-12-17"          # Stryd 5.0
+      s4: "2023-01-03"          # Stryd 4.0 (includes 5.0 firmware — shift <1.2%, below noise floor)
     
     # Mass correction history (periods when Stryd was configured with wrong weight)
     # Format: {start_date: "YYYY-MM-DD", end_date: "YYYY-MM-DD", configured_kg: float}
@@ -114,7 +113,6 @@ power:
   
   # GAP-specific settings (only used when mode = "gap")
   gap:
-    peak_cp_watts: 374  # Auto-updated by StepB bootstrap
     re_constant: 0.92     # Running economy constant (0.92 for avg male, ~0.94 for female)
     # Note: PEAK_CP is bootstrapped from first race result in GAP mode
 
