@@ -433,10 +433,6 @@ def get_summary_stats(df):
         'rfl_14d_delta_sim': _calc_rfl_delta(df, 14, 'sim'),
         'latest_hr': int(latest[hr_col]) if latest is not None and pd.notna(latest.get(hr_col)) else None,
         'latest_dist': round(latest[dist_col], 2) if latest is not None and pd.notna(latest.get(dist_col)) else None,
-        # v51: Easy RF gap — use last valid row (short runs at end of day have NaN RF)
-        'easy_rfl_gap': round(_last_valid(df, 'Easy_RFL_Gap') * 100, 1) if _last_valid(df, 'Easy_RFL_Gap') is not None else None,
-        'easy_rfl_gap_gap': round(_last_valid(df, 'Easy_RFL_Gap_gap') * 100, 1) if _last_valid(df, 'Easy_RFL_Gap_gap') is not None else None,
-        'easy_rfl_gap_sim': round(_last_valid(df, 'Easy_RFL_Gap_sim') * 100, 1) if _last_valid(df, 'Easy_RFL_Gap_sim') is not None else None,
         # Phase 2: GAP and Sim RFL for mode toggle — use last valid row (short runs have NaN RF)
         'latest_rfl_gap': round(_last_valid(df, 'RFL_gap_Trend') * 100, 1) if _last_valid(df, 'RFL_gap_Trend') is not None else None,
         'latest_rfl_sim': round(_last_valid(df, 'RFL_sim_Trend') * 100, 1) if _last_valid(df, 'RFL_sim_Trend') is not None else None,
@@ -4434,21 +4430,18 @@ def generate_html(stats, rf_data, volume_data, ctl_atl_data, ctl_atl_lookup, rfl
         _init_delta = stats.get('rfl_14d_delta_gap') or stats.get('rfl_14d_delta')
         _init_rfl_label = 'RFL (GAP)'
         _init_preds = stats['race_predictions'].get('_mode_gap') or stats['race_predictions']
-        _init_easy = stats.get('easy_rfl_gap_gap') if stats.get('easy_rfl_gap_gap') is not None else stats.get('easy_rfl_gap')
         _init_ag = stats['race_predictions'].get('_ag_gap') or stats.get('age_grade')
     elif _init_mode == 'sim':
         _init_rfl = stats.get('latest_rfl_sim') or stats.get('latest_rfl')
         _init_delta = stats.get('rfl_14d_delta_sim') or stats.get('rfl_14d_delta')
         _init_rfl_label = 'RFL (Sim)'
         _init_preds = stats['race_predictions'].get('_mode_sim', dict())
-        _init_easy = stats.get('easy_rfl_gap_sim')
         _init_ag = stats['race_predictions'].get('_ag_sim')
     else:
         _init_rfl = stats.get('latest_rfl')
         _init_delta = stats.get('rfl_14d_delta')
         _init_rfl_label = 'RFL Trend'
         _init_preds = stats['race_predictions']
-        _init_easy = stats.get('easy_rfl_gap')
         _init_ag = stats.get('age_grade')
     
     # Body class for initial mode
@@ -5126,14 +5119,10 @@ function raceAnnotations(dates) {{
             <div class="tip">Change in RFL over the last 14 days. Positive = fitness improving. Negative = fitness declining.</div>
         </div>
         <div class="stat-card ws-tip">
-            <div class="stat-value" id="easy-rf-gap-value"
-                 data-stryd="{f"{'+' if stats['easy_rfl_gap'] > 0 else ''}{stats['easy_rfl_gap']}%" if stats['easy_rfl_gap'] is not None else '-'}"
-                 data-gap="{f"{'+' if stats['easy_rfl_gap_gap'] > 0 else ''}{stats['easy_rfl_gap_gap']}%" if stats['easy_rfl_gap_gap'] is not None else '-'}"
-                 data-sim="{f"{'+' if stats['easy_rfl_gap_sim'] > 0 else ''}{stats['easy_rfl_gap_sim']}%" if stats['easy_rfl_gap_sim'] is not None else '-'}"
-            >{f"{'+' if _init_easy > 0 else ''}{_init_easy}%" if _init_easy is not None else '-'}</div>
-            <div class="stat-label">Easy RF Gap</div>
-            <div class="stat-sub">vs trend</div>
-            <div class="tip">How your easy runs compare to the overall fitness trend. Negative = easy runs feel harder than expected (possible fatigue or illness).</div>
+            <div class="stat-value" id="ag-rfl-value">{f"{stats['ag_rfl']}%" if stats.get('ag_rfl') is not None else '-%'}</div>
+            <div class="stat-label">AG RFL</div>
+            <div class="stat-sub">vs peak</div>
+            <div class="tip">Age-graded Relative Fitness Level — your current predicted age grade ({stats.get('current_pred_ag', '-')}%) divided by your best ever race age grade ({stats.get('best_race_ag', '-')}%). 100% = you are at your age-adjusted peak.</div>
         </div>
         <div class="stat-card ws-tip">
             <div class="stat-value" id="ag-value">{_init_ag if _init_ag else '-'}%</div>
@@ -6728,11 +6717,6 @@ function raceAnnotations(dates) {{
             rflLabel.textContent = labels[mode];
         }}
         
-        // Update Easy RF Gap stat card
-        const easyGapEl = document.getElementById('easy-rf-gap-value');
-        if (easyGapEl) {{
-            easyGapEl.textContent = easyGapEl.dataset[mode] || '-';
-        }}
         
         // Hide/show power-only elements via body class (CSS handles all hiding)
         const isGap = mode === 'gap';
@@ -6998,6 +6982,31 @@ def main():
     stats['age_grade'] = age_grade
     stats['critical_power'] = critical_power
     stats['race_predictions'] = race_predictions
+    
+    # AG RFL: current predicted AG / best ever race AG
+    # Current = max predicted AG across distances (from race_predictions dict)
+    # Best = max age_grade_pct across all races in master
+    _current_ag_candidates = []
+    if age_grade and age_grade > 30:
+        _current_ag_candidates.append(age_grade)
+    for mode in ('gap', 'sim'):
+        _mode_ag = race_predictions.get(f'_ag_{mode}')
+        if _mode_ag and _mode_ag > 30:
+            _current_ag_candidates.append(_mode_ag)
+    _current_ag = max(_current_ag_candidates) if _current_ag_candidates else None
+    
+    _best_race_ag = None
+    race_col = 'race_flag' if 'race_flag' in df.columns else 'Race'
+    if 'age_grade_pct' in df.columns and race_col in df.columns:
+        _race_ags = df.loc[df[race_col] == 1, 'age_grade_pct'].dropna()
+        _race_ags = _race_ags[(_race_ags >= 30) & (_race_ags < 120)]
+        if len(_race_ags) > 0:
+            _best_race_ag = round(float(_race_ags.max()), 2)
+    
+    _ag_rfl = round(_current_ag / _best_race_ag * 100, 1) if _current_ag and _best_race_ag and _best_race_ag > 0 else None
+    stats['ag_rfl'] = _ag_rfl
+    stats['best_race_ag'] = _best_race_ag
+    stats['current_pred_ag'] = round(_current_ag, 1) if _current_ag else None
     
     print("Processing RF trend (multiple ranges)...")
     rf_data = {
