@@ -30,28 +30,23 @@ athlete:
   #   Marathon: 0.93
 
 planned_races:
-  - name: "Burgess Parkrun"
-    date: "2026-02-28"
+  - name: "Battersea Parkrun"
+    date: "2026-03-28"
     distance_km: 5.0
     priority: C
-    surface: road
-  - name: "Paddock Wood Half"
-    date: "2026-03-08"
-    distance_km: 21.097
-    priority: A
     surface: road
 
 power:
   mode: "gap"
 
   stryd:
-    peak_cp_watts: 695
+    peak_cp_watts: 461
     eras: {}
     mass_corrections: []
     re_reference_era: "s4"
 
   gap:
-    peak_cp_watts: 461  # Auto-updated by StepB bootstrap
+    peak_cp_watts: 456  # Auto-updated by StepB bootstrap
     re_constant: 0.92
 
 data:
