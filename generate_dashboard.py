@@ -58,6 +58,11 @@ def load_and_process_data():
     df['date'] = pd.to_datetime(df['date'])
     df = df.sort_values('date').reset_index(drop=True)
     
+    # v53: Read singleton values (AG, CP, PEAK_CP) from the unfiltered last row
+    # before auto_exclude filter, since StepB writes these to dfm.index[-1]
+    # which may be auto-excluded (e.g. short jog at end of day).
+    _unfiltered_last = df.iloc[-1] if len(df) > 0 else None
+    
     # v52: Filter out auto-excluded activities (junk, duplicates, non-running)
     # These are flagged by StepB's apply_auto_excludes() with auto_exclude=1
     # Races are preserved even if auto-excluded (e.g. no HR) — they still
@@ -188,12 +193,18 @@ def load_and_process_data():
                     _PEAK_CP_OVERRIDDEN = True
         
         # Predicted 5K age grade
-        # v53: For GAP-mode athletes, Stryd AG may be empty — use mode-specific AG
-        ag_val = latest.get('pred_5k_age_grade')
+        # v53: Read from unfiltered last row (StepB writes to absolute last row, may be auto-excluded)
+        _ag_source = _unfiltered_last if _unfiltered_last is not None else latest
+        ag_val = _ag_source.get('pred_5k_age_grade')
         if not (pd.notna(ag_val) and 30 < float(ag_val) < 120):
             # Stryd AG missing or implausible — try mode-specific
             _ag_mode_col = f'pred_5k_age_grade_{_cfg_power_mode}'
-            ag_val = latest.get(_ag_mode_col)
+            ag_val = _ag_source.get(_ag_mode_col)
+        if not (pd.notna(ag_val) and 30 < float(ag_val) < 120):
+            # Also try filtered latest as fallback
+            ag_val = latest.get('pred_5k_age_grade')
+            if not (pd.notna(ag_val) and 30 < float(ag_val) < 120):
+                ag_val = latest.get(f'pred_5k_age_grade_{_cfg_power_mode}')
         if pd.notna(ag_val) and 30 < float(ag_val) < 120:
             age_grade = round(float(ag_val), 2)
         
@@ -259,7 +270,9 @@ def load_and_process_data():
             peak_cp_mode = latest.get(f'effective_peak_cp_{mode}')
             race_predictions[f'_peak_cp_{mode}'] = int(round(float(peak_cp_mode))) if pd.notna(peak_cp_mode) else None
             
-            ag_mode = latest.get(f'pred_5k_age_grade_{mode}')
+            ag_mode = _ag_source.get(f'pred_5k_age_grade_{mode}') if _unfiltered_last is not None else None
+            if not (ag_mode is not None and pd.notna(ag_mode)):
+                ag_mode = latest.get(f'pred_5k_age_grade_{mode}')
             race_predictions[f'_ag_{mode}'] = round(float(ag_mode), 2) if pd.notna(ag_mode) else None
     
     return df, ctl, atl, tsb, weight, age_grade, critical_power, race_predictions
