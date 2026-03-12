@@ -215,6 +215,15 @@ def load_and_process_data():
         pred_hm = latest.get('pred_hm_s')
         pred_mara = latest.get('pred_marathon_s')
         
+        # For GAP/sim athletes, Stryd prediction columns are NaN.
+        # Fall back to mode-specific columns so headline stats aren't blank.
+        if _cfg_power_mode in ('gap', 'sim'):
+            _sfx = f'_{_cfg_power_mode}'
+            if pd.isna(pred_5k): pred_5k = latest.get(f'pred_5k_s{_sfx}')
+            if pd.isna(pred_10k): pred_10k = latest.get(f'pred_10k_s{_sfx}')
+            if pd.isna(pred_hm): pred_hm = latest.get(f'pred_hm_s{_sfx}')
+            if pd.isna(pred_mara): pred_mara = latest.get(f'pred_marathon_s{_sfx}')
+        
         if pd.notna(pred_5k):
             race_predictions['5k'] = format_seconds(pred_5k)
             race_predictions['5k_raw'] = int(pred_5k)
@@ -246,6 +255,9 @@ def load_and_process_data():
             
             cp_mode = latest.get(f'CP_{mode}')
             race_predictions[f'_cp_{mode}'] = int(round(float(cp_mode))) if pd.notna(cp_mode) else None
+            
+            peak_cp_mode = latest.get(f'effective_peak_cp_{mode}')
+            race_predictions[f'_peak_cp_{mode}'] = int(round(float(peak_cp_mode))) if pd.notna(peak_cp_mode) else None
             
             ag_mode = latest.get(f'pred_5k_age_grade_{mode}')
             race_predictions[f'_ag_{mode}'] = round(float(ag_mode), 2) if pd.notna(ag_mode) else None
@@ -5590,7 +5602,7 @@ function raceAnnotations(dates) {{
                 predMara_s: {stats["race_predictions"].get("marathon_raw", 0)} }},
             gap: {{ rfl: '{stats.get("latest_rfl_gap") or stats.get("latest_rfl", "-")}', ag: '{stats["race_predictions"].get("_ag_gap") or stats.get("age_grade") or "-"}',
                 rflDelta: '{_fmt_delta(stats.get("rfl_14d_delta_gap") if stats.get("rfl_14d_delta_gap") is not None else stats.get("rfl_14d_delta"))}',
-                cp: {round(PEAK_CP_WATTS_DASH * _gap_rfl_num / 100) if _gap_rfl_num else 0},
+                cp: {stats['race_predictions'].get('_cp_gap') or (round(PEAK_CP_WATTS_DASH * _gap_rfl_num / 100) if _gap_rfl_num else 0)},
                 pred5k: '{format_race_time(_gap_preds.get("5k", "-"))}',
                 pred10k: '{format_race_time(_gap_preds.get("10k", "-"))}',
                 predHm: '{format_race_time(_gap_preds.get("Half Marathon", "-"))}',

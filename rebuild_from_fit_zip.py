@@ -3711,6 +3711,50 @@ def main():
             if col not in df.columns:
                 df[col] = np.nan
 
+    # ---------- Deduplicate by start_time_utc (±600s tolerance) ----------
+    # When multiple data sources (Polar + Strava) contribute the same run,
+    # they produce separate rows with slightly different timestamps.
+    # Keep the FIT-derived row (better per-second data) over TCX/GPX.
+    if len(df) > 1 and "start_time_utc" in df.columns:
+        _st = pd.to_datetime(df["start_time_utc"], errors="coerce", utc=True)
+        _has_st = _st.notna()
+        _n_before = len(df)
+        if _has_st.sum() > 1:
+            # Sort so FIT files come first (preferred), TCX/GPX last
+            _is_tcx = df["file"].astype(str).str.lower().str.endswith((".tcx", ".gpx"))
+            df["_dedup_priority"] = _is_tcx.astype(int)  # 0=FIT (keep), 1=TCX (remove)
+            df = df.sort_values(["_dedup_priority", "date"]).reset_index(drop=True)
+            _st = pd.to_datetime(df["start_time_utc"], errors="coerce", utc=True)
+
+            _drop = set()
+            _used = set()  # indices already matched
+            for i in range(len(df)):
+                if i in _drop or i in _used:
+                    continue
+                if pd.isna(_st.iloc[i]):
+                    continue
+                for j in range(i + 1, len(df)):
+                    if j in _drop or j in _used:
+                        continue
+                    if pd.isna(_st.iloc[j]):
+                        continue
+                    diff = abs((_st.iloc[i] - _st.iloc[j]).total_seconds())
+                    if diff <= 600:
+                        # j has higher priority number (TCX) or is later duplicate
+                        _drop.add(j)
+                        _used.add(i)
+                        break
+                    elif diff > 86400:
+                        break  # sorted by date, no point checking further
+
+            if _drop:
+                df = df.drop(index=list(_drop)).reset_index(drop=True)
+            df = df.drop(columns=["_dedup_priority"], errors="ignore")
+            df = df.sort_values("date").reset_index(drop=True)
+            _n_removed = _n_before - len(df)
+            if _n_removed > 0:
+                print(f"Timestamp dedup: removed {_n_removed} duplicate rows (±600s, prefer FIT over TCX)")
+
     # ---------- Weather (Open-Meteo, zero setup) ----------
     # Speed: group runs by rounded location and fetch one hourly block per location (cached on disk).
     wx_cache_dir = os.path.join(out_dir, "_weather_cache_openmeteo")
