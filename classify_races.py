@@ -456,6 +456,12 @@ def detect_candidates_from_master(master_df: pd.DataFrame, lthr: float,
         if strava_km is not None and (strava_km != strava_km or strava_km <= 0):
             strava_km = None
 
+        # ── Virtual run exclusion ──
+        # Strava 'Virtual Run' = Zwift/treadmill with unreliable distance. Skip entirely.
+        _stype = str(row.get('strava_activity_type', '') or '').lower()
+        if 'virtual' in _stype:
+            continue
+        
         # ── Fix B: Treadmill exclusion ──
         # Treadmill runs have no GPS trace. Keyword + no GPS → skip entirely.
         # Indoor track races (real events indoors) are NOT excluded — they still
@@ -750,6 +756,23 @@ def enrich_and_classify(master_path: str, overrides_path: str,
         elif 'uncertain' in v:
             ov.at[i, 'race_flag'] = 0
             ov.at[i, 'notes'] = f"REVIEW: {row['reason']}"
+    
+    # ── Deflag virtual/Zwift races ──
+    # Strava 'Virtual Run' activity type = treadmill with unreliable distance.
+    # These should not count as races regardless of HR/keyword signals.
+    virtual_count = 0
+    for i, row in ov.iterrows():
+        if row.get('race_flag', 0) != 1:
+            continue
+        fname = row['file']
+        m = master_lookup.get(fname, {})
+        _stype = str(m.get('strava_activity_type', '') or '').lower()
+        if 'virtual' in _stype:
+            ov.at[i, 'race_flag'] = 0
+            ov.at[i, 'notes'] = f"Virtual run (Strava type: {_stype}) — deflagged"
+            virtual_count += 1
+    if virtual_count:
+        print(f"  Deflagged {virtual_count} virtual/Zwift race(s)")
     
     # ── Demote races with large elapsed/moving ratio ──
     # If elapsed_time >> moving_time, the activity has significant pauses

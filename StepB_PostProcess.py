@@ -6043,7 +6043,7 @@ def main() -> int:
         # Flags (v42)
         "race_flag", "surface_adj", "hf_parkrun",
         # Strava data
-        "strava_match_type", "strava_activity_id", "strava_distance_km",
+        "strava_match_type", "strava_activity_id", "strava_activity_type", "strava_distance_km",
         "strava_moving_time_s", "strava_elapsed_time_s", 
         "strava_elev_gain_m", "strava_elev_loss_m",
         # Device info
