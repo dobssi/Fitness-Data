@@ -5782,7 +5782,7 @@ def main() -> int:
                 runner_age = runner_age_default
             
             pred_5k_ag = calc_age_grade(pred_5k, 5.0, runner_age, runner_gender, 'road')
-            if pred_5k_ag:
+            if pred_5k_ag and pd.notna(pred_5k_ag) and 30 < pred_5k_ag < 120:
                 dfm.at[dfm.index[-1], 'pred_5k_age_grade'] = round(pred_5k_ag, 1)
                 print(f"  Predicted 5K Age Grade: {pred_5k_ag:.1f}% (age {runner_age})")
             
@@ -5801,9 +5801,15 @@ def main() -> int:
                     else:
                         mode_pred_5k = calc_race_prediction(mode_rfl, '5k', re_p90, _effective_peak_cp, mass_kg)
                     mode_ag = calc_age_grade(mode_pred_5k, 5.0, runner_age, runner_gender, 'road')
-                    if mode_ag:
+                    if mode_ag and pd.notna(mode_ag) and 30 < mode_ag < 120:
                         dfm.at[dfm.index[-1], f'pred_5k_age_grade_{mode}'] = round(mode_ag, 1)
                         print(f"  {mode.upper()} predicted 5K AG: {mode_ag:.1f}% (RFL={mode_rfl:.3f})")
+                        # For GAP/SIM athletes: also fill base column if Stryd AG is missing
+                        if mode == POWER_MODE:
+                            _base_ag = dfm.at[dfm.index[-1], 'pred_5k_age_grade'] if 'pred_5k_age_grade' in dfm.columns else np.nan
+                            if not (pd.notna(_base_ag) and 30 < float(_base_ag) < 120):
+                                dfm.at[dfm.index[-1], 'pred_5k_age_grade'] = round(mode_ag, 1)
+                                print(f"  Base AG filled from {mode.upper()}: {mode_ag:.1f}%")
         
         # Calculate age grades for races and parkruns
         print("  Calculating age grades for races/parkruns...")
