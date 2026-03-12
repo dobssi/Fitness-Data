@@ -186,7 +186,7 @@
         .ws .tip { display: none; position: absolute; bottom: 100%; left: 50%; transform: translateX(-50%); background: var(--surface2); border: 1px solid var(--border); padding: 3px 7px; border-radius: 4px; font-size: 0.68rem; white-space: nowrap; z-index: 10; color: var(--text); pointer-events: none; margin-bottom: 4px; }
         .ws:hover .tip { display: block; }
         .ws-tip { position: relative; cursor: default; }
-        .ws-tip .tip { display: none; position: absolute; bottom: 100%; left: 50%; transform: translateX(-50%); background: #1e2130; border: 1px solid var(--border); padding: 5px 9px; border-radius: 5px; font-size: 0.67rem; white-space: nowrap; z-index: 20; color: var(--text); pointer-events: none; margin-bottom: 4px; max-width: 280px; white-space: normal; text-align: center; line-height: 1.4; }
+        .ws-tip .tip { display: none; position: fixed; background: #1e2130; border: 1px solid var(--border); padding: 5px 9px; border-radius: 5px; font-size: 0.67rem; z-index: 9999; color: var(--text); pointer-events: none; max-width: 280px; white-space: normal; text-align: center; line-height: 1.4; }
         .ws-tip:hover .tip { display: block; }
         .wt { font-size: 0.72rem; font-family: 'JetBrains Mono'; color: var(--text-dim); width: 48px; text-align: right; flex-shrink: 0; }
         
@@ -493,7 +493,7 @@ function raceAnnotations(dates) {
 }catch(e){console.warn('Chart.js not loaded:',e);}
 </script>
     <h1>🏃 Paul Collyer</h1>
-    <div class="dash-sub">Thursday 12 March 2026, 05:32</div>
+    <div class="dash-sub">Thursday 12 March 2026, 19:19</div>
     
     <!-- Phase 2: Mode Toggle -->
     <div class="mode-toggle" style="display:flex;gap:6px;margin:10px 0 8px;align-items:center;">
@@ -584,20 +584,16 @@ function raceAnnotations(dates) {
             <div class="tip">Change in RFL over the last 14 days. Positive = fitness improving. Negative = fitness declining.</div>
         </div>
         <div class="stat-card ws-tip">
-            <div class="stat-value" id="easy-rf-gap-value"
-                 data-stryd="-1.4%"
-                 data-gap="-2.9%"
-                 data-sim="-2.4%"
-            >-1.4%</div>
-            <div class="stat-label">Easy RF Gap</div>
-            <div class="stat-sub">vs trend</div>
-            <div class="tip">How your easy runs compare to the overall fitness trend. Negative = easy runs feel harder than expected (possible fatigue or illness).</div>
-        </div>
-        <div class="stat-card ws-tip">
             <div class="stat-value" id="ag-value">75.3%</div>
             <div class="stat-label">Age Grade</div>
             <div class="stat-sub">5k estimate</div>
             <div class="tip">Age-graded performance — compares your estimated 5K to the world record for your age and sex. 60%+ is good club level, 70%+ is competitive.</div>
+        </div>
+        <div class="stat-card ws-tip">
+            <div class="stat-value" id="ag-rfl-value">93.6%</div>
+            <div class="stat-label">AG RFL</div>
+            <div class="stat-sub">vs peak</div>
+            <div class="tip">Age-graded Relative Fitness Level — your current predicted age grade (76.3%) divided by your best ever race age grade (81.51%). 100% = you are at your age-adjusted peak.</div>
         </div>
     </div>
     
@@ -630,19 +626,19 @@ function raceAnnotations(dates) {
     
     <div class="stats-grid">
         <div class="stat-card ws-tip">
-            <div class="stat-value">57.1</div>
+            <div class="stat-value">49.1</div>
             <div class="stat-label">Last 7 Days</div>
             <div class="stat-sub">km</div>
             <div class="tip">Total running distance in the last 7 days.</div>
         </div>
         <div class="stat-card ws-tip">
-            <div class="stat-value">253.9</div>
+            <div class="stat-value">242.1</div>
             <div class="stat-label">Last 30 Days</div>
             <div class="stat-sub">km</div>
             <div class="tip">Total running distance in the last 30 days.</div>
         </div>
         <div class="stat-card ws-tip">
-            <div class="stat-value">2,484</div>
+            <div class="stat-value">2,479</div>
             <div class="stat-label">Last 12 Months</div>
             <div class="stat-sub">km</div>
             <div class="tip">Total running distance in the last 12 months.</div>
@@ -1292,7 +1288,7 @@ function raceAnnotations(dates) {
     
     
     <div class="footer">
-        Updated: 2026-03-12 05:32<br>
+        Updated: 2026-03-12 19:19<br>
         Data through: 2026-03-12
     </div>
     
@@ -1457,7 +1453,7 @@ function raceAnnotations(dates) {
                 predMara_s: 12508 },
             gap: { rfl: '87.4', ag: '76.3',
                 rflDelta: '-1.0%',
-                cp: 322,
+                cp: 327,
                 pred5k: '20:05',
                 pred10k: '42:07',
                 predHm: '1:32:47',
@@ -2056,7 +2052,8 @@ function raceAnnotations(dates) {
             const datesISO = indices.map(i => d.dates_iso[i]);
             // Mode-dependent prediction source
             const predKey = currentMode === 'gap' ? 'predicted_gap' : currentMode === 'sim' ? 'predicted_sim' : 'predicted';
-            const predicted = indices.map(i => (d[predKey] || d.predicted)[i]);
+            const predArr = d[predKey] && d[predKey].some(v => v !== null) ? d[predKey] : d.predicted;
+            const predicted = indices.map(i => predArr[i]);
             const actual = indices.map(i => d.actual[i]);
             const names = indices.map(i => d.names[i]);
             const temps = indices.map(i => d.temps[i]);
@@ -2089,23 +2086,38 @@ function raceAnnotations(dates) {
             // Colour actual dots: parkruns lighter, non-parkrun races darker
             const dotColors = isParkrun.map(p => p === 1 ? 'rgba(252, 165, 165, 0.8)' : 'rgba(239, 68, 68, 0.9)');
             
-            // Build data points for time axis
-            const predPoints = datesISO.map((dt, i) => displayPredicted[i] !== null ? ({ x: dt, y: displayPredicted[i] }) : null).filter(p => p !== null);
+            // Build data points for time axis (fall back to actual time if prediction missing)
+            const predPoints = datesISO.map((dt, i) => ({ x: dt, y: displayPredicted[i] !== null ? displayPredicted[i] : actual[i] }));
             const actualPoints = datesISO.map((dt, i) => ({ x: dt, y: actual[i] }));
             
             // Full prediction trend line (weekly smoothed, for distances with few races)
             const trendKey = currentMode === 'gap' ? 'trend_dates_iso_gap' : currentMode === 'sim' ? 'trend_dates_iso_sim' : 'trend_dates_iso';
             const trendValKey = currentMode === 'gap' ? 'trend_values_gap' : currentMode === 'sim' ? 'trend_values_sim' : 'trend_values';
-            const trendDates = d[trendKey] || d.trend_dates_iso || [];
-            const trendVals = d[trendValKey] || d.trend_values || [];
+            const trendDates = (d[trendKey] && d[trendKey].length > 0) ? d[trendKey] : (d.trend_dates_iso || []);
+            const trendVals = (d[trendValKey] && d[trendValKey].length > 0) ? d[trendValKey] : (d.trend_values || []);
             const trendPoints = trendDates.map((dt, i) => ({ x: dt, y: trendVals[i] }));
-            const fewRaces = actualPoints.length < 5;
+            const singleRace = actualPoints.length < 2;
+            
+            // Compute x-axis bounds from race dates
+            const raceTimes = datesISO.map(d => new Date(d).getTime());
+            const firstRace = Math.min(...raceTimes);
+            const lastRace = Math.max(...raceTimes);
+            let xDataMin = firstRace;
+            let xDataMax = lastRace;
+            if (singleRace) {
+                // Extend to present so you see current fitness relative to sparse races
+                xDataMax = Math.max(xDataMax, Date.now());
+            }
+            const xSpan = Math.max(xDataMax - xDataMin, 180 * 86400000);  // minimum 6 months
+            const xPad = xSpan * 0.05;
+            const xMin = new Date(xDataMin - xPad).toISOString().slice(0, 10);
+            const xMax = new Date(xDataMax + xPad).toISOString().slice(0, 10);
             
             // Compute stable y-axis range covering both adjusted and unadjusted data
             const allYVals = [];
             for (let i = 0; i < actual.length; i++) { if (actual[i]) allYVals.push(actual[i]); }
             for (let i = 0; i < predicted.length; i++) { if (predicted[i]) allYVals.push(predicted[i]); }
-            if (fewRaces) { for (let i = 0; i < trendVals.length; i++) { if (trendVals[i]) allYVals.push(trendVals[i]); } }
+            if (singleRace) { for (let i = 0; i < trendVals.length; i++) { if (trendVals[i]) allYVals.push(trendVals[i]); } }
             // Also include worst-case adjusted predictions
             for (let i = 0; i < predicted.length; i++) {
                 if (predicted[i] === null) continue;
@@ -2134,8 +2146,8 @@ function raceAnnotations(dates) {
                 type: 'line',
                 data: {
                     datasets: [
-                    // Background trend line (only for distances with < 5 races)
-                    ...(fewRaces && trendPoints.length > 0 ? [{
+                    // Background trend line (only for single-race distances)
+                    ...(singleRace && trendPoints.length > 0 ? [{
                         label: 'Fitness trend',
                         data: trendPoints,
                         borderColor: (function() {
@@ -2165,10 +2177,15 @@ function raceAnnotations(dates) {
                             return modeBase + ' 0.05)';
                         })(),
                         borderDash: adjustConditions ? [4, 3] : [],
-                        borderWidth: 2,
-                        pointRadius: 0,
-                        fill: !fewRaces,
+                        borderWidth: singleRace ? 0 : 2,
+                        pointRadius: 3,
+                        pointBackgroundColor: (function() {
+                            const modeBase = currentMode === 'gap' ? 'rgba(74, 222, 128,' : currentMode === 'sim' ? 'rgba(249, 115, 22,' : 'rgba(129, 140, 248,';
+                            return modeBase + ' 0.8)';
+                        })(),
+                        fill: false,
                         tension: 0.3,
+                        showLine: !singleRace,
                     }, {
                         label: 'Actual',
                         data: actualPoints,
@@ -2258,6 +2275,8 @@ function raceAnnotations(dates) {
                     scales: {
                         x: {
                             type: 'time',
+                            min: xMin,
+                            max: xMax,
                             time: { unit: 'year', displayFormats: { year: 'yyyy' } },
                             ticks: { maxTicksLimit: 10, font: { size: 10 } }
                         },
@@ -2559,11 +2578,6 @@ function raceAnnotations(dates) {
             rflLabel.textContent = labels[mode];
         }
         
-        // Update Easy RF Gap stat card
-        const easyGapEl = document.getElementById('easy-rf-gap-value');
-        if (easyGapEl) {
-            easyGapEl.textContent = easyGapEl.dataset[mode] || '-';
-        }
         
         // Hide/show power-only elements via body class (CSS handles all hiding)
         const isGap = mode === 'gap';
@@ -2799,6 +2813,22 @@ function raceAnnotations(dates) {
     const _DOW = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
     _rwpPlans.forEach(p => { if (p.canvas) drawRWPChart(p.canvas, p); });
     window.addEventListener('resize', () => _rwpPlans.forEach(p => { if (p.canvas) drawRWPChart(p.canvas, p); }));
+    
+    // Tooltip positioning — flip below if too close to top of viewport
+    document.querySelectorAll('.ws-tip').forEach(el => {
+        el.addEventListener('mouseenter', function() {
+            const tip = this.querySelector('.tip');
+            if (!tip) return;
+            const rect = this.getBoundingClientRect();
+            const tipH = tip.offsetHeight || 60;
+            let top = rect.top - tipH - 6;
+            let left = rect.left + rect.width / 2 - 140;
+            if (top < 4) top = rect.bottom + 6;
+            left = Math.max(4, Math.min(left, window.innerWidth - 284));
+            tip.style.top = top + 'px';
+            tip.style.left = left + 'px';
+        });
+    });
     
     </script>
 </body>
