@@ -3666,21 +3666,32 @@ def main():
         try:
             df_extra = pd.read_csv(args.extra_summaries, parse_dates=["date"])
             n_extra_raw = len(df_extra)
-            if n_extra_raw > 0 and "start_time_utc" in df_extra.columns:
-                df_extra["start_time_utc"] = pd.to_datetime(df_extra["start_time_utc"], errors="coerce", utc=True)
-                # Deduplicate against existing rows by start_time_utc (±120s tolerance)
-                existing_starts = pd.to_datetime(df.get("start_time_utc"), errors="coerce", utc=True)
-                existing_starts = existing_starts.dropna()
+            if n_extra_raw > 0:
+                # Deduplicate against existing rows by date (±600s) + distance (±10%)
+                _ex_dates = pd.to_datetime(df_extra["date"], errors="coerce")
+                _ex_dist = pd.to_numeric(df_extra.get("distance_km"), errors="coerce").fillna(0)
+                _existing_dates = pd.to_datetime(df["date"], errors="coerce")
+                _existing_dist = pd.to_numeric(df.get("distance_km"), errors="coerce").fillna(0)
                 keep_mask = pd.Series([True] * n_extra_raw, index=df_extra.index)
-                for idx, row in df_extra.iterrows():
-                    ext_ts = row.get("start_time_utc")
-                    if pd.isna(ext_ts):
+                for idx in range(n_extra_raw):
+                    ext_dt = _ex_dates.iloc[idx]
+                    ext_d = _ex_dist.iloc[idx]
+                    if pd.isna(ext_dt):
                         continue
-                    # Check if any existing row is within 120s
-                    if len(existing_starts) > 0:
-                        diffs = (existing_starts - ext_ts).abs()
-                        if diffs.min() <= pd.Timedelta(seconds=120):
-                            keep_mask.at[idx] = False
+                    if len(_existing_dates) > 0:
+                        diffs = (_existing_dates - ext_dt).abs()
+                        close = diffs <= pd.Timedelta(seconds=600)
+                        if close.any():
+                            # Check distance match
+                            for j in diffs[close].index:
+                                d_j = _existing_dist.at[j]
+                                if ext_d > 0 and d_j > 0:
+                                    ratio = max(ext_d, d_j) / min(ext_d, d_j)
+                                else:
+                                    ratio = 1.0
+                                if ratio <= 1.10:
+                                    keep_mask.iloc[idx] = False
+                                    break
                 df_extra = df_extra[keep_mask]
                 n_dedup = n_extra_raw - len(df_extra)
                 if len(df_extra) > 0:
@@ -3688,7 +3699,7 @@ def main():
                     df = df.sort_values("date").reset_index(drop=True)
                 print(f"Extra summaries: {n_extra_raw} rows in CSV, {n_dedup} duplicates removed, {len(df_extra)} merged into master")
             else:
-                print(f"Extra summaries: {n_extra_raw} rows but missing start_time_utc column — skipped")
+                print(f"Extra summaries: empty CSV — skipped")
         except Exception as e:
             print(f"WARNING: Failed to load extra summaries from {args.extra_summaries}: {repr(e)}")
 
@@ -3711,49 +3722,61 @@ def main():
             if col not in df.columns:
                 df[col] = np.nan
 
-    # ---------- Deduplicate by start_time_utc (±600s tolerance) ----------
+    # ---------- Deduplicate by date + distance (±600s, ±10% distance) ----------
     # When multiple data sources (Polar + Strava) contribute the same run,
-    # they produce separate rows with slightly different timestamps.
-    # Keep the FIT-derived row (better per-second data) over TCX/GPX.
-    if len(df) > 1 and "start_time_utc" in df.columns:
-        _st = pd.to_datetime(df["start_time_utc"], errors="coerce", utc=True)
-        _has_st = _st.notna()
+    # they produce separate rows with slightly different timestamps (~7 min for
+    # Polar/Strava offset). Keep the row with the best data: prefer FIT files
+    # (have per-second NPZ) over TCX/GPX summary rows.
+    if len(df) > 1 and "date" in df.columns:
+        _dt = pd.to_datetime(df["date"], errors="coerce")
+        _dist = pd.to_numeric(df.get("distance_km"), errors="coerce").fillna(0)
         _n_before = len(df)
-        if _has_st.sum() > 1:
-            # Sort so FIT files come first (preferred), TCX/GPX last
-            _is_tcx = df["file"].astype(str).str.lower().str.endswith((".tcx", ".gpx"))
-            df["_dedup_priority"] = _is_tcx.astype(int)  # 0=FIT (keep), 1=TCX (remove)
-            df = df.sort_values(["_dedup_priority", "date"]).reset_index(drop=True)
-            _st = pd.to_datetime(df["start_time_utc"], errors="coerce", utc=True)
 
-            _drop = set()
-            _used = set()  # indices already matched
-            for i in range(len(df)):
-                if i in _drop or i in _used:
+        # Sort: FIT first (priority 0), TCX/GPX last (priority 1), then by date
+        _file_str = df["file"].astype(str).str.lower()
+        _is_tcx = _file_str.str.endswith(".tcx") | _file_str.str.endswith(".gpx")
+        # Also deprioritise extra-summary rows (notes contain tcx_import/gpx_import/tcx_treadmill)
+        _notes = df.get("notes", pd.Series("", index=df.index)).astype(str).str.lower()
+        _is_summary = _notes.str.contains("tcx_import|gpx_import|tcx_treadmill", na=False)
+        df["_dedup_priority"] = (_is_tcx | _is_summary).astype(int)
+        df = df.sort_values(["_dedup_priority", "date"]).reset_index(drop=True)
+        _dt = pd.to_datetime(df["date"], errors="coerce")
+        _dist = pd.to_numeric(df.get("distance_km"), errors="coerce").fillna(0)
+
+        _drop = set()
+        _used = set()
+        for i in range(len(df)):
+            if i in _drop or i in _used:
+                continue
+            if pd.isna(_dt.iloc[i]):
+                continue
+            for j in range(i + 1, len(df)):
+                if j in _drop or j in _used:
                     continue
-                if pd.isna(_st.iloc[i]):
+                if pd.isna(_dt.iloc[j]):
                     continue
-                for j in range(i + 1, len(df)):
-                    if j in _drop or j in _used:
-                        continue
-                    if pd.isna(_st.iloc[j]):
-                        continue
-                    diff = abs((_st.iloc[i] - _st.iloc[j]).total_seconds())
-                    if diff <= 600:
-                        # j has higher priority number (TCX) or is later duplicate
+                diff_s = abs((_dt.iloc[i] - _dt.iloc[j]).total_seconds())
+                if diff_s <= 600:
+                    # Confirm: distance within 10% or both < 1km
+                    d_i, d_j = _dist.iloc[i], _dist.iloc[j]
+                    if d_i > 0 and d_j > 0:
+                        dist_ratio = max(d_i, d_j) / min(d_i, d_j) if min(d_i, d_j) > 0 else 99
+                    else:
+                        dist_ratio = 1.0  # both zero/nan — assume match
+                    if dist_ratio <= 1.10:
                         _drop.add(j)
                         _used.add(i)
                         break
-                    elif diff > 86400:
-                        break  # sorted by date, no point checking further
+                elif diff_s > 86400:
+                    break  # sorted by date, no point checking further
 
-            if _drop:
-                df = df.drop(index=list(_drop)).reset_index(drop=True)
-            df = df.drop(columns=["_dedup_priority"], errors="ignore")
-            df = df.sort_values("date").reset_index(drop=True)
-            _n_removed = _n_before - len(df)
-            if _n_removed > 0:
-                print(f"Timestamp dedup: removed {_n_removed} duplicate rows (±600s, prefer FIT over TCX)")
+        if _drop:
+            df = df.drop(index=list(_drop)).reset_index(drop=True)
+        df = df.drop(columns=["_dedup_priority"], errors="ignore")
+        df = df.sort_values("date").reset_index(drop=True)
+        _n_removed = _n_before - len(df)
+        if _n_removed > 0:
+            print(f"Timestamp dedup: removed {_n_removed} duplicate rows (±600s + distance match, prefer FIT over TCX)")
 
     # ---------- Weather (Open-Meteo, zero setup) ----------
     # Speed: group runs by rounded location and fetch one hourly block per location (cached on disk).
