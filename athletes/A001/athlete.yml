@@ -85,7 +85,7 @@ power:
   
   # Stryd-specific settings (only used when mode = "stryd")
   stryd:
-    peak_cp_watts: 370    # Peak Critical Power at 100% RFL (tuned to race results, was 372)
+    peak_cp_watts: 368    # Peak Critical Power at 100% RFL (tuned to race results, was 372)
     
     # Era transition dates (hardware changes)
     # Format: era_name: "YYYY-MM-DD"
@@ -114,6 +114,7 @@ power:
   
   # GAP-specific settings (only used when mode = "gap")
   gap:
+    peak_cp_watts: 374  # Auto-updated by StepB bootstrap
     re_constant: 0.92     # Running economy constant (0.92 for avg male, ~0.94 for female)
     # Note: PEAK_CP is bootstrapped from first race result in GAP mode
 

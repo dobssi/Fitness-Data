@@ -3493,8 +3493,8 @@ def main():
 
                 for (lat_r, lon_r, year), idxs in _sb_groups.items():
                     _sb_done += 1
-                    starts = [df_out.at[i, "_wx_start_utc"] for i in idxs if df_out.at[i, "_wx_start_utc"] is not None]
-                    ends = [df_out.at[i, "_wx_end_utc"] for i in idxs if df_out.at[i, "_wx_end_utc"] is not None]
+                    starts = [df_out.at[i, "_wx_start_utc"] for i in idxs if df_out.at[i, "_wx_start_utc"] is not None and not pd.isna(df_out.at[i, "_wx_start_utc"])]
+                    ends = [df_out.at[i, "_wx_end_utc"] for i in idxs if df_out.at[i, "_wx_end_utc"] is not None and not pd.isna(df_out.at[i, "_wx_end_utc"])]
                     if not starts or not ends:
                         continue
                     date_min = (min(starts).normalize() - pd.Timedelta(days=1)).date().isoformat()
@@ -3873,8 +3873,8 @@ def main():
     for (lat_r, lon_r, year), idxs in groups.items():
         done_groups += 1
         # date window for this location+year group (pad 1 day)
-        starts = [df.at[i, "_wx_start_utc"] for i in idxs if df.at[i, "_wx_start_utc"] is not None]
-        ends = [df.at[i, "_wx_end_utc"] for i in idxs if df.at[i, "_wx_end_utc"] is not None]
+        starts = [df.at[i, "_wx_start_utc"] for i in idxs if df.at[i, "_wx_start_utc"] is not None and not pd.isna(df.at[i, "_wx_start_utc"])]
+        ends = [df.at[i, "_wx_end_utc"] for i in idxs if df.at[i, "_wx_end_utc"] is not None and not pd.isna(df.at[i, "_wx_end_utc"])]
         if not starts or not ends:
             continue
         date_min = (min(starts).normalize() - pd.Timedelta(days=1)).date().isoformat()
