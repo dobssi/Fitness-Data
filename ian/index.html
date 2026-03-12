@@ -493,7 +493,7 @@ function raceAnnotations(dates) {
 }catch(e){console.warn('Chart.js not loaded:',e);}
 </script>
     <h1>🏃 Ian Lilley</h1>
-    <div class="dash-sub">Thursday 12 March 2026, 18:26</div>
+    <div class="dash-sub">Thursday 12 March 2026, 19:02</div>
     
     <!-- Phase 2: Mode Toggle -->
     <div class="mode-toggle" style="display:flex;gap:6px;margin:10px 0 8px;align-items:center;display:none;">
@@ -584,14 +584,10 @@ function raceAnnotations(dates) {
             <div class="tip">Change in RFL over the last 14 days. Positive = fitness improving. Negative = fitness declining.</div>
         </div>
         <div class="stat-card ws-tip">
-            <div class="stat-value" id="easy-rf-gap-value"
-                 data-stryd="+4.6%"
-                 data-gap="-0.4%"
-                 data-sim="+6.2%"
-            >-0.4%</div>
-            <div class="stat-label">Easy RF Gap</div>
-            <div class="stat-sub">vs trend</div>
-            <div class="tip">How your easy runs compare to the overall fitness trend. Negative = easy runs feel harder than expected (possible fatigue or illness).</div>
+            <div class="stat-value" id="ag-rfl-value">93.1%</div>
+            <div class="stat-label">AG RFL</div>
+            <div class="stat-sub">vs peak</div>
+            <div class="tip">Age-graded Relative Fitness Level — your current predicted age grade (74.9%) divided by your best ever race age grade (80.44%). 100% = you are at your age-adjusted peak.</div>
         </div>
         <div class="stat-card ws-tip">
             <div class="stat-value" id="ag-value">74.9%</div>
@@ -1246,7 +1242,7 @@ function raceAnnotations(dates) {
     
     
     <div class="footer">
-        Updated: 2026-03-12 18:26<br>
+        Updated: 2026-03-12 19:02<br>
         Data through: 2026-03-12
     </div>
     
@@ -2536,11 +2532,6 @@ function raceAnnotations(dates) {
             rflLabel.textContent = labels[mode];
         }
         
-        // Update Easy RF Gap stat card
-        const easyGapEl = document.getElementById('easy-rf-gap-value');
-        if (easyGapEl) {
-            easyGapEl.textContent = easyGapEl.dataset[mode] || '-';
-        }
         
         // Hide/show power-only elements via body class (CSS handles all hiding)
         const isGap = mode === 'gap';
