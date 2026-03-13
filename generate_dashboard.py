@@ -58,6 +58,13 @@ def load_and_process_data():
     df['date'] = pd.to_datetime(df['date'])
     df = df.sort_values('date').reset_index(drop=True)
     
+    def _last_valid(df, col):
+        """Return last non-NaN value from column, or None."""
+        if col not in df.columns:
+            return None
+        valid = df[col].dropna()
+        return valid.iloc[-1] if len(valid) > 0 else None
+    
     # v53: Read singleton values (AG, CP, PEAK_CP) from the unfiltered last row
     # before auto_exclude filter, since StepB writes these to dfm.index[-1]
     # which may be auto-excluded (e.g. short jog at end of day).
@@ -425,13 +432,6 @@ def get_summary_stats(df):
     
     latest = df.iloc[-1] if len(df) > 0 else None
 
-    def _last_valid(df, col):
-        """Return last non-NaN value from column, or None."""
-        if col not in df.columns:
-            return None
-        valid = df[col].dropna()
-        return valid.iloc[-1] if len(valid) > 0 else None
-    
     # Master uses distance_km, not Distance_m
     dist_col = 'distance_km' if 'distance_km' in df.columns else 'Distance_m'
     hr_col = 'avg_hr' if 'avg_hr' in df.columns else 'Avg_HR'
