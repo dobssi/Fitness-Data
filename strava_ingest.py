@@ -988,7 +988,18 @@ def main():
     # Step 4: Handle GPX/TCX files
     n_gpx_ok = 0
     n_tcx_ok = 0
+    n_skipped_nonrun_gpxtcx = 0
     gpx_summaries = []
+    
+    # Build set of running activity filenames from activities.csv
+    # so we skip cycling, swimming, etc. TCX/GPX files
+    running_filenames = set()
+    if activities_df is not None and 'filename' in activities_df.columns:
+        for fn in activities_df['filename'].dropna():
+            # Normalise: strip path, strip .gz, lowercase for matching
+            basename = os.path.basename(str(fn)).replace('.gz', '').lower()
+            running_filenames.add(basename)
+        print(f"\n  Running activity filenames from CSV: {len(running_filenames)}")
     
     if export['gpx_files'] or export['tcx_files']:
         print(f"\n=== Step 3: Process GPX/TCX files ===")
@@ -997,6 +1008,12 @@ def main():
         os.makedirs(cache_dir, exist_ok=True)
         
         for gpx_path in export['gpx_files']:
+            # Filter: skip non-running if we have activities.csv
+            if running_filenames:
+                basename = os.path.basename(gpx_path).replace('.gz', '').lower()
+                if basename not in running_filenames:
+                    n_skipped_nonrun_gpxtcx += 1
+                    continue
             npz = gpx_to_fit_equivalent_npz(gpx_path, cache_dir)
             if npz:
                 n_gpx_ok += 1
@@ -1007,6 +1024,12 @@ def main():
                         gpx_summaries.append(summary)
         
         for tcx_path in export['tcx_files']:
+            # Filter: skip non-running if we have activities.csv
+            if running_filenames:
+                basename = os.path.basename(tcx_path).replace('.gz', '').lower()
+                if basename not in running_filenames:
+                    n_skipped_nonrun_gpxtcx += 1
+                    continue
             npz = tcx_to_fit_equivalent_npz(tcx_path, cache_dir)
             if npz:
                 n_tcx_ok += 1
@@ -1018,6 +1041,8 @@ def main():
         
         print(f"  GPX: {n_gpx_ok}/{len(export['gpx_files'])} processed successfully")
         print(f"  TCX: {n_tcx_ok}/{len(export['tcx_files'])} processed successfully")
+        if n_skipped_nonrun_gpxtcx:
+            print(f"  Skipped {n_skipped_nonrun_gpxtcx} non-running GPX/TCX files (filtered by activities.csv)")
     
     # Step 5: Create consolidated FIT zip (renamed to YYYY-MM-DD_HH-MM-SS.FIT)
     # Filter to running activities only by reading sport type from each FIT file
