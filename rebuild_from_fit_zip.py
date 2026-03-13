@@ -3716,9 +3716,10 @@ def main():
                         continue
                     if len(_existing_dates) > 0:
                         diffs_s = (_existing_dates - ext_dt).abs().dt.total_seconds()
-                        # Match ±600s around any whole-hour offset (TCX local vs FIT UTC)
+                        # Match ±600s around any whole-hour offset, max ±14h
+                        in_range = diffs_s <= 50400  # 14 hours max
                         nearest_hour = (diffs_s / 3600).round() * 3600
-                        close = (diffs_s - nearest_hour).abs() <= 600
+                        close = in_range & ((diffs_s - nearest_hour).abs() <= 600)
                         if close.any():
                             # Check distance match
                             for j in diffs_s[close].index:
@@ -3797,12 +3798,18 @@ def main():
                 # Cross-source pair (FIT vs TCX/summary)? Timezone offsets possible.
                 # Same-source pair? Only near-identical timestamps are duplicates.
                 _cross_source = (df.iloc[i]["_dedup_priority"] != df.iloc[j]["_dedup_priority"])
-                if _cross_source:
-                    # Check ±600s around any whole-hour offset up to ±12h
-                    # TCX from Strava exports may use local time vs FIT in UTC
+                is_time_match = False
+                if _cross_source and diff_s <= 50400:  # max ±14 hours (UTC-12 to UTC+2)
+                    # Check ±600s around any whole-hour offset
                     nearest_hour = round(diff_s / 3600) * 3600
                     is_time_match = abs(diff_s - nearest_hour) <= 600
-                else:
+                    # Extra guard: must share a calendar date (in UTC or UTC±14)
+                    if is_time_match:
+                        date_i = _dt.iloc[i].date()
+                        date_j = _dt.iloc[j].date()
+                        is_time_match = (date_i == date_j or 
+                                         abs((date_i - date_j).days) <= 1)
+                elif not _cross_source:
                     # Same source — only tight match (Polar 7-min offset etc)
                     is_time_match = diff_s <= 600
                 if is_time_match:

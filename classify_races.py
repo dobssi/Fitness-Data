@@ -375,8 +375,12 @@ def classify_run(name: str, avg_hr: float, lthr: float, max_hr: float,
     #       adjusted prediction → race (two co-signals confirming race effort)
     #    c) HR alone: require base threshold + 4% uplift (high bar, no other evidence)
     #    d) Pace rejection: even with high HR, reject if pace is >5% slower than predicted
-    UNNAMED_HR_UPLIFT = 0.04  # +4% LTHR for HR-only classification (no pace signal)
+    UNNAMED_HR_UPLIFT_BASE = 0.04  # +4% LTHR for HR-only at 5K
     UNNAMED_PACE_RATIO = 1.05  # >5% slower than predicted race pace → not race pace
+    # Scale uplift by distance: longer races need less extra HR evidence
+    # 5K: +4%, 10K: +3.5%, HM: +2.5%, Marathon: +1.5%, 30K+: +1%
+    _dist_uplift_scale = max(0.25, 1.0 - (distance_km - 5.0) / 50.0)  # linear from 1.0 at 5K to 0.25 at 42K+
+    UNNAMED_HR_UPLIFT = UNNAMED_HR_UPLIFT_BASE * _dist_uplift_scale
     
     # Compute pace evidence once
     _has_pace_data = (avg_pace and pred_5k_pace and pred_5k_pace > 0)
