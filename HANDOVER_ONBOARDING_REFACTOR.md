@@ -90,11 +90,26 @@ python onboard_athlete.py --config config.json --dry-run
 ## Pending / not changed
 
 - Johan A007 INITIAL still running (separate from this work)
-- `user_data` folder pattern not implemented this session
-- Existing hand-built workflows unchanged — template only affects new athletes going forward
+- `user_data` pattern deployed to template and script delivered — awaiting first athlete to drop files to test end-to-end on CI
+- Existing hand-built workflows (Ian, Steve, Nadi, Johan) don't have the `merge_user_data` step yet — only new athletes generated from the template get it automatically. To add to existing athletes, insert the step manually or regenerate from template.
+
+---
+
+## Also completed this session
+
+### Ian/Nadi/Steve folder renames
+- `IanLilley/` → `A002/`, `NadiJahangiri/` → `A003/`, `SteveDavies/` → `A004/`
+- Dropbox folders renamed, workflows updated (sed `s|OldName|A00X|g` — 6 lines each)
+- Ian A002 UPDATE validated on CI (full green run, 3,078 rows)
+
+### `user_data` folder pattern
+- New `ci/merge_user_data.py`: downloads `user_data/` from Dropbox, merges FITs into `data/fits.zip` (timestamp dedup), replaces `activities.csv` if larger, appends weight to `athlete_data.csv` (date dedup)
+- Step added to `ci/workflow_template.yml` (both jobs, after Dropbox download)
+- `user_data/fits/` folders created on Dropbox for all active athletes
+- Shared Dropbox links sent to Ian, Steve, Johan, Nadi
 
 ---
 
 ## For Next Claude
 
-"Onboarding refactor complete. `onboard_athlete.py` now uses `ci/workflow_template.yml` (template-based, 10 placeholders, simple string replacement) instead of 520-line inline f-strings. Fixes all 20 gaps vs old generator. Schedule commented out by default. New CLI args `--athlete-id` and `--slug` for re-onboarding. Validated against A005, Johan, and test athlete. See HANDOVER_ONBOARDING_REFACTOR.md."
+"Onboarding refactor complete. `onboard_athlete.py` now uses `ci/workflow_template.yml` (template-based, 10 placeholders, simple string replacement) instead of 520-line inline f-strings. Fixes all 20 gaps vs old generator. Schedule commented out by default. New CLI args `--athlete-id` and `--slug` for re-onboarding. Ian/Nadi/Steve folders renamed to A002/A003/A004 (Dropbox + repo + workflows), Ian validated on CI. New `ci/merge_user_data.py` implements the user_data folder pattern — athletes drop FITs/activities.csv/weight.csv into Dropbox `user_data/` folder, pipeline merges each run. Step added to workflow template. Folders created, Dropbox links shared with all athletes. Awaiting first real test (likely Steve's Zwift FITs). See HANDOVER_ONBOARDING_REFACTOR.md."

@@ -39,9 +39,6 @@ v53 is a mature multi-athlete running analytics pipeline (Stryd/GAP/SIM modes) p
 
 ### High priority
 
-**Ian/Nadi/Steve folder renames**
-`IanLilley/` → `A002/`, `NadiJahangiri/` → `A003/`, `SteveDavies/` → `A004/`. Requires: Dropbox folder move, workflow YAML updates (`ATHLETE_DIR`, `DB_BASE`), GH Pages path updates, cache key updates. Also rename workflow files to match (`a002_pipeline.yml` etc.). Note: Ian/Steve/Nadi INITIAL rebuilds already completed (two-job template, fresh NPZ cache).
-
 **Rename `power_adjuster_to_S4` → `power_era_adjuster`**
 Current name references a specific era (s4) that may not exist for all athletes. Cross-codebase rename: rebuild, StepB, config, detect_eras, master columns. Own session.
 
@@ -138,6 +135,8 @@ Stale subset of `CLAUDE_RUNNING_PROJECT_OVERVIEW.md`. Delete if still present �
 ## Recently completed (2026-03-13)
 
 - **Onboard workflow generation refactor** — Replaced 520-line inline f-string workflow generator with `ci/workflow_template.yml` template file + simple `{{PLACEHOLDER}}` substitution. Template based on proven Paul Test (A005) two-job workflow. Fixes all 20 gaps vs old generator: two-job INITIAL split, `--full` fetch, `--cache-full`, `--weight-oldest`, weather cache dir, classify_races step, safety uploads, correct bash `${EXIT_CODE:-0}`, `gpx_tcx_summaries.csv` support, operator precedence, PYTHONUNBUFFERED, mass from YAML, etc. Schedule commented out by default (enable after validation). Added `--athlete-id` and `--slug` CLI args for re-onboarding existing athletes. Old generator preserved as `_generate_workflow_yml_inline()` fallback.
+- **Ian/Nadi/Steve folder renames** — `IanLilley/` → `A002/`, `NadiJahangiri/` → `A003/`, `SteveDavies/` → `A004/`. Dropbox folders renamed, workflows updated (6 lines each — ATHLETE_DIR + DB_BASE in both jobs), repo `git mv`. Ian A002 UPDATE validated on CI.
+- **`user_data` folder pattern** — New `ci/merge_user_data.py` script. Athletes drop files into `user_data/fits/` (FIT files), `user_data/activities.csv` (Strava re-export), or `user_data/weight.csv` on Dropbox. Pipeline downloads and merges each run: FITs added to `data/fits.zip` (timestamp dedup), activities.csv replaced if larger, weight appended to `athlete_data.csv` (date dedup). Step added to workflow template (both jobs). `user_data/fits/` folders created on Dropbox for all active athletes. Shared Dropbox links sent to Ian, Steve, Johan, Nadi.
 
 ## Recently completed (2026-03-12)
 

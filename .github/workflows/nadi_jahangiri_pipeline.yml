@@ -126,6 +126,14 @@ jobs:
             $CACHE_FLAG
         continue-on-error: true
 
+      - name: Merge user-uploaded data
+        if: ${{ steps.gate.outputs.continue == 'true' && env.PIPELINE_MODE != 'DASHBOARD' && env.PIPELINE_MODE != 'CLASSIFY_RACES' }}
+        run: |
+          python ci/merge_user_data.py \
+            --athlete-dir ${{ env.ATHLETE_DIR }} \
+            --dropbox-base "${{ env.DB_BASE }}"
+        continue-on-error: true
+
       - name: Initial data ingest (INITIAL only)
         if: ${{ env.PIPELINE_MODE == 'INITIAL' }}
         run: |
@@ -190,6 +198,14 @@ jobs:
             --athlete-yml ${{ env.ATHLETE_CONFIG_PATH }} \
             --from-master \
             $SKIP_FLAG
+
+      - name: Merge user-uploaded data
+        if: ${{ env.PIPELINE_MODE != 'DASHBOARD' }}
+        run: |
+          python ci/merge_user_data.py \
+            --athlete-dir ${{ env.ATHLETE_DIR }} \
+            --dropbox-base "${{ env.DB_BASE }}"
+        continue-on-error: true
 
       - name: StepB post-processing (UPDATE / FULL)
         if: ${{ env.PIPELINE_MODE == 'UPDATE' || env.PIPELINE_MODE == 'FULL' }}

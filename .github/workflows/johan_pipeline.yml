@@ -210,6 +210,14 @@ jobs:
             $CACHE_FLAG
         continue-on-error: true
 
+      - name: Merge user-uploaded data
+        if: ${{ steps.gate.outputs.continue == 'true' && env.PIPELINE_MODE != 'DASHBOARD' && env.PIPELINE_MODE != 'CLASSIFY_RACES' }}
+        run: |
+          python ci/merge_user_data.py \
+            --athlete-dir ${{ env.ATHLETE_DIR }} \
+            --dropbox-base "${{ env.DB_BASE }}"
+        continue-on-error: true
+
       - name: Sync athlete data from intervals.icu
         if: ${{ steps.gate.outputs.continue == 'true' && github.event.inputs.sync != 'false' && env.PIPELINE_MODE != 'CLASSIFY_RACES' }}
         run: |
@@ -518,6 +526,14 @@ jobs:
                     output/_weather_cache_openmeteo/openmeteo_cache.sqlite \
             --cache-dir ${{ env.ATHLETE_DIR }}/persec_cache \
             --cache-full
+        continue-on-error: true
+
+      - name: Merge user-uploaded data
+        if: ${{ env.PIPELINE_MODE != 'DASHBOARD' }}
+        run: |
+          python ci/merge_user_data.py \
+            --athlete-dir ${{ env.ATHLETE_DIR }} \
+            --dropbox-base "${{ env.DB_BASE }}"
         continue-on-error: true
 
       - name: Sync athlete data from intervals.icu
