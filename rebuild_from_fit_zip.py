@@ -2846,6 +2846,21 @@ def match_strava(master: pd.DataFrame, act: pd.DataFrame, tz_local: str, pending
     act_type = []  # v53: Strava activity type (for virtual run detection)
     mtype = []
 
+    # Early exit: if strava data has no usable dates, skip matching entirely
+    if len(act) == 0 or (
+        act.get("ActivityDate_utc_assume_utc") is not None and 
+        act["ActivityDate_utc_assume_utc"].notna().sum() == 0
+    ):
+        print(f"Strava: no usable activities — skipping match ({len(act)} rows, 0 valid dates)")
+        out = master.copy()
+        out["strava_match_type"] = "unmatched"
+        out["strava_activity_type"] = None
+        for col in ["strava_activity_id", "strava_distance_km", 
+                     "strava_moving_time_s", "strava_elapsed_time_s",
+                     "strava_elev_gain_m", "strava_elev_loss_m"]:
+            out[col] = np.nan
+        return out
+
     # Precompute numpy arrays for dt to speed up repeated operations
     a_utc = act["ActivityDate_utc_assume_utc"]
     a_loc = act["ActivityDate_utc_assume_local"]

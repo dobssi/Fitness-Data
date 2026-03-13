@@ -165,18 +165,30 @@ def ingest_strava(local_zip: str, data_dir: str, athlete_dir: str, tz: str,
         # Activities.csv: Strava version replaces Polar version (different schemas)
         # Strava CSV has proper activity names; Polar CSV names are mostly empty
         if os.path.isfile(strava_csv):
-            if os.path.isfile(activities_csv):
-                # Back up Polar CSV, replace with Strava
-                polar_backup = activities_csv + ".polar_backup"
-                shutil.copy2(activities_csv, polar_backup)
-                print(f"  ✓ Polar activities.csv backed up to {os.path.basename(polar_backup)}")
-            shutil.copy2(strava_csv, activities_csv)
+            # Sanity check: don't replace with an empty or malformed CSV
+            _replace = True
             try:
                 import pandas as pd
-                _n = len(pd.read_csv(strava_csv, encoding='utf-8', encoding_errors='replace'))
-                print(f"  ✓ activities.csv replaced with Strava version ({_n} entries)")
-            except Exception:
-                print(f"  ✓ activities.csv replaced with Strava version")
+                _new_df = pd.read_csv(strava_csv, encoding='latin-1', nrows=5)
+                if len(_new_df) == 0 or len(_new_df.columns) < 3:
+                    print(f"  ⚠ Strava extract activities.csv is empty/malformed ({len(_new_df)} rows, {len(_new_df.columns)} cols) — keeping existing")
+                    _replace = False
+            except Exception as e:
+                print(f"  ⚠ Cannot read Strava extract activities.csv ({e}) — keeping existing")
+                _replace = False
+            
+            if _replace:
+                if os.path.isfile(activities_csv):
+                    # Back up Polar CSV, replace with Strava
+                    polar_backup = activities_csv + ".polar_backup"
+                    shutil.copy2(activities_csv, polar_backup)
+                    print(f"  ✓ Polar activities.csv backed up to {os.path.basename(polar_backup)}")
+                shutil.copy2(strava_csv, activities_csv)
+                try:
+                    _n = len(pd.read_csv(strava_csv, encoding='latin-1'))
+                    print(f"  ✓ activities.csv replaced with Strava version ({_n} entries)")
+                except Exception:
+                    print(f"  ✓ activities.csv replaced with Strava version")
     else:
         # Primary Strava ingest — just copy outputs
         if os.path.isfile(strava_fits):
