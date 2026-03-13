@@ -359,6 +359,12 @@
             .rs { grid-template-columns: repeat(2, 1fr); }
         }
         
+        /* Upcoming sessions table */
+        .upcoming-rest td { opacity: 0.35; }
+        .upcoming-race td { color: #FFD700; font-weight: 600; }
+        .upcoming-week-total td { border-top: 1px solid rgba(255,255,255,0.08); }
+        .chart-container tbody tr td { padding: 3px 8px; }
+
         /* Legacy chart classes — dark theme */
         .chart-container {
             background: var(--surface);
@@ -493,7 +499,7 @@ function raceAnnotations(dates) {
 }catch(e){console.warn('Chart.js not loaded:',e);}
 </script>
     <h1>🏃 Paul Test</h1>
-    <div class="dash-sub">Friday 13 March 2026, 21:01</div>
+    <div class="dash-sub">Friday 13 March 2026, 21:06</div>
     
     <!-- Phase 2: Mode Toggle -->
     <div class="mode-toggle" style="display:flex;gap:6px;margin:10px 0 8px;align-items:center;display:none;">
@@ -884,7 +890,27 @@ function raceAnnotations(dates) {
             <canvas id="ctlAtlChart"></canvas>
         </div>
     </div>
-    
+
+    <!-- Upcoming Sessions -->
+    <div class="chart-container">
+        <div class="chart-header">
+            <div class="chart-title">📋 Upcoming Sessions</div>
+        </div>
+        <div class="chart-desc">Planned training from uploaded schedule. TSS estimated from session type and duration.</div>
+        <div style="overflow-x:auto">
+        <table style="width:100%;border-collapse:collapse;font-size:0.9em">
+        <thead><tr style="border-bottom:1px solid rgba(255,255,255,0.1)">
+            <th style="text-align:left;padding:4px 8px;opacity:0.6">Date</th>
+            <th style="text-align:left;padding:4px 8px;opacity:0.6">Session</th>
+            <th style="text-align:right;padding:4px 8px;opacity:0.6">TSS</th>
+        </tr></thead>
+        <tbody><tr class="upcoming-race"><td style="white-space:nowrap;opacity:0.7;font-size:0.85em">Sun 15 Mar</td><td>2 sjoar runt</td><td style="text-align:right;opacity:0.7">240</td></tr><tr class="upcoming-week-total"><td colspan="2" style="text-align:right;font-size:0.8em;opacity:0.6">Week total</td><td style="text-align:right;font-size:0.8em;opacity:0.6">240</td></tr></tbody>
+        </table>
+        </div>
+        <div style="margin-top:8px;font-size:0.85em;opacity:0.7">Race: 2 sjoar runt — Sun 15 Mar (2 days)</div>
+        
+    </div>
+
     <!-- Volume Chart -->
     <div class="chart-container">
         <div class="chart-header">
@@ -1274,7 +1300,7 @@ function raceAnnotations(dates) {
     
     
     <div class="footer">
-        Updated: 2026-03-13 21:01<br>
+        Updated: 2026-03-13 21:06<br>
         Data through: 2026-03-13
     </div>
     
