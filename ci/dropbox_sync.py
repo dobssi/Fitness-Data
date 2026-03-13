@@ -519,7 +519,7 @@ def main():
     parser.add_argument("--dropbox-base", default=DROPBOX_BASE,
                         help=f"Dropbox base path (default: {DROPBOX_BASE})")
     parser.add_argument("--local-prefix", default="",
-                        help="Local path prefix for items (e.g. athletes/IanLilley)")
+                        help="Local path prefix for items (e.g. athletes/A002)")
     args = parser.parse_args()
     
     token = get_token()

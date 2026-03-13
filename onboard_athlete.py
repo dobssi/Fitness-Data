@@ -383,7 +383,7 @@ def detect_power_meter(runs: list[dict]) -> dict:
 # ═════════════════════════════════════════════════════════════════════════════
 
 def make_folder_name(name: str) -> str:
-    """Convert 'Ian Lilley' → 'IanLilley'. Legacy — see next_athlete_id()."""
+    """Convert 'Ian Lilley' → 'IanLilley'. Legacy format — now uses numeric IDs (A001+)."""
     return re.sub(r"[^a-zA-Z0-9]", "", name.title().replace(" ", ""))
 
 
