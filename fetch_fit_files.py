@@ -45,7 +45,7 @@ DEFAULT_FIT_DIR = "FIT_downloads"
 DEFAULT_STATE_FILE = "fit_sync_state.json"
 DEFAULT_ZIP_FILE = "TotalHistory.zip"
 FULL_HISTORY_START = "2013-01-01"
-RUNNING_TYPES = {"Run", "VirtualRun"}     # Activity types to download FIT files for
+RUNNING_TYPES = {"run", "virtualrun"}     # Activity types to download FIT files for (lowercase, no spaces)
 
 
 def load_sync_state(path: str) -> dict:
@@ -171,7 +171,7 @@ def fetch_new_fit_files(client: IntervalsClient,
     all_activities = client.get_activities(since, today)
     run_activities = [
         act for act in all_activities
-        if act.get("type") in RUNNING_TYPES
+        if act.get("type", "").replace(" ", "").lower() in RUNNING_TYPES
     ]
     
     print(f"  -> {len(all_activities)} total activities, {len(run_activities)} runs")
@@ -364,7 +364,7 @@ def refresh_activity_names(client, pending_csv: str, days: int = 14):
     
     # Fetch recent activities from intervals.icu
     activities = client.get_activities(since)
-    runs = [a for a in activities if a.get("type") in ("Run", "VirtualRun")]
+    runs = [a for a in activities if a.get("type", "").replace(" ", "").lower() in RUNNING_TYPES]
     print(f"  Found {len(runs)} runs on intervals.icu since {since}")
     
     if not runs:
