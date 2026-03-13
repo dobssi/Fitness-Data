@@ -51,9 +51,9 @@ jobs:
       DROPBOX_REFRESH_TOKEN: ${{ secrets.DROPBOX_REFRESH_TOKEN }}
       DROPBOX_APP_KEY:       ${{ secrets.DROPBOX_APP_KEY }}
       DROPBOX_APP_SECRET:    ${{ secrets.DROPBOX_APP_SECRET }}
-      ATHLETE_DIR:           athletes/NadiJahangiri
-      ATHLETE_CONFIG_PATH:   athletes/NadiJahangiri/athlete.yml
-      DB_BASE:               /Running and Cycling/DataPipeline/athletes/NadiJahangiri
+      ATHLETE_DIR:           athletes/A003
+      ATHLETE_CONFIG_PATH:   athletes/A003/athlete.yml
+      DB_BASE:               /Running and Cycling/DataPipeline/athletes/A003
       TZ_LOCAL:              Europe/London
       PIPELINE_MODE:         ${{ github.event.inputs.mode || 'UPDATE' }}
       PYTHONUNBUFFERED:      1
@@ -329,9 +329,9 @@ jobs:
       DROPBOX_REFRESH_TOKEN: ${{ secrets.DROPBOX_REFRESH_TOKEN }}
       DROPBOX_APP_KEY:       ${{ secrets.DROPBOX_APP_KEY }}
       DROPBOX_APP_SECRET:    ${{ secrets.DROPBOX_APP_SECRET }}
-      ATHLETE_DIR:           athletes/NadiJahangiri
-      ATHLETE_CONFIG_PATH:   athletes/NadiJahangiri/athlete.yml
-      DB_BASE:               /Running and Cycling/DataPipeline/athletes/NadiJahangiri
+      ATHLETE_DIR:           athletes/A003
+      ATHLETE_CONFIG_PATH:   athletes/A003/athlete.yml
+      DB_BASE:               /Running and Cycling/DataPipeline/athletes/A003
       TZ_LOCAL:              Europe/London
       PIPELINE_MODE:         ${{ github.event.inputs.mode || 'FROM_STEPB' }}
       PYTHONUNBUFFERED:      1

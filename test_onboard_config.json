@@ -1,0 +1,20 @@
+{
+  "name": "Mo Farah",
+  "email": "paul.collyer@gmail.com",
+  "dob": "1980-01-01",
+  "gender": "male",
+  "mass_kg": 60,
+  "timezone": "UK",
+  "power_mode": "gap",
+  "max_hr": 170,
+  "lthr": 155,
+  "data_source": "intervals",
+  "intervals_id": "",
+  "intervals_key": "",
+  "hr_zones": null,
+  "planned_races": [],
+  "race_times": [],
+  "athlete_id": "",
+  "folder_name": "",
+  "slug": "Mo"
+}

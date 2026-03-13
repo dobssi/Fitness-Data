@@ -62,9 +62,9 @@ jobs:
       DROPBOX_APP_SECRET:    ${{ secrets.DROPBOX_APP_SECRET }}
       INTERVALS_API_KEY:     ${{ secrets.STEVE_INTERVALS_API_KEY }}
       INTERVALS_ATHLETE_ID:  ${{ secrets.STEVE_INTERVALS_ATHLETE_ID }}
-      ATHLETE_DIR:           athletes/SteveDavies
-      ATHLETE_CONFIG_PATH:   athletes/SteveDavies/athlete.yml
-      DB_BASE:               /Running and Cycling/DataPipeline/athletes/SteveDavies
+      ATHLETE_DIR:           athletes/A004
+      ATHLETE_CONFIG_PATH:   athletes/A004/athlete.yml
+      DB_BASE:               /Running and Cycling/DataPipeline/athletes/A004
       TZ_LOCAL:              Europe/London
       PIPELINE_MODE:         ${{ github.event.inputs.mode || 'UPDATE' }}
       PYTHONUNBUFFERED:      1
@@ -438,9 +438,9 @@ jobs:
       DROPBOX_APP_SECRET:    ${{ secrets.DROPBOX_APP_SECRET }}
       INTERVALS_API_KEY:     ${{ secrets.STEVE_INTERVALS_API_KEY }}
       INTERVALS_ATHLETE_ID:  ${{ secrets.STEVE_INTERVALS_ATHLETE_ID }}
-      ATHLETE_DIR:           athletes/SteveDavies
-      ATHLETE_CONFIG_PATH:   athletes/SteveDavies/athlete.yml
-      DB_BASE:               /Running and Cycling/DataPipeline/athletes/SteveDavies
+      ATHLETE_DIR:           athletes/A004
+      ATHLETE_CONFIG_PATH:   athletes/A004/athlete.yml
+      DB_BASE:               /Running and Cycling/DataPipeline/athletes/A004
       TZ_LOCAL:              Europe/London
       PIPELINE_MODE:         ${{ github.event.inputs.mode || 'FROM_STEPB' }}
       PYTHONUNBUFFERED:      1

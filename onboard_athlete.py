@@ -569,12 +569,94 @@ pipeline:
 
 
 def generate_workflow_yml(cfg: dict) -> str:
-    """Generate GitHub Actions workflow YAML."""
+    """Generate GitHub Actions workflow YAML from template.
     
+    Uses ci/workflow_template.yml with {{PLACEHOLDER}} substitution.
+    The template is the proven two-job workflow (rebuild + stepb_deploy)
+    with all features: INITIAL/FULL/UPDATE/FROM_STEPB/DASHBOARD/CLASSIFY_RACES,
+    safety uploads, classify_races, gpx_tcx_summaries support, etc.
+    
+    Falls back to the template bundled alongside this script if ci/ not found.
+    """
     name = cfg["name"]
     folder = cfg["folder_name"]
     slug = cfg["slug"]
-    aid = cfg.get("athlete_id", "A000")  # v53: for Master filename
+    aid = cfg.get("athlete_id", "A000")
+    dob = cfg["dob"]
+    gender = cfg["gender"]
+    tz = cfg.get("timezone", "Europe/London")
+    source = cfg.get("data_source", "fit_folder")
+    
+    secret_prefix = slug.upper()
+    
+    # Resolve template path — try relative to this script first, then cwd
+    script_dir = Path(__file__).resolve().parent
+    template_candidates = [
+        script_dir / "ci" / "workflow_template.yml",
+        Path("ci") / "workflow_template.yml",
+        script_dir / "workflow_template.yml",
+    ]
+    
+    template_path = None
+    for candidate in template_candidates:
+        if candidate.is_file():
+            template_path = candidate
+            break
+    
+    if template_path is None:
+        print(f"  ⚠ Template not found. Searched:")
+        for c in template_candidates:
+            print(f"    {c}")
+        print(f"  Falling back to inline generation (DEPRECATED — template is recommended)")
+        return _generate_workflow_yml_inline(cfg)
+    
+    with open(template_path, encoding="utf-8") as f:
+        template = f.read()
+    
+    # Default cron: 8x/day for intervals.icu athletes, commented out for fit_folder
+    if source == "intervals":
+        cron = "0 9,11,13,15,17,19,21,23 * * *"
+    else:
+        cron = "0 9,11,13,15,17,19,21,23 * * *"  # Same schedule, athlete can disable
+    
+    # Pages slug — use the workflow slug (first name, lowercase)
+    pages_slug = slug
+    
+    replacements = {
+        "{{ATHLETE_NAME}}":   name,
+        "{{ATHLETE_SLUG}}":   slug,
+        "{{ATHLETE_ID}}":     aid,
+        "{{ATHLETE_FOLDER}}": folder,
+        "{{PAGES_SLUG}}":     pages_slug,
+        "{{DOB}}":            dob,
+        "{{GENDER}}":         gender,
+        "{{TIMEZONE}}":       tz,
+        "{{SECRET_PREFIX}}":  secret_prefix,
+        "{{CRON_SCHEDULE}}":  cron,
+    }
+    
+    result = template
+    for placeholder, value in replacements.items():
+        result = result.replace(placeholder, str(value))
+    
+    # Verify no unresolved placeholders remain
+    remaining = re.findall(r'\{\{[A-Z_]+\}\}', result)
+    if remaining:
+        print(f"  ⚠ Unresolved template placeholders: {set(remaining)}")
+    
+    return result
+
+
+def _generate_workflow_yml_inline(cfg: dict) -> str:
+    """DEPRECATED fallback — inline workflow generation.
+    
+    Only used if ci/workflow_template.yml is not found.
+    This is the old v53 inline f-string generator, kept as safety net.
+    """
+    name = cfg["name"]
+    folder = cfg["folder_name"]
+    slug = cfg["slug"]
+    aid = cfg.get("athlete_id", "A000")
     mode = cfg.get("power_mode", "gap")
     mass = cfg["mass_kg"]
     dob = cfg["dob"]
@@ -1235,6 +1317,8 @@ def main():
     parser.add_argument("--config", help="JSON config file (skip interactive)")
     parser.add_argument("--scan-fits", help="Path to FIT files to scan (folder or .zip)")
     parser.add_argument("--output-dir", default=".", help="Base directory for output")
+    parser.add_argument("--athlete-id", help="Override athlete ID (e.g. A007). Default: auto-increment.")
+    parser.add_argument("--slug", help="Override slug for workflow/pages (e.g. johan). Default: derived from name.")
     parser.add_argument("--dry-run", action="store_true", help="Print what would be created")
     args = parser.parse_args()
     
@@ -1299,10 +1383,18 @@ def main():
         cfg["fit_scan_path"] = args.scan_fits
     
     # Derived names — use athlete ID for folder, slug (first name) for workflow/pages
-    athlete_id = next_athlete_id(args.output_dir)
+    if args.athlete_id:
+        athlete_id = args.athlete_id
+        print(f"  Using specified athlete ID: {athlete_id}")
+    else:
+        athlete_id = next_athlete_id(args.output_dir)
     cfg["athlete_id"] = athlete_id
     cfg["folder_name"] = athlete_id  # e.g. A005
-    cfg["slug"] = make_slug(cfg["name"])  # e.g. ian (for workflow file, pages path, cache keys)
+    if args.slug:
+        cfg["slug"] = args.slug
+        print(f"  Using specified slug: {args.slug}")
+    else:
+        cfg["slug"] = make_slug(cfg["name"])  # e.g. ian (for workflow file, pages path, cache keys)
     
     base = Path(args.output_dir)
     athlete_dir = base / "athletes" / cfg["folder_name"]
