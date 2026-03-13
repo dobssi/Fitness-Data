@@ -2744,7 +2744,10 @@ def load_strava(activities_csv: str, tz_local: str) -> pd.DataFrame:
 
     This makes matching robust to differing Strava export behaviors across years.
     """
-    act = pd.read_csv(activities_csv, encoding='latin-1')
+    try:
+        act = pd.read_csv(activities_csv, encoding='utf-8')
+    except UnicodeDecodeError:
+        act = pd.read_csv(activities_csv, encoding='latin-1')
 
     # Build case-insensitive column lookup (handles both original Strava and normalised formats)
     _col_lookup = {}

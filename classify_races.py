@@ -340,9 +340,13 @@ def classify_run(name: str, avg_hr: float, lthr: float, max_hr: float,
         else:
             return ('training', 'medium', f'Race keyword but HR {hr_pct*100:.0f}%LTHR below race threshold')
     
-    # 3. Anti-keyword only → training (regardless of HR — sessions can have high HR)
+    # 3. Anti-keyword only → training IF HR is below threshold
+    #    If HR is above race threshold despite anti-keyword, fall through to
+    #    step 5 where HR + pace/distance can classify it (e.g. "Tempo 42km" at
+    #    race HR is a marathon, not a tempo run)
     if has_anti_kw and not has_race_kw and not has_race_name:
-        return ('training', 'high', f'Training keyword: "{_first_match(ANTI_KEYWORDS, name)}", HR {hr_pct*100:.0f}%LTHR')
+        if hr_pct < min_hr:
+            return ('training', 'high', f'Training keyword: "{_first_match(ANTI_KEYWORDS, name)}", HR {hr_pct*100:.0f}%LTHR')
     
     # 4. Both race + anti keywords → check context
     if has_race_kw and has_anti_kw:

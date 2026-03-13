@@ -500,7 +500,10 @@ def load_strava_activities(csv_path: str) -> pd.DataFrame:
         distance_km, moving_time_s, elapsed_time_s, elev_gain_m,
         is_race, workout_type
     """
-    df = pd.read_csv(csv_path, encoding='latin-1')
+    try:
+        df = pd.read_csv(csv_path, encoding='utf-8')
+    except UnicodeDecodeError:
+        df = pd.read_csv(csv_path, encoding='latin-1')
     
     # Normalise column names (Strava format varies slightly across exports)
     col_map = {}
@@ -623,8 +626,10 @@ def extract_strava_export(zip_path: str, work_dir: str) -> dict:
             name = info.filename
             name_lower = name.lower()
             
-            # Skip directories and non-relevant files
+            # Skip directories, Mac resource forks, and non-relevant files
             if info.is_dir():
+                continue
+            if name.startswith('__MACOSX') or os.path.basename(name).startswith('._'):
                 continue
             
             # activities.csv

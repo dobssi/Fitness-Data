@@ -46,7 +46,7 @@ power:
   mode: "gap"
 
   stryd:
-    peak_cp_watts: 412
+    peak_cp_watts: 410
     eras: {}
     mass_corrections: []
     re_reference_era: "s4"

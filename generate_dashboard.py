@@ -6449,7 +6449,27 @@ function raceAnnotations(dates) {{
         }}
         
         if (predCtx && predData && predData['5k'] && predData['5k'].dates.length > 0) {{
-            renderPredChart('5k', showParkruns);
+            // Grey out distance tabs with no races
+            document.querySelectorAll('#predToggle button[data-dist]').forEach(btn => {{
+                const dist = btn.dataset.dist;
+                const d = predData[dist];
+                if (!d || !d.dates || d.dates.length === 0) {{
+                    btn.style.opacity = '0.3';
+                    btn.style.pointerEvents = 'none';
+                    btn.title = 'No races at this distance';
+                }}
+            }});
+            // Auto-select first distance with races
+            let initDist = '5k';
+            for (const dist of ['5k', '10k', 'hm', 'marathon']) {{
+                const d = predData[dist];
+                if (d && d.dates && d.dates.length > 0) {{ initDist = dist; break; }}
+            }}
+            document.querySelectorAll('#predToggle button').forEach(b => b.classList.remove('active'));
+            const initBtn = document.querySelector(`#predToggle button[data-dist="${{initDist}}"]`);
+            if (initBtn) initBtn.classList.add('active');
+            currentPredDist = initDist;
+            renderPredChart(initDist, showParkruns);
             
             document.getElementById('predToggle').addEventListener('click', function(e) {{
                 if (e.target.tagName === 'BUTTON') {{
@@ -7044,7 +7064,7 @@ def main():
         if len(_race_ags) > 0:
             _best_race_ag = round(float(_race_ags.max()), 2)
     
-    _ag_rfl = round(_current_ag / _best_race_ag * 100, 1) if _current_ag and _best_race_ag and _best_race_ag > 0 else None
+    _ag_rfl = min(round(_current_ag / _best_race_ag * 100, 1), 100.0) if _current_ag and _best_race_ag and _best_race_ag > 0 else None
     stats['ag_rfl'] = _ag_rfl
     stats['best_race_ag'] = _best_race_ag
     stats['current_pred_ag'] = round(_current_ag, 1) if _current_ag else None
