@@ -3715,11 +3715,13 @@ def main():
                     if pd.isna(ext_dt):
                         continue
                     if len(_existing_dates) > 0:
-                        diffs = (_existing_dates - ext_dt).abs()
-                        close = diffs <= pd.Timedelta(seconds=600)
+                        diffs_s = (_existing_dates - ext_dt).abs().dt.total_seconds()
+                        # Match ±600s around any whole-hour offset (TCX local vs FIT UTC)
+                        nearest_hour = (diffs_s / 3600).round() * 3600
+                        close = (diffs_s - nearest_hour).abs() <= 600
                         if close.any():
                             # Check distance match
-                            for j in diffs[close].index:
+                            for j in diffs_s[close].index:
                                 d_j = _existing_dist.at[j]
                                 if ext_d > 0 and d_j > 0:
                                     ratio = max(ext_d, d_j) / min(ext_d, d_j)
@@ -3792,7 +3794,18 @@ def main():
                 if pd.isna(_dt.iloc[j]):
                     continue
                 diff_s = abs((_dt.iloc[i] - _dt.iloc[j]).total_seconds())
-                if diff_s <= 600:
+                # Cross-source pair (FIT vs TCX/summary)? Timezone offsets possible.
+                # Same-source pair? Only near-identical timestamps are duplicates.
+                _cross_source = (df.iloc[i]["_dedup_priority"] != df.iloc[j]["_dedup_priority"])
+                if _cross_source:
+                    # Check ±600s around any whole-hour offset up to ±12h
+                    # TCX from Strava exports may use local time vs FIT in UTC
+                    nearest_hour = round(diff_s / 3600) * 3600
+                    is_time_match = abs(diff_s - nearest_hour) <= 600
+                else:
+                    # Same source — only tight match (Polar 7-min offset etc)
+                    is_time_match = diff_s <= 600
+                if is_time_match:
                     # Confirm: distance within 10% or both < 1km
                     d_i, d_j = _dist.iloc[i], _dist.iloc[j]
                     if d_i > 0 and d_j > 0:
@@ -3812,7 +3825,7 @@ def main():
         df = df.sort_values("date").reset_index(drop=True)
         _n_removed = _n_before - len(df)
         if _n_removed > 0:
-            print(f"Timestamp dedup: removed {_n_removed} duplicate rows (±600s + distance match, prefer FIT over TCX)")
+            print(f"Timestamp dedup: removed {_n_removed} duplicate rows (±600s around 0/1/2h offset + distance match, prefer FIT over TCX)")
 
     # ---------- Weather (Open-Meteo, zero setup) ----------
     # Speed: group runs by rounded location and fetch one hourly block per location (cached on disk).
