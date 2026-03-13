@@ -235,7 +235,11 @@ jobs:
               --output ${{ env.ATHLETE_DIR }}/planned_sessions.yml \
               $MASTER_FLAG
           else
-            echo "No training plan PDF in user_data/ — skipping"
+            echo "No training plan PDF in user_data/"
+            if [ -f "${{ env.ATHLETE_DIR }}/planned_sessions.yml" ]; then
+              echo "Removing stale planned_sessions.yml"
+              rm -f ${{ env.ATHLETE_DIR }}/planned_sessions.yml
+            fi
           fi
         continue-on-error: true
 
@@ -580,7 +584,11 @@ jobs:
               --output ${{ env.ATHLETE_DIR }}/planned_sessions.yml \
               $MASTER_FLAG
           else
-            echo "No training plan PDF in user_data/ — skipping"
+            echo "No training plan PDF in user_data/"
+            if [ -f "${{ env.ATHLETE_DIR }}/planned_sessions.yml" ]; then
+              echo "Removing stale planned_sessions.yml"
+              rm -f ${{ env.ATHLETE_DIR }}/planned_sessions.yml
+            fi
           fi
         continue-on-error: true
 
