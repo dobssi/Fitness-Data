@@ -419,6 +419,60 @@ def _calc_rfl_delta(df, days_back=14, mode='stryd'):
     return round(delta, 1)
 
 
+def get_upcoming_sessions(master_file):
+    """Extract upcoming planned sessions from the Daily sheet.
+
+    Returns list of dicts: [{date_str, day_name, description, tss, source, is_race}, ...]
+    Only includes future dates with planned sessions. If today already has an
+    actual activity, starts from tomorrow.
+    """
+    try:
+        df = pd.read_excel(master_file, sheet_name=1)  # Daily sheet
+        df['Date'] = pd.to_datetime(df['Date'])
+        if 'Planned_Description' not in df.columns or 'Planned_Source' not in df.columns:
+            return []
+
+        today = pd.Timestamp(datetime.now().date())
+
+        # Check if today already has an actual run (non-planned TSS)
+        today_row = df[df['Date'] == today]
+        has_actual_today = False
+        if len(today_row) > 0:
+            row = today_row.iloc[0]
+            src = str(row.get('Planned_Source', ''))
+            has_actual_today = row.get('TSS_Running', 0) > 0 and src in ('', 'nan')
+
+        start_date = today + timedelta(days=1) if has_actual_today else today
+
+        # Filter to future planned sessions
+        future = df[
+            (df['Date'] >= start_date) &
+            (df['Planned_Description'].notna()) &
+            (df['Planned_Description'] != '') &
+            (df['Planned_Description'] != 'nan')
+        ].sort_values('Date')
+
+        if len(future) == 0:
+            return []
+
+        sessions = []
+        for _, row in future.iterrows():
+            dt = row['Date']
+            sessions.append({
+                'date_str': dt.strftime('%a %d %b'),
+                'date_iso': dt.strftime('%Y-%m-%d'),
+                'description': str(row['Planned_Description']),
+                'tss': round(row.get('TSS_Running', 0)),
+                'source': str(row.get('Planned_Source', '')),
+                'is_race': str(row.get('Planned_Source', '')) == 'race',
+            })
+
+        return sessions
+    except Exception as e:
+        print(f"  Warning: could not load upcoming sessions: {e}")
+        return []
+
+
 def get_summary_stats(df):
     """Calculate summary statistics."""
     now = datetime.now()
@@ -4440,7 +4494,97 @@ def _generate_alert_banner(alert_data, critical_power=None):
     # The initial call uses the fallback CP value.
 
 
-def generate_html(stats, rf_data, volume_data, ctl_atl_data, ctl_atl_lookup, rfl_trend_dates, rfl_trend_values, rfl_trendline, rfl_projection, rfl_ci_upper, rfl_ci_lower, alltime_rfl_dates, alltime_rfl_values, recent_runs, top_races, alert_data=None, weight_data=None, prediction_data=None, ag_data=None, zone_data=None, rfl_trend_gap=None, rfl_trend_sim=None, milestone_data=None, race_history_data=None):
+def _build_upcoming_sessions_html(sessions):
+    """Build HTML for the Upcoming Sessions card. Returns empty string if no sessions."""
+    if not sessions:
+        return ''
+
+    # Group by week (ISO week) to show weekly TSS totals
+    from collections import OrderedDict
+    weeks = OrderedDict()
+    for s in sessions:
+        # Get ISO week from date
+        dt = datetime.strptime(s['date_iso'], '%Y-%m-%d')
+        week_key = dt.strftime('%Y-W%V')
+        if week_key not in weeks:
+            weeks[week_key] = {'sessions': [], 'tss': 0}
+        weeks[week_key]['sessions'].append(s)
+        weeks[week_key]['tss'] += s['tss']
+
+    # Build rows
+    rows = []
+    current_week = None
+    for s in sessions:
+        dt = datetime.strptime(s['date_iso'], '%Y-%m-%d')
+        week_key = dt.strftime('%Y-W%V')
+
+        # Week separator
+        if week_key != current_week:
+            if current_week is not None:
+                # Close previous week with total
+                prev_tss = weeks[current_week]['tss']
+                rows.append(f'<tr class="upcoming-week-total"><td colspan="2" style="text-align:right;font-size:0.8em;opacity:0.6">Week total</td><td style="text-align:right;font-size:0.8em;opacity:0.6">{prev_tss}</td></tr>')
+            current_week = week_key
+
+        # Session row
+        is_rest = s['tss'] == 0
+        is_race = s.get('is_race', False)
+        row_class = 'upcoming-race' if is_race else ('upcoming-rest' if is_rest else '')
+        tss_str = str(s['tss']) if s['tss'] > 0 else ''
+        desc = s['description']
+        if len(desc) > 55:
+            desc = desc[:52] + '...'
+
+        rows.append(
+            f'<tr class="{row_class}">'
+            f'<td style="white-space:nowrap;opacity:0.7;font-size:0.85em">{s["date_str"]}</td>'
+            f'<td>{desc}</td>'
+            f'<td style="text-align:right;opacity:0.7">{tss_str}</td>'
+            f'</tr>'
+        )
+
+    # Final week total
+    if current_week:
+        final_tss = weeks[current_week]['tss']
+        rows.append(f'<tr class="upcoming-week-total"><td colspan="2" style="text-align:right;font-size:0.8em;opacity:0.6">Week total</td><td style="text-align:right;font-size:0.8em;opacity:0.6">{final_tss}</td></tr>')
+
+    # Race countdown
+    race_sessions = [s for s in sessions if s.get('is_race')]
+    race_line = ''
+    if race_sessions:
+        r = race_sessions[0]
+        days_to = (datetime.strptime(r['date_iso'], '%Y-%m-%d') - datetime.now()).days + 1
+        race_line = f'<div style="margin-top:8px;font-size:0.85em;opacity:0.7">Race: {r["description"]} — {r["date_str"]} ({days_to} days)</div>'
+
+    # Weekly TSS taper summary
+    week_tss_parts = []
+    for wk, wdata in weeks.items():
+        week_tss_parts.append(str(wdata['tss']))
+    taper_line = ''
+    if len(week_tss_parts) > 1:
+        taper_line = f'<div style="font-size:0.85em;opacity:0.7">Weekly TSS: {" → ".join(week_tss_parts)}</div>'
+
+    return f'''<div class="chart-container">
+        <div class="chart-header">
+            <div class="chart-title">📋 Upcoming Sessions</div>
+        </div>
+        <div class="chart-desc">Planned training from uploaded schedule. TSS estimated from session type and duration.</div>
+        <div style="overflow-x:auto">
+        <table style="width:100%;border-collapse:collapse;font-size:0.9em">
+        <thead><tr style="border-bottom:1px solid rgba(255,255,255,0.1)">
+            <th style="text-align:left;padding:4px 8px;opacity:0.6">Date</th>
+            <th style="text-align:left;padding:4px 8px;opacity:0.6">Session</th>
+            <th style="text-align:right;padding:4px 8px;opacity:0.6">TSS</th>
+        </tr></thead>
+        <tbody>{"".join(rows)}</tbody>
+        </table>
+        </div>
+        {race_line}
+        {taper_line}
+    </div>'''
+
+
+def generate_html(stats, rf_data, volume_data, ctl_atl_data, ctl_atl_lookup, rfl_trend_dates, rfl_trend_values, rfl_trendline, rfl_projection, rfl_ci_upper, rfl_ci_lower, alltime_rfl_dates, alltime_rfl_values, recent_runs, top_races, alert_data=None, weight_data=None, prediction_data=None, ag_data=None, zone_data=None, rfl_trend_gap=None, rfl_trend_sim=None, milestone_data=None, race_history_data=None, upcoming_sessions=None):
     """Generate the HTML dashboard."""
     
     # --- Helper for None-safe delta formatting ---
@@ -4952,6 +5096,12 @@ def generate_html(stats, rf_data, volume_data, ctl_atl_data, ctl_atl_lookup, rfl
             .rs {{ grid-template-columns: repeat(2, 1fr); }}
         }}
         
+        /* Upcoming sessions table */
+        .upcoming-rest td {{ opacity: 0.35; }}
+        .upcoming-race td {{ color: #FFD700; font-weight: 600; }}
+        .upcoming-week-total td {{ border-top: 1px solid rgba(255,255,255,0.08); }}
+        .chart-container tbody tr td {{ padding: 3px 8px; }}
+
         /* Legacy chart classes — dark theme */
         .chart-container {{
             background: var(--surface);
@@ -5275,7 +5425,10 @@ function raceAnnotations(dates) {{
             <canvas id="ctlAtlChart"></canvas>
         </div>
     </div>
-    
+
+    <!-- Upcoming Sessions -->
+    {_build_upcoming_sessions_html(upcoming_sessions)}
+
     <!-- Volume Chart -->
     <div class="chart-container">
         <div class="chart-header">
@@ -7172,13 +7325,19 @@ def main():
     n_ra = len(milestone_data.get('recent_achievements', []))
     print(f"  {n_ms} milestones, {n_ra} recent achievements")
     
+    # Upcoming sessions from planned_sessions.yml (via Daily sheet)
+    print("Loading upcoming sessions...")
+    upcoming_sessions = get_upcoming_sessions(MASTER_FILE)
+    if upcoming_sessions:
+        print(f"  {len(upcoming_sessions)} upcoming planned sessions")
+
     # Race History data
     print("Computing race history...")
     race_history_data = get_race_history_data(df, ctl_atl_lookup, zone_data=zone_data)
     
     # Generate HTML
     print("Generating HTML...")
-    html = generate_html(stats, rf_data, volume_data, ctl_atl_data, ctl_atl_lookup, rfl_trend_dates, rfl_trend_values, rfl_trendline, rfl_projection, rfl_ci_upper, rfl_ci_lower, alltime_rfl_dates, alltime_rfl_values, recent_runs, top_races, alert_data=alert_data, weight_data=weight_data, prediction_data=prediction_data, ag_data=ag_data, zone_data=zone_data, rfl_trend_gap={'values': rfl_trend_gap_values, 'trendline': rfl_trendline_gap, 'projection': rfl_proj_gap, 'ci_upper': rfl_ci_upper_gap, 'ci_lower': rfl_ci_lower_gap}, rfl_trend_sim={'values': rfl_trend_sim_values, 'trendline': rfl_trendline_sim, 'projection': rfl_proj_sim, 'ci_upper': rfl_ci_upper_sim, 'ci_lower': rfl_ci_lower_sim}, milestone_data=milestone_data, race_history_data=race_history_data)
+    html = generate_html(stats, rf_data, volume_data, ctl_atl_data, ctl_atl_lookup, rfl_trend_dates, rfl_trend_values, rfl_trendline, rfl_projection, rfl_ci_upper, rfl_ci_lower, alltime_rfl_dates, alltime_rfl_values, recent_runs, top_races, alert_data=alert_data, weight_data=weight_data, prediction_data=prediction_data, ag_data=ag_data, zone_data=zone_data, rfl_trend_gap={'values': rfl_trend_gap_values, 'trendline': rfl_trendline_gap, 'projection': rfl_proj_gap, 'ci_upper': rfl_ci_upper_gap, 'ci_lower': rfl_ci_lower_gap}, rfl_trend_sim={'values': rfl_trend_sim_values, 'trendline': rfl_trendline_sim, 'projection': rfl_proj_sim, 'ci_upper': rfl_ci_upper_sim, 'ci_lower': rfl_ci_lower_sim}, milestone_data=milestone_data, race_history_data=race_history_data, upcoming_sessions=upcoming_sessions)
     
     # Write file
     with open(OUTPUT_FILE, 'w', encoding='utf-8') as f:
