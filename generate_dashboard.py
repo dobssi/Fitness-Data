@@ -235,6 +235,21 @@ def load_and_process_data():
             if pd.isna(pred_hm): pred_hm = latest.get(f'pred_hm_s{_sfx}')
             if pd.isna(pred_mara): pred_mara = latest.get(f'pred_marathon_s{_sfx}')
         
+        # If still NaN (latest row has no predictions because previous row had NaN RFL,
+        # e.g. a very short jog), fall back to last valid prediction in the Master.
+        if pd.isna(pred_5k):
+            _col = f'pred_5k_s_{_cfg_power_mode}' if _cfg_power_mode in ('gap', 'sim') else 'pred_5k_s'
+            pred_5k = _last_valid(df, _col)
+        if pd.isna(pred_10k):
+            _col = f'pred_10k_s_{_cfg_power_mode}' if _cfg_power_mode in ('gap', 'sim') else 'pred_10k_s'
+            pred_10k = _last_valid(df, _col)
+        if pd.isna(pred_hm):
+            _col = f'pred_hm_s_{_cfg_power_mode}' if _cfg_power_mode in ('gap', 'sim') else 'pred_hm_s'
+            pred_hm = _last_valid(df, _col)
+        if pd.isna(pred_mara):
+            _col = f'pred_marathon_s_{_cfg_power_mode}' if _cfg_power_mode in ('gap', 'sim') else 'pred_marathon_s'
+            pred_mara = _last_valid(df, _col)
+        
         if pd.notna(pred_5k):
             race_predictions['5k'] = format_seconds(pred_5k)
             race_predictions['5k_raw'] = int(pred_5k)
@@ -259,13 +274,18 @@ def load_and_process_data():
                                        ('Half Marathon', f'pred_hm_s_{mode}', 'hm_raw'),
                                        ('Marathon', f'pred_marathon_s_{mode}', 'marathon_raw')]:
                 val = latest.get(col)
-                if pd.notna(val):
+                # Fall back to last valid if latest row is NaN
+                if pd.isna(val):
+                    val = _last_valid(df, col)
+                if val is not None and pd.notna(val):
                     mode_preds[dist] = format_seconds(val)
                     mode_preds[raw_key] = int(val)
             race_predictions[f'_mode_{mode}'] = mode_preds
             
             cp_mode = latest.get(f'CP_{mode}')
-            race_predictions[f'_cp_{mode}'] = int(round(float(cp_mode))) if pd.notna(cp_mode) else None
+            if pd.isna(cp_mode):
+                cp_mode = _last_valid(df, f'CP_{mode}')
+            race_predictions[f'_cp_{mode}'] = int(round(float(cp_mode))) if cp_mode is not None and pd.notna(cp_mode) else None
             
             peak_cp_mode = latest.get(f'effective_peak_cp_{mode}')
             race_predictions[f'_peak_cp_{mode}'] = int(round(float(peak_cp_mode))) if pd.notna(peak_cp_mode) else None
