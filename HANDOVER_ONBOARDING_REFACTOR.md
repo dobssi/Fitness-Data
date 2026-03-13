@@ -1,11 +1,11 @@
-# Handover: Onboarding Workflow Refactor
+# Handover: Onboarding Refactor + user_data + Fixes
 ## Date: 2026-03-13
 
 ---
 
 ## Summary
 
-Replaced the broken inline f-string workflow generator in `onboard_athlete.py` with a template-based approach using `ci/workflow_template.yml`. The template is based on the proven Paul Test (A005) two-job workflow and fixes all 20 known gaps in the old generator.
+Major infrastructure session: onboarding workflow refactored to template-based generation, folder renames completed, user_data pattern implemented, classify_races fixes for Swedish keywords and marathon HR logic, strava_ingest fix for non-running TCX leak, dashboard prediction fallback fix. All changes validated on CI.
 
 ---
 
@@ -13,103 +13,48 @@ Replaced the broken inline f-string workflow generator in `onboard_athlete.py` w
 
 | File | Status | Changes |
 |------|--------|---------|
-| `ci/workflow_template.yml` | **NEW** | 635-line workflow template with `{{PLACEHOLDER}}` substitution. Based on A005 two-job workflow + Johan's gpx_tcx_summaries additions. Schedule commented out by default. |
-| `onboard_athlete.py` | **Modified** | `generate_workflow_yml()` now loads template + does string replacement. Old generator preserved as `_generate_workflow_yml_inline()` fallback. Added `--athlete-id` and `--slug` CLI args for re-onboarding. |
-| `TODO.md` | **Modified** | Onboard refactor moved from active to completed. |
+| `ci/workflow_template.yml` | **NEW** | 651-line workflow template with `{{PLACEHOLDER}}` substitution. Two-job structure, all 20 features. Schedule commented out by default. |
+| `ci/merge_user_data.py` | **NEW** | Downloads `user_data/` from Dropbox, merges FITs into fits.zip (timestamp dedup), activities.csv (replace if larger), weight.csv (append to athlete_data.csv, date dedup). |
+| `onboard_athlete.py` | **Modified** | Template-based workflow generation. Added `--athlete-id` and `--slug` CLI args. Old generator preserved as fallback. |
+| `classify_races.py` | **Modified** | Added `maraton` (Swedish) to RACE_KEYWORDS, RACE_NAME_OVERRIDES, NON_PARKRUN_RACE_KW. Fixed Path B: sustained HR at 20km+ or 4%+ above threshold overrides pace rejection — marathon at 92% LTHR is always a race. |
+| `strava_ingest.py` | **Modified** | TCX/GPX processing now filters by activities.csv running filenames. Non-running activities (cycling, swimming etc.) excluded from gpx_tcx_summaries.csv. |
+| `generate_dashboard.py` | **Modified** | `_last_valid()` moved to module level. Prediction headline stats and mode toggle fall back to last valid value when latest row has NaN (caused by short jog preceding it). |
+| `TODO.md` | **Modified** | Onboard refactor + folder renames + user_data completed. Workout planner feature expanded with Option 2 (LLM PDF import) and Option 3 (parameter-driven). |
+| `.github/workflows/*.yml` (x6) | **Modified** | Ian/Steve/Nadi: folder renames (IanLilley to A002, SteveDavies to A004, NadiJahangiri to A003). All 6 workflows: merge_user_data step added to both jobs. |
 
 ---
 
-## What the template fixes (all 20 gaps vs old generator)
+## Validation Results
 
-1. Two-job split (rebuild + stepb_deploy) with fresh 6h clock for INITIAL
-2. `--full` fetch on INITIAL to get all intervals.icu FITs
-3. `--cache-full` on Dropbox download
-4. `--weight-oldest` on sync_athlete_data
-5. Weather cache dir mkdir
-6. classify_races.py step with `--skip-if-classified`
-7. Safety upload (always runs, weather cache + Master)
-8. Correct bash `${EXIT_CODE:-0}` (not double-braced `${{EXIT_CODE:-0}}`)
-9. `gpx_tcx_summaries.csv` in download + rebuild + upload
-10. Proper operator precedence in all `if` conditions
-11. `PYTHONUNBUFFERED: 1`
-12. Mass extracted from YAML at runtime (not hardcoded)
-13. Mode output exposed for job2 conditions
-14. INITIAL skips persec cache restore
-15. INITIAL does full persec cache upload
-16. Re-classify races with predictions (stepb_deploy job2)
-17. StepB second pass after re-classify
-18. Strava flag conditional on file existence
-19. Reset sync state on manual dispatch
-20. Upload fits.zip on INITIAL/FULL too
-
-## Template placeholders
-
-| Placeholder | Example | Source |
-|-------------|---------|--------|
-| `{{ATHLETE_NAME}}` | Johan | `cfg["name"]` |
-| `{{ATHLETE_SLUG}}` | johan | `make_slug(name)` or `--slug` |
-| `{{ATHLETE_ID}}` | A007 | `next_athlete_id()` or `--athlete-id` |
-| `{{ATHLETE_FOLDER}}` | A007 | Same as athlete_id |
-| `{{PAGES_SLUG}}` | johan | Same as slug |
-| `{{DOB}}` | 1975-07-14 | `cfg["dob"]` |
-| `{{GENDER}}` | male | `cfg["gender"]` |
-| `{{TIMEZONE}}` | Europe/Stockholm | `cfg["timezone"]` |
-| `{{SECRET_PREFIX}}` | JOHAN | `slug.upper()` |
-| `{{CRON_SCHEDULE}}` | 0 9,11,...,23 * * * | Hardcoded (schedule is commented out anyway) |
-
-## Validation
-
-- Generated A005 workflow matches reference exactly (modulo gpx_tcx additions)
-- Generated Johan workflow diff shows only improvements (UPDATE rebuild gains extra-summaries)
-- Generated test athlete (Mo Farah) produces clean 635-line workflow, 0 unresolved placeholders
-- End-to-end `--config` + `--dry-run` + full run all tested
-- Syntax check passes
-
-## CLI usage
-
-```bash
-# New athlete — auto-assigns next ID (A008, A009, etc.)
-python onboard_athlete.py --config new_athlete.json --output-dir .
-
-# Re-onboard existing athlete
-python onboard_athlete.py --config athletes/A007/onboard_config.json --athlete-id A007 --slug johan --output-dir .
-
-# Dry run
-python onboard_athlete.py --config config.json --dry-run
-```
-
-## Design decisions
-
-- **Schedule commented out by default** — uncomment after INITIAL is validated and working
-- **Template not inline fallback** — if `ci/workflow_template.yml` is missing, falls back to old generator with deprecation warning
-- **No conditional blocks in template** — all athletes get gpx_tcx_summaries support (conditional on file existence in bash), classify_races, etc. Simpler than Mustache-style conditionals.
-- **Timezone not validated** — onboard.html form should send IANA names. Could add alias map later (UK→Europe/London etc.)
+| Athlete | Mode | Result |
+|---------|------|--------|
+| Ian A002 | UPDATE | 3,078 rows, folder rename working, all Dropbox paths correct |
+| Steve A004 | DASHBOARD | Predictions now showing (21:05 5K, 44:10 10K, 1:37:03 HM) |
+| Johan A007 | INITIAL | 1,077 rows, 20 races (incl marathon), 3 spinning rows eliminated, PEAK_CP stable 416W |
+| Johan A007 | CLASSIFY_RACES x2 | Marathon classified, PEAK_CP converged (416/416, unchanged on repeat) |
 
 ---
 
-## Pending / not changed
+## Key Decisions
 
-- Johan A007 INITIAL still running (separate from this work)
-- `user_data` pattern deployed to template and script delivered — awaiting first athlete to drop files to test end-to-end on CI
-- Existing hand-built workflows (Ian, Steve, Nadi, Johan) don't have the `merge_user_data` step yet — only new athletes generated from the template get it automatically. To add to existing athletes, insert the step manually or regenerate from template.
+- **Schedule commented out by default** in workflow template — uncomment after INITIAL validated
+- **`_last_valid()` at module level** — both `load_and_process_data()` and `get_summary_stats()` need it
+- **Marathon HR logic:** at 20km+ distance, sustained HR above race threshold = race, regardless of pace vs prediction mismatch. Pace rejection only applies at shorter distances.
+- **Strava TCX filter:** cross-reference against `activities.csv` filename column (run-only). No activities.csv = no filter (backward compatible).
+- **PEAK_CP see-saw:** confirmed harmless +/-1-2W oscillation, converges within 2 runs. Not worth dampening.
+- **Nadi is male** (corrected assumption).
 
 ---
 
-## Also completed this session
+## Outstanding / Next Session
 
-### Ian/Nadi/Steve folder renames
-- `IanLilley/` → `A002/`, `NadiJahangiri/` → `A003/`, `SteveDavies/` → `A004/`
-- Dropbox folders renamed, workflows updated (sed `s|OldName|A00X|g` — 6 lines each)
-- Ian A002 UPDATE validated on CI (full green run, 3,078 rows)
-
-### `user_data` folder pattern
-- New `ci/merge_user_data.py`: downloads `user_data/` from Dropbox, merges FITs into `data/fits.zip` (timestamp dedup), replaces `activities.csv` if larger, appends weight to `athlete_data.csv` (date dedup)
-- Step added to `ci/workflow_template.yml` (both jobs, after Dropbox download)
-- `user_data/fits/` folders created on Dropbox for all active athletes
-- Shared Dropbox links sent to Ian, Steve, Johan, Nadi
+- **Workout planner (Option 2/3)** — PDF training plan import via LLM or parameter-driven taper generation. Prototype tested on Johan's Hannover HM plan. See expanded TODO.
+- **Prediction tuning** — Paul and Ian predictions feel too slow post-pipeline changes. Own session.
+- **Johan REVIEW flags** — 15 rows for Johan to review in activity_overrides.xlsx
+- **Footpod distance sanitisation** — Polar stride sensor can inflate distances on non-GPS sessions (spinning, treadmill). Current per-second cross-check doesn't catch summary-only rows. Low priority.
 
 ---
 
 ## For Next Claude
 
-"Onboarding refactor complete. `onboard_athlete.py` now uses `ci/workflow_template.yml` (template-based, 10 placeholders, simple string replacement) instead of 520-line inline f-strings. Fixes all 20 gaps vs old generator. Schedule commented out by default. New CLI args `--athlete-id` and `--slug` for re-onboarding. Ian/Nadi/Steve folders renamed to A002/A003/A004 (Dropbox + repo + workflows), Ian validated on CI. New `ci/merge_user_data.py` implements the user_data folder pattern — athletes drop FITs/activities.csv/weight.csv into Dropbox `user_data/` folder, pipeline merges each run. Step added to workflow template. Folders created, Dropbox links shared with all athletes. Awaiting first real test (likely Steve's Zwift FITs). See HANDOVER_ONBOARDING_REFACTOR.md."
+"Major infrastructure session. Onboarding refactored to template-based workflow generation (`ci/workflow_template.yml` + `--athlete-id`/`--slug` args). Ian/Nadi/Steve folders renamed to A002/A003/A004. `ci/merge_user_data.py` implements user_data folder pattern — athletes drop FITs/CSV into Dropbox, pipeline merges. Step added to all 6 workflows. `classify_races.py` fixed for Swedish `maraton` keyword + marathon-distance HR logic (sustained effort at 20km+ overrides pace rejection). `strava_ingest.py` now filters non-running TCX/GPX via activities.csv. `generate_dashboard.py` prediction fallback uses `_last_valid()` at module level. All validated on CI: Ian UPDATE, Steve DASHBOARD, Johan INITIAL x2 + CLASSIFY_RACES x2. Next priorities: workout planner feature (PDF import or parameter-driven taper), prediction tuning. See HANDOVER_ONBOARDING_REFACTOR.md."

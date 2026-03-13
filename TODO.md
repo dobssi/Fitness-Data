@@ -66,7 +66,10 @@ Short races showing last row with 60+ min zone data. Needs troubleshooting.
 In-dashboard search of activity log, edit modal for overrides, connects to existing GitHub Actions override dispatch. Replaces spreadsheet editing.
 
 **Scheduled workout planner** *(own session)*
-Planned sessions → TSS estimates → Banister projection → dashed CTL/ATL chart extension + projected TSB on race day card. Foundation partially built with `PlannedSession` dataclass and `planned_sessions` YAML block.
+Planned sessions → TSS estimates → Banister projection → dashed CTL/ATL chart extension + projected TSB on race day card. Foundation partially built with `PlannedSession` dataclass and `planned_sessions` YAML block. Two approaches to populate:
+- **Option 2 (LLM-assisted):** Athlete drops coach's training plan PDF into `user_data/`. Pipeline calls Anthropic API to extract structured sessions (week-by-week, session types, efforts, durations). Athlete confirms, output goes into `planned_sessions` in `athlete.yml`. Prototype tested on Johan's Hannover HM plan — successfully parsed 5 weeks of sessions, estimated TSS, projected Banister to race day (TSB +4.7). Swedish/English mixed notation handled.
+- **Option 3 (parameter-driven):** Athlete provides race date + distance + weekly volume target (or inferred from recent CTL). Script generates generic taper (100→90→80→70% over 4 weeks), distributes key sessions + filler easy runs to hit volume targets. No PDF parsing needed — covers 80% of value.
+Either approach fills `planned_sessions` YAML → StepB Banister projection → dashed CTL/ATL/TSB lines on dashboard → projected TSB on race day card.
 
 **Athlete page** *(own session, phase 2 after workout planner)*
 `athlete.html` — forward-looking complement to dashboard. Training plan + projected CTL/ATL, race calendar, goals, profile.
