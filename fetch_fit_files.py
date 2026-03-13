@@ -174,7 +174,7 @@ def fetch_new_fit_files(client: IntervalsClient,
     all_activities = client.get_activities(since, today)
     run_activities = [
         act for act in all_activities
-        if act.get("type", "").replace(" ", "").lower() in RUNNING_TYPES
+        if act.get("type", "Unknown").replace(" ", "").lower() in RUNNING_TYPES
     ]
     
     # Debug: show all activity types to diagnose missing runs
@@ -373,7 +373,7 @@ def refresh_activity_names(client, pending_csv: str, days: int = 14):
     
     # Fetch recent activities from intervals.icu
     activities = client.get_activities(since)
-    runs = [a for a in activities if a.get("type", "").replace(" ", "").lower() in RUNNING_TYPES]
+    runs = [a for a in activities if a.get("type", "Unknown").replace(" ", "").lower() in RUNNING_TYPES]
     print(f"  Found {len(runs)} runs on intervals.icu since {since}")
     
     if not runs:
