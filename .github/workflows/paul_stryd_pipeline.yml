@@ -218,6 +218,30 @@ jobs:
             --dropbox-base "${{ env.DB_BASE }}"
         continue-on-error: true
 
+      - name: Parse training plan PDF
+        if: ${{ steps.gate.outputs.continue == 'true' && env.PIPELINE_MODE != 'DASHBOARD' && env.PIPELINE_MODE != 'CLASSIFY_RACES' }}
+        run: |
+          PDF_FILE=$(find ${{ env.ATHLETE_DIR }}/user_data -maxdepth 1 -name '*.pdf' -type f 2>/dev/null | head -1)
+          if [ -n "$PDF_FILE" ]; then
+            echo "Found training plan: $PDF_FILE"
+            MASTER_FLAG=""
+            PREV_MASTER="${{ env.ATHLETE_DIR }}/output/Master_A006_FULL_post.xlsx"
+            if [ -f "$PREV_MASTER" ]; then
+              MASTER_FLAG="--master $PREV_MASTER"
+            fi
+            python ci/parse_training_plan.py \
+              --pdf "$PDF_FILE" \
+              --output ${{ env.ATHLETE_DIR }}/planned_sessions.yml \
+              $MASTER_FLAG
+          else
+            echo "No training plan PDF in user_data/"
+            if [ -f "${{ env.ATHLETE_DIR }}/planned_sessions.yml" ]; then
+              echo "Removing stale planned_sessions.yml"
+              rm -f ${{ env.ATHLETE_DIR }}/planned_sessions.yml
+            fi
+          fi
+        continue-on-error: true
+
       - name: Sync athlete data from intervals.icu
         if: ${{ steps.gate.outputs.continue == 'true' && github.event.inputs.sync != 'false' && env.PIPELINE_MODE != 'CLASSIFY_RACES' }}
         run: |
@@ -330,6 +354,7 @@ jobs:
             --runner-dob "1969-05-27" \
             --runner-gender male \
             --strava ${{ env.ATHLETE_DIR }}/data/activities.csv \
+            --planned-sessions ${{ env.ATHLETE_DIR }}/planned_sessions.yml \
             --progress-every 50
 
       - name: Generate dashboard (UPDATE / FULL)
@@ -530,6 +555,30 @@ jobs:
             --dropbox-base "${{ env.DB_BASE }}"
         continue-on-error: true
 
+      - name: Parse training plan PDF
+        if: ${{ env.PIPELINE_MODE != 'DASHBOARD' }}
+        run: |
+          PDF_FILE=$(find ${{ env.ATHLETE_DIR }}/user_data -maxdepth 1 -name '*.pdf' -type f 2>/dev/null | head -1)
+          if [ -n "$PDF_FILE" ]; then
+            echo "Found training plan: $PDF_FILE"
+            MASTER_FLAG=""
+            PREV_MASTER="${{ env.ATHLETE_DIR }}/output/Master_A006_FULL_post.xlsx"
+            if [ -f "$PREV_MASTER" ]; then
+              MASTER_FLAG="--master $PREV_MASTER"
+            fi
+            python ci/parse_training_plan.py \
+              --pdf "$PDF_FILE" \
+              --output ${{ env.ATHLETE_DIR }}/planned_sessions.yml \
+              $MASTER_FLAG
+          else
+            echo "No training plan PDF in user_data/"
+            if [ -f "${{ env.ATHLETE_DIR }}/planned_sessions.yml" ]; then
+              echo "Removing stale planned_sessions.yml"
+              rm -f ${{ env.ATHLETE_DIR }}/planned_sessions.yml
+            fi
+          fi
+        continue-on-error: true
+
       - name: Sync athlete data from intervals.icu
         if: ${{ env.PIPELINE_MODE != 'DASHBOARD' }}
         run: |
@@ -554,6 +603,7 @@ jobs:
             --runner-dob "1969-05-27" \
             --runner-gender male \
             --strava ${{ env.ATHLETE_DIR }}/data/activities.csv \
+            --planned-sessions ${{ env.ATHLETE_DIR }}/planned_sessions.yml \
             --progress-every 50
 
       # ─── INITIAL/CLASSIFY_RACES: re-classify with predictions available ───
@@ -585,6 +635,7 @@ jobs:
             --runner-dob "1969-05-27" \
             --runner-gender male \
             --strava ${{ env.ATHLETE_DIR }}/data/activities.csv \
+            --planned-sessions ${{ env.ATHLETE_DIR }}/planned_sessions.yml \
             --progress-every 50
 
       - name: Generate dashboard
