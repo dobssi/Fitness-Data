@@ -90,16 +90,22 @@ _MONTH_NAMES = {
 
 # ─── Text extraction ─────────────────────────────────────────────────────────
 
-def extract_text(pdf_path: str) -> str:
-    """Extract all text from PDF using pdfplumber."""
-    import pdfplumber
-    pages = []
-    with pdfplumber.open(pdf_path) as pdf:
-        for page in pdf.pages:
-            text = page.extract_text()
-            if text:
-                pages.append(text)
-    return '\n'.join(pages)
+def extract_text(file_path: str) -> str:
+    """Extract text from PDF or plain text file."""
+    ext = os.path.splitext(file_path)[1].lower()
+    if ext in ('.txt', '.md', '.text'):
+        with open(file_path, encoding='utf-8', errors='replace') as f:
+            return f.read()
+    else:
+        # PDF
+        import pdfplumber
+        pages = []
+        with pdfplumber.open(file_path) as pdf:
+            for page in pdf.pages:
+                text = page.extract_text()
+                if text:
+                    pages.append(text)
+        return '\n'.join(pages)
 
 
 # ─── Week header detection ───────────────────────────────────────────────────

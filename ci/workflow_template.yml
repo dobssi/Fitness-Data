@@ -222,7 +222,7 @@ jobs:
       - name: Parse training plan PDF
         if: ${{ steps.gate.outputs.continue == 'true' && env.PIPELINE_MODE != 'DASHBOARD' && env.PIPELINE_MODE != 'CLASSIFY_RACES' }}
         run: |
-          PDF_FILE=$(find ${{ env.ATHLETE_DIR }}/user_data -maxdepth 1 -name '*.pdf' -type f 2>/dev/null | head -1)
+          PDF_FILE=$(find ${{ env.ATHLETE_DIR }}/user_data -maxdepth 1 \( -name '*.pdf' -o -name '*.txt' \) -type f 2>/dev/null | head -1)
           if [ -n "$PDF_FILE" ]; then
             echo "Found training plan: $PDF_FILE"
             MASTER_FLAG=""
@@ -571,7 +571,7 @@ jobs:
       - name: Parse training plan PDF
         if: ${{ env.PIPELINE_MODE != 'DASHBOARD' }}
         run: |
-          PDF_FILE=$(find ${{ env.ATHLETE_DIR }}/user_data -maxdepth 1 -name '*.pdf' -type f 2>/dev/null | head -1)
+          PDF_FILE=$(find ${{ env.ATHLETE_DIR }}/user_data -maxdepth 1 \( -name '*.pdf' -o -name '*.txt' \) -type f 2>/dev/null | head -1)
           if [ -n "$PDF_FILE" ]; then
             echo "Found training plan: $PDF_FILE"
             MASTER_FLAG=""

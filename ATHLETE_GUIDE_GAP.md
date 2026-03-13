@@ -125,3 +125,43 @@ The banner at the top of the dashboard shows health check alerts when something 
 - **Fitness plateau** — RFL stuck below recent peak for an extended period
 
 Green "All clear" means everything looks normal.
+
+---
+
+## Your Data Folder
+
+You have a personal `user_data/` folder on Dropbox where you can drop files that the pipeline picks up automatically on the next update.
+
+### Training Plan
+
+Drop a training plan as a **PDF** or **text file** into your `user_data/` folder. The pipeline will parse it and project your planned training onto the dashboard:
+
+- **Dashed CTL/ATL lines** on the Training Load chart showing where your fitness and fatigue are heading
+- **Upcoming Sessions card** listing your planned workouts with estimated TSS
+- **Race Readiness** cards factor in the planned training for taper recommendations
+
+The plan needs week headers with dates and day-by-day sessions. Swedish and English are both supported. Example text format:
+
+```
+Week 12, 16 - 22.3
+Tue: Fartlek 50' - 6x(3'/3' @ HM pace)
+Thu: Easy 75' + 10x 30/30
+Sat: Long run 90' progressive to HM pace
+
+Week 13, 23 - 29.3
+Tue: Tempo 40' @ threshold
+Thu: Easy 60'
+Sat: Long run 80' with 4x1km @ HM pace
+```
+
+Days you don't specify are filled with easy runs or rest. TSS is estimated from session type and duration — it calibrates from your own training history when available.
+
+To update: drop a new file (replaces the old plan). To clear: remove the file.
+
+### Other Files
+
+| File | What it does |
+|------|-------------|
+| `fits/` folder | Drop FIT files here — added to your data (e.g. from Zwift, manual exports) |
+| `activities.csv` | Updated Strava export — replaces existing if it has more rows |
+| `weight.csv` | Date + weight entries (`2026-03-13,75.5`) — appended to your history |

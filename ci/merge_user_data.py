@@ -324,7 +324,7 @@ def download_user_data(athlete_dir: str, db_base: str, token: str) -> dict:
         user_files = dropbox_list_folder(remote_base, token)
         if user_files:
             for fname, size in user_files.items():
-                if fname.lower().endswith('.pdf'):
+                if fname.lower().endswith(('.pdf', '.txt')):
                     local_pdf = os.path.join(local_base, fname)
                     os.makedirs(local_base, exist_ok=True)
                     try:
