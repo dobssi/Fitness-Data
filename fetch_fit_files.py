@@ -174,7 +174,13 @@ def fetch_new_fit_files(client: IntervalsClient,
         if act.get("type", "").replace(" ", "").lower() in RUNNING_TYPES
     ]
     
+    # Debug: show all activity types to diagnose missing runs
+    _type_counts = {}
+    for a in all_activities:
+        t = a.get("type", "Unknown")
+        _type_counts[t] = _type_counts.get(t, 0) + 1
     print(f"  -> {len(all_activities)} total activities, {len(run_activities)} runs")
+    print(f"  Activity types: {_type_counts}")
     
     # Determine which need downloading
     to_download = []
