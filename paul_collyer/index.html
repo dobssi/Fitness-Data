@@ -493,7 +493,7 @@ function raceAnnotations(dates) {
 }catch(e){console.warn('Chart.js not loaded:',e);}
 </script>
     <h1>🏃 Paul Collyer</h1>
-    <div class="dash-sub">Friday 13 March 2026, 07:02</div>
+    <div class="dash-sub">Friday 13 March 2026, 16:10</div>
     
     <!-- Phase 2: Mode Toggle -->
     <div class="mode-toggle" style="display:flex;gap:6px;margin:10px 0 8px;align-items:center;">
@@ -632,7 +632,7 @@ function raceAnnotations(dates) {
             <div class="tip">Total running distance in the last 7 days.</div>
         </div>
         <div class="stat-card ws-tip">
-            <div class="stat-value">242.1</div>
+            <div class="stat-value">235.3</div>
             <div class="stat-label">Last 30 Days</div>
             <div class="stat-sub">km</div>
             <div class="tip">Total running distance in the last 30 days.</div>
@@ -1288,7 +1288,7 @@ function raceAnnotations(dates) {
     
     
     <div class="footer">
-        Updated: 2026-03-13 07:02<br>
+        Updated: 2026-03-13 16:10<br>
         Data through: 2026-03-13
     </div>
     
@@ -2297,7 +2297,27 @@ function raceAnnotations(dates) {
         }
         
         if (predCtx && predData && predData['5k'] && predData['5k'].dates.length > 0) {
-            renderPredChart('5k', showParkruns);
+            // Grey out distance tabs with no races
+            document.querySelectorAll('#predToggle button[data-dist]').forEach(btn => {
+                const dist = btn.dataset.dist;
+                const d = predData[dist];
+                if (!d || !d.dates || d.dates.length === 0) {
+                    btn.style.opacity = '0.3';
+                    btn.style.pointerEvents = 'none';
+                    btn.title = 'No races at this distance';
+                }
+            });
+            // Auto-select first distance with races
+            let initDist = '5k';
+            for (const dist of ['5k', '10k', 'hm', 'marathon']) {
+                const d = predData[dist];
+                if (d && d.dates && d.dates.length > 0) { initDist = dist; break; }
+            }
+            document.querySelectorAll('#predToggle button').forEach(b => b.classList.remove('active'));
+            const initBtn = document.querySelector(`#predToggle button[data-dist="${initDist}"]`);
+            if (initBtn) initBtn.classList.add('active');
+            currentPredDist = initDist;
+            renderPredChart(initDist, showParkruns);
             
             document.getElementById('predToggle').addEventListener('click', function(e) {
                 if (e.target.tagName === 'BUTTON') {
