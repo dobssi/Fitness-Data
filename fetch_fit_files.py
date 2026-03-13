@@ -45,7 +45,10 @@ DEFAULT_FIT_DIR = "FIT_downloads"
 DEFAULT_STATE_FILE = "fit_sync_state.json"
 DEFAULT_ZIP_FILE = "TotalHistory.zip"
 FULL_HISTORY_START = "2013-01-01"
-RUNNING_TYPES = {"run", "virtualrun"}     # Activity types to download FIT files for (lowercase, no spaces)
+RUNNING_TYPES = {"run", "virtualrun", "unknown"}  # Activity types to download FIT files for (lowercase, no spaces)
+# Note: intervals.icu categorises some Zwift/treadmill runs as "Unknown".
+# Including "unknown" may download a few non-running FITs, but rebuild_from_fit_zip
+# filters by sport type from the FIT file itself, so non-runs get excluded.
 
 
 def load_sync_state(path: str) -> dict:
