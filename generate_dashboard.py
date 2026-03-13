@@ -49,6 +49,14 @@ OUTPUT_FILE = os.environ.get("OUTPUT_FILE", r"index.html")
 # ============================================================================
 # DATA PROCESSING
 # ============================================================================
+def _last_valid(df, col):
+    """Return last non-NaN value from column, or None."""
+    if col not in df.columns:
+        return None
+    valid = df[col].dropna()
+    return valid.iloc[-1] if len(valid) > 0 else None
+
+
 def load_and_process_data():
     """Load Master and athlete_data files, prepare data for dashboard."""
     
@@ -57,13 +65,6 @@ def load_and_process_data():
     df = pd.read_excel(MASTER_FILE, sheet_name=0)  # Master sheet (may have athlete ID suffix)
     df['date'] = pd.to_datetime(df['date'])
     df = df.sort_values('date').reset_index(drop=True)
-    
-    def _last_valid(df, col):
-        """Return last non-NaN value from column, or None."""
-        if col not in df.columns:
-            return None
-        valid = df[col].dropna()
-        return valid.iloc[-1] if len(valid) > 0 else None
     
     # v53: Read singleton values (AG, CP, PEAK_CP) from the unfiltered last row
     # before auto_exclude filter, since StepB writes these to dfm.index[-1]
