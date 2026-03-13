@@ -42,7 +42,7 @@ RACE_KEYWORDS = re.compile(
     r'mob match|interclub|'
     r'vitality|bupa|great run|great north|big half|'
     # Swedish / European race names
-    r'loppet|varvet|rusket|midnattsloppet|vinthund|premiärhalv|'
+    r'loppet|varvet|rusket|midnattsloppet|vinthund|premiärhalv|maraton|'
     # Common race series / organisers
     r"RunThrough|Brooks 5k|CityRun|STHLM 10|Winter 10k|Stockholm's Bästa|"
     r'Harry Hawkes|BMC\b|\bTT\b|mästerskap|'
@@ -64,7 +64,7 @@ ANTI_KEYWORDS = re.compile(
 
 # Specific race name matches (abbreviations, event names)
 RACE_NAME_OVERRIDES = re.compile(
-    r'\bVLM\b|London Marathon|Copenhagen Marathon|Stockholm Marathon|'
+    r'\bVLM\b|London Marathon|Copenhagen Marathon|Stockholm Marathon|Stockholm maraton|'
     r'Hackney Half|Battersea Park|Djurgårdsvarvet|Höstrusket|Hässelbyloppet|'
     r'Lidingöloppet|Midnattsloppet|2 sjöar|'
     # Additional known races
@@ -83,7 +83,7 @@ NON_PARKRUN_RACE_KW = re.compile(
     r'marathon|half marathon|\bhalf\b|\brace\b|championship|league|'
     r'serpentine|LFOTM|cross country|\bXC\b|assembly|relays?\b|'
     r'mob match|interclub|vitality|bupa|great run|great north|big half|'
-    r'loppet|varvet|rusket|midnattsloppet|vinthund|premiärhalv|'
+    r'loppet|varvet|rusket|midnattsloppet|vinthund|premiärhalv|maraton|'
     r"RunThrough|Brooks 5k|CityRun|STHLM 10|Winter 10k|Stockholm's Bästa|"
     r'Harry Hawkes|BMC\b|\bTT\b|\bPB[!\s]|\bSB[!\s]',
     re.I
@@ -414,6 +414,21 @@ def classify_run(name: str, avg_hr: float, lthr: float, max_hr: float,
     # Path B: HR above uplifted threshold (HR alone is strong enough)
     if hr_pct >= min_hr + UNNAMED_HR_UPLIFT:
         if _pace_rejects_race:
+            # At long distances (HM+), sustained high HR IS the race signal.
+            # Nobody sustains 92% LTHR for 2+ hours in training.
+            # Pace rejection only applies at shorter distances where a hard tempo
+            # at race HR but slower pace is plausible.
+            # Also override if HR is >5% above the base threshold — at any distance,
+            # HR that far above threshold is a race regardless of pace.
+            hr_margin = hr_pct - min_hr
+            is_long_race = distance_km >= 20
+            hr_strongly_above = hr_margin >= 0.04  # 4%+ above base threshold
+            if is_long_race or hr_strongly_above:
+                return ('race', 'medium',
+                        f'HR {hr_pct*100:.0f}%LTHR ≥ {min_hr*100:.0f}% + '
+                        f'{hr_margin*100:.1f}% margin (pace slower than predicted but '
+                        f'{"sustained effort at " + f"{distance_km:.0f}km" if is_long_race else "HR strongly above threshold"}'
+                        f') — REVIEW')
             return ('training', 'medium',
                     f'HR {hr_pct*100:.0f}%LTHR but pace {avg_pace:.2f} min/km is '
                     f'{(pace_ratio-1)*100:.0f}% slower than expected race pace '
