@@ -1789,7 +1789,7 @@ def _read_athlete_csv(path: str) -> pd.DataFrame:
     return pd.read_csv(io.StringIO(''.join(clean_lines)))
 
 
-def calc_ctl_atl(df: pd.DataFrame, athlete_data_path: str = None) -> tuple:
+def calc_ctl_atl(df: pd.DataFrame, athlete_data_path: str = None, planned_sessions_path: str = None) -> tuple:
     """
     Calculate CTL, ATL, TSB using Banister exponential weighted moving average.
     
@@ -1872,10 +1872,63 @@ def calc_ctl_atl(df: pd.DataFrame, athlete_data_path: str = None) -> tuple:
     # Maps date_str -> {'tss': float, 'description': str, 'source': str}
     _planned_tss = {}
     _DAY_MAP = {'mon': 0, 'tue': 1, 'wed': 2, 'thu': 3, 'fri': 4, 'sat': 5, 'sun': 6}
-    
+
     _template_end = today + pd.Timedelta(days=14)  # default: 14 days if no planned sessions
-    
-    if PLANNED_SESSIONS:
+
+    # ── Check for date-anchored planned_sessions.yml ──
+    _ps_file_path = planned_sessions_path
+    # Auto-discover from athlete config directory if not explicitly passed
+    if not _ps_file_path:
+        _athlete_cfg_path = os.environ.get('ATHLETE_CONFIG_PATH', '')
+        if _athlete_cfg_path:
+            _ps_candidate = os.path.join(os.path.dirname(_athlete_cfg_path), 'planned_sessions.yml')
+            if os.path.exists(_ps_candidate):
+                _ps_file_path = _ps_candidate
+
+    _ps_file_used = False
+    if _ps_file_path and os.path.exists(_ps_file_path):
+        try:
+            import yaml as _yaml
+            with open(_ps_file_path) as _f:
+                _ps_data = _yaml.safe_load(_f)
+            if _ps_data and 'weeks' in _ps_data:
+                _ps_source = _ps_data.get('source', '?')
+                print(f"  Loaded planned_sessions.yml: source={_ps_source}")
+                for _week in _ps_data['weeks']:
+                    _week_start = pd.Timestamp(_week['start'])
+                    for _sess in _week.get('sessions', []):
+                        _day_offset = _DAY_MAP.get(_sess.get('day', ''), 0)
+                        _sess_date = _week_start + pd.Timedelta(days=_day_offset)
+                        if _sess_date > today:
+                            _dstr = _sess_date.strftime('%Y-%m-%d')
+                            _planned_tss[_dstr] = {
+                                'tss': float(_sess.get('tss', 0)),
+                                'description': _sess.get('description', ''),
+                                'source': 'planned'
+                            }
+                _template_end = max(
+                    (pd.Timestamp(w['start']) + pd.Timedelta(days=6) for w in _ps_data['weeks']),
+                    default=today + pd.Timedelta(days=14)
+                )
+                # Add race from planned_sessions.yml to PLANNED_RACES if present
+                if _ps_data.get('race_date') and _ps_data.get('race_distance_km'):
+                    _existing_dates = {pr['date'] for pr in PLANNED_RACES}
+                    if _ps_data['race_date'] not in _existing_dates:
+                        PLANNED_RACES.append({
+                            'name': _ps_source,
+                            'date': _ps_data['race_date'],
+                            'distance_km': _ps_data['race_distance_km'],
+                            'priority': 'A',
+                            'surface': 'road'
+                        })
+                        print(f"  Added race from plan: {_ps_source} on {_ps_data['race_date']} ({_ps_data['race_distance_km']}km)")
+                _n_planned = len(_planned_tss)
+                print(f"  Date-anchored plan: {_n_planned} sessions, ending {_template_end.strftime('%Y-%m-%d')}")
+                _ps_file_used = True
+        except Exception as e:
+            print(f"  WARNING: Could not read planned_sessions.yml: {e}")
+
+    if not _ps_file_used and PLANNED_SESSIONS:
         # Template covers 1-2 weeks from tomorrow, played once (not repeating)
         _num_weeks = len(PLANNED_SESSIONS)  # 1 or 2
         _template_end = today + pd.Timedelta(days=_num_weeks * 7)
@@ -2222,6 +2275,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--runner-age", type=int, default=55, help="Runner's current age for age grade calculations")
     p.add_argument("--runner-gender", default="male", choices=["male", "female"], help="Runner's gender for age grade")
     p.add_argument("--runner-dob", default=None, help="Runner's DOB (YYYY-MM-DD) for precise age calculations")
+    p.add_argument("--planned-sessions", default=None, help="Path to planned_sessions.yml (date-anchored, overrides athlete.yml templates)")
     return p.parse_args()
 
 
@@ -5483,7 +5537,8 @@ def main() -> int:
     
     # Calculate CTL/ATL/TSB
     athlete_data_path = args.athlete_data if hasattr(args, 'athlete_data') else "athlete_data.csv"
-    dfm, daily_df = calc_ctl_atl(dfm, athlete_data_path)
+    _planned_sessions_path = getattr(args, 'planned_sessions', None)
+    dfm, daily_df = calc_ctl_atl(dfm, athlete_data_path, planned_sessions_path=_planned_sessions_path)
     
     # v51: Join weight_kg from athlete_data.csv
     if os.path.exists(athlete_data_path):

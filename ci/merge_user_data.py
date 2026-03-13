@@ -303,8 +303,8 @@ def download_user_data(athlete_dir: str, db_base: str, token: str) -> dict:
     remote_base = f"{db_base}/user_data"
     local_base = os.path.join(athlete_dir, "user_data")
     
-    result = {"fits": 0, "activities": False, "weight": False}
-    
+    result = {"fits": 0, "activities": False, "weight": False, "training_plan": False}
+
     # ── Download individual files ──
     for filename in ["activities.csv", "weight.csv"]:
         remote_path = f"{remote_base}/{filename}"
@@ -319,6 +319,23 @@ def download_user_data(athlete_dir: str, db_base: str, token: str) -> dict:
         except Exception:
             pass  # File doesn't exist — that's fine
     
+    # ── Download PDF training plans from user_data/ ──
+    try:
+        user_files = dropbox_list_folder(remote_base, token)
+        if user_files:
+            for fname, size in user_files.items():
+                if fname.lower().endswith('.pdf'):
+                    local_pdf = os.path.join(local_base, fname)
+                    os.makedirs(local_base, exist_ok=True)
+                    try:
+                        dropbox_download(f"{remote_base}/{fname}", local_pdf, token)
+                        result["training_plan"] = True
+                        print(f"  Downloaded training plan: {fname}")
+                    except Exception as e:
+                        print(f"  Warning: Failed to download {fname}: {e}")
+    except Exception:
+        pass  # No files in user_data/ root — that's fine
+
     # ── Download FIT files from user_data/fits/ ──
     remote_fits = f"{remote_base}/fits"
     local_fits = os.path.join(local_base, "fits")
@@ -376,7 +393,8 @@ def main():
             dl = download_user_data(athlete_dir, db_base, token)
             print(f"  Downloaded: {dl['fits']} FIT(s), "
                   f"activities={'yes' if dl['activities'] else 'no'}, "
-                  f"weight={'yes' if dl['weight'] else 'no'}")
+                  f"weight={'yes' if dl['weight'] else 'no'}, "
+                  f"training_plan={'yes' if dl.get('training_plan') else 'no'}")
         except Exception as e:
             print(f"  ⚠ Dropbox download failed: {e}")
             print(f"  Continuing with local user_data/ if present...")
