@@ -1348,7 +1348,7 @@ def _loop_like_from_track(df: pd.DataFrame, dist_m_est: float) -> tuple[float, b
 # The dates below are the first run date with each new pod.
 # These can be overridden via stryd_era_config.json in the output directory.
 
-HARDWARE_ERAS = ["pre_stryd", "v1", "repl", "air", "s4", "s5"]
+HARDWARE_ERAS = ["pre_stryd", "v1", "repl", "air", "s4", "s5", "s6"]
 
 # Default era transition dates (first run with each pod)
 # Format: era_name -> start_date (end is implicitly the next era's start)
@@ -1359,7 +1359,8 @@ DEFAULT_ERA_TRANSITIONS = {
     "repl":      "2017-09-12",  # Replacement pod when v1 broke
     "air":       "2019-09-07",  # Air power model
     "s4":        "2023-01-03",  # Stryd 4.0
-    "s5":        "2025-12-17",  # Stryd 5.0
+    "s5":        "2025-12-17",  # New Stryd pod (reads ~1% higher power than s4)
+    "s6":        "2026-02-09",  # Stryd firmware update (reads ~3% lower power than s4)
 }
 
 # v1_late is treated like pre_stryd for power simulation
@@ -4212,7 +4213,9 @@ def main():
             return "Air Power model"
         if t < pd.Timestamp("2025-12-17"):
             return "Stryd 4.0"
-        return "Stryd 5.0"
+        if t < pd.Timestamp("2026-02-09"):
+            return "Stryd 5.0"
+        return "Stryd 5.0 FW"
 
     df["pod_model"] = pd.to_datetime(df["date"], errors="coerce").apply(_pod_model)
 
@@ -4292,7 +4295,6 @@ def main():
     SIMULATED_ERAS = {"pre_stryd", "v1_late"}
     K_MEASURED = 20.0
     K_SIMULATED = 60.0
-    K_S5 = 50.0
 
     def _shrink_adjust(raw_adj: float, n: int, prior_center: float, k: float) -> float:
         if not (np.isfinite(raw_adj) and raw_adj > 0):
@@ -4311,9 +4313,6 @@ def main():
             raw = float(base_pred / pred)
             if era == "s4":  # v44: changed from s4_late
                 adj = 1.0
-            elif era == "s5":
-                adj = _shrink_adjust(raw, n=n, prior_center=0.995, k=K_S5)
-                adj = float(np.clip(adj, 0.985, 1.010))
             elif era in SIMULATED_ERAS:
                 adj = _shrink_adjust(raw, n=n, prior_center=1.0, k=K_SIMULATED)
                 adj = float(np.clip(adj, 0.90, 1.12))
@@ -4327,9 +4326,6 @@ def main():
             raw = float(base_pred / pred)
             if pm == "Stryd 4.0":
                 adj = 1.0
-            elif pm == "Stryd 5.0":
-                adj = _shrink_adjust(raw, n=n, prior_center=0.995, k=K_S5)
-                adj = float(np.clip(adj, 0.985, 1.010))
             else:
                 adj = _shrink_adjust(raw, n=n, prior_center=1.0, k=K_MEASURED)
                 adj = float(np.clip(adj, 0.90, 1.12))

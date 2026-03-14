@@ -78,6 +78,8 @@ power:
       repl: "2017-09-12"        # Replacement pod
       air: "2019-09-07"         # Air power model
       s4: "2023-01-03"          # Stryd 4.0 (includes 5.0 firmware — shift <1.2%, below noise floor)
+      s5: "2025-12-17"          # New Stryd pod (reads ~1% higher power than s4)
+      s6: "2026-02-09"          # Stryd firmware update (reads ~3% lower power than s4)
     
     # Mass correction history (periods when Stryd was configured with wrong weight)
     # Format: {start_date: "YYYY-MM-DD", end_date: "YYYY-MM-DD", configured_kg: float}
