@@ -53,8 +53,8 @@ CTL/ATL projection extends to race date from PDF even if athlete doesn't have th
 **Age Grade Rating / AG-relative RFL** *(favourite feature idea)*
 Continuously updated age grade rating on the dashboard (already have AG% on stat card). Express age-adjusted RFL as current AG% divided by peak AG%. Gives a "how fit am I relative to my age-adjusted best" metric that's more meaningful than raw RFL for ageing athletes. The AG% trend already exists — this is presenting it as a relative fitness signal.
 
-**Prediction chart trend line missing for GAP athletes** *(bug)*
-No green prediction line or dashed adjusted line on Race Predictions chart for GAP athletes (A005, A007, etc.). Root cause: JS looks for `trend_values_gap` key and `predicted_gap` array in predData JSON — both are null/missing. The `_pred_col()` fix in `generate_dashboard.py` resolved headline stats and master columns, but the prediction chart JS dataset builder at line ~2084 needs the same fallback: if `trend_values_gap` is empty/missing, use `trend_values` (which contains the Stryd-based trend). Similarly `predicted_gap` needs to fall back to `predicted`. Reproducing on A005 and likely all GAP mode dashboards.
+**Prediction tuning — Stryd mode possibly over-pessimistic**
+Paul's Stryd mode predictions feel too slow. GAP prediction chart trend line fix done (2026-03-13). Revisit Stryd-specific tuning in own session.
 
 **RE condition-adjusted prediction scaling**
 RE_Adj era bias fixed (era-normalised). But RE% still maps ~1:1 to time%, which may be too aggressive even after normalisation. A 4.7% RE improvement on flat Battersea gave adjusted 5K of ~17:00 (pre-fix). Monitor after next rebuild to see if era normalisation alone is sufficient, or if attenuation (×0.5?) is still needed.
@@ -140,6 +140,10 @@ Add athlete config summary as first sheet in Master XLSX. Separate session.
 Stale subset of `CLAUDE_RUNNING_PROJECT_OVERVIEW.md`. Delete if still present — the overview doc is the canonical reference.
 
 ---
+
+## Recently completed (2026-03-14 — Claude Code)
+
+- **GAP prediction chart trend line fix** — JS fallback from `trend_values_gap` → `trend_values` and `predicted_gap` → `predicted`. Green trend line now renders for all GAP athletes.
 
 ## Recently completed (2026-03-13, session 2 — Claude Code)
 

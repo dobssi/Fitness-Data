@@ -4511,6 +4511,21 @@ def _build_upcoming_sessions_html(sessions):
         weeks[week_key]['sessions'].append(s)
         weeks[week_key]['tss'] += s['tss']
 
+    # Detect hard sessions (F/L prefix = fartlek/long run with quality)
+    def _is_hard_session(desc):
+        d = desc.strip()
+        return bool(d) and d[0] in ('F', 'L') and len(d) > 1 and d[1] in '0123456789:'
+
+    # Smart truncation: preserve session type prefix (e.g. "F9:" or "L4:")
+    def _truncate_desc(desc, max_len=50):
+        if len(desc) <= max_len:
+            return desc
+        # Find first colon — keep the prefix label intact
+        colon = desc.find(':')
+        if 0 < colon < 5:
+            return desc[:max_len - 1] + '\u2026'
+        return desc[:max_len - 1] + '\u2026'
+
     # Build rows
     rows = []
     current_week = None
@@ -4523,30 +4538,36 @@ def _build_upcoming_sessions_html(sessions):
             if current_week is not None:
                 # Close previous week with total
                 prev_tss = weeks[current_week]['tss']
-                rows.append(f'<tr class="upcoming-week-total"><td colspan="2" style="text-align:right;font-size:0.8em;opacity:0.6">Week total</td><td style="text-align:right;font-size:0.8em;opacity:0.6">{prev_tss}</td></tr>')
+                rows.append(f'<tr class="upcoming-week-total"><td colspan="2" style="text-align:right">Week total</td><td style="text-align:right">{prev_tss}</td></tr>')
             current_week = week_key
 
         # Session row
         is_rest = s['tss'] == 0
         is_race = s.get('is_race', False)
-        row_class = 'upcoming-race' if is_race else ('upcoming-rest' if is_rest else '')
+        is_hard = _is_hard_session(s['description'])
+        classes = []
+        if is_race:
+            classes.append('upcoming-race')
+        elif is_rest:
+            classes.append('upcoming-rest')
+        elif is_hard:
+            classes.append('upcoming-hard')
+        row_class = ' '.join(classes)
         tss_str = str(s['tss']) if s['tss'] > 0 else ''
-        desc = s['description']
-        if len(desc) > 55:
-            desc = desc[:52] + '...'
+        desc = _truncate_desc(s['description'])
 
         rows.append(
             f'<tr class="{row_class}">'
-            f'<td style="white-space:nowrap;opacity:0.7;font-size:0.85em">{s["date_str"]}</td>'
-            f'<td>{desc}</td>'
-            f'<td style="text-align:right;opacity:0.7">{tss_str}</td>'
+            f'<td style="white-space:nowrap;opacity:0.5;font-size:0.85em">{s["date_str"]}</td>'
+            f'<td class="upcoming-desc">{desc}</td>'
+            f'<td style="text-align:right;opacity:0.5">{tss_str}</td>'
             f'</tr>'
         )
 
     # Final week total
     if current_week:
         final_tss = weeks[current_week]['tss']
-        rows.append(f'<tr class="upcoming-week-total"><td colspan="2" style="text-align:right;font-size:0.8em;opacity:0.6">Week total</td><td style="text-align:right;font-size:0.8em;opacity:0.6">{final_tss}</td></tr>')
+        rows.append(f'<tr class="upcoming-week-total"><td colspan="2" style="text-align:right">Week total</td><td style="text-align:right">{final_tss}</td></tr>')
 
     # Race countdown
     race_sessions = [s for s in sessions if s.get('is_race')]
@@ -4554,7 +4575,8 @@ def _build_upcoming_sessions_html(sessions):
     if race_sessions:
         r = race_sessions[0]
         days_to = (datetime.strptime(r['date_iso'], '%Y-%m-%d') - datetime.now()).days + 1
-        race_line = f'<div style="margin-top:8px;font-size:0.85em;opacity:0.7">Race: {r["description"]} — {r["date_str"]} ({days_to} days)</div>'
+        day_word = 'day' if days_to == 1 else 'days'
+        race_line = f'<div style="margin-top:10px;font-size:0.85em;opacity:0.7">Race: {r["description"]} — {r["date_str"]} ({days_to} {day_word})</div>'
 
     # Weekly TSS taper summary
     week_tss_parts = []
@@ -5097,9 +5119,18 @@ def generate_html(stats, rf_data, volume_data, ctl_atl_data, ctl_atl_lookup, rfl
         }}
         
         /* Upcoming sessions table */
-        .upcoming-rest td {{ opacity: 0.35; }}
+        .upcoming-rest td {{ opacity: 0.3; font-style: italic; }}
         .upcoming-race td {{ color: #FFD700; font-weight: 600; }}
-        .upcoming-week-total td {{ border-top: 1px solid rgba(255,255,255,0.08); }}
+        .upcoming-hard td.upcoming-desc {{ color: #93c5fd; }}
+        .upcoming-week-total td {{
+            border-top: 1px solid rgba(255,255,255,0.15);
+            padding-top: 6px !important;
+            padding-bottom: 8px !important;
+            font-weight: 600;
+            font-size: 0.82em;
+            letter-spacing: 0.02em;
+        }}
+        .upcoming-week-total + tr td {{ padding-top: 8px !important; }}
         .chart-container tbody tr td {{ padding: 3px 8px; }}
 
         /* Legacy chart classes — dark theme */
