@@ -383,8 +383,8 @@ def build_cache_index_fast(cache_dir: str) -> tuple:
     # Validate: check if index has entries and roughly matches .npz count
     npz_count = sum(1 for f in os.listdir(cache_dir) if f.lower().endswith(".npz")) if os.path.isdir(cache_dir) else 0
     
-    if not index or abs(len(index) - npz_count) > max(5, npz_count * 0.05):
-        # Index missing, empty, or significantly stale — rebuild
+    if not index or len(index) < npz_count:
+        # Index missing, empty, or has fewer entries than NPZ files — rebuild
         index = rebuild_cache_index(cache_dir)
     
     # Convert to sorted parallel lists for bisect lookup

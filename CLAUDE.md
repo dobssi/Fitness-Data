@@ -162,7 +162,7 @@ python onboard_athlete.py  # processes onboarding JSON from onboard.html
 
 ### High priority
 - **Rename `power_adjuster_to_S4` → `power_era_adjuster`:** Cross-codebase rename (rebuild, StepB, config, detect_eras, master columns). Own session.
-- **Prediction chart trend line missing for GAP athletes:** No green line on Race Predictions chart for A005/A007/all GAP dashboards. JS looks for `trend_values_gap` which doesn't exist; needs fallback to `trend_values`.
+- **Prediction chart trend line missing for GAP athletes:** ✅ FIXED. JS fallback from `trend_values_gap` → `trend_values`.
 - **Prediction tuning:** Paul and Ian predictions feel too slow post-pipeline changes. Own session.
 
 ### Dashboard
@@ -176,7 +176,8 @@ python onboard_athlete.py  # processes onboarding JSON from onboard.html
 - **GPS route map** — Leaflet.js + NPZ lat/lon. Own session.
 
 ### Pipeline / data quality
-- **HR spike filter:** Only handles session-start spikes, not mid-session pauses (>60s timestamp gaps).
+- **HR spike filter:** Settling time fix done (scales with pause duration). Post-pause HR overshoot still open — needs own session.
+- **A001 workflow missing `merge_user_data.py`:** Bespoke workflow doesn't process `user_data/` from Dropbox. Training plan not picked up. Fix identified, not yet applied.
 - **RE condition-adjusted prediction scaling:** Monitor if era normalisation alone is sufficient.
 - **NPZ upload missing** from A005/A006/other workflows (only A001 has it).
 - **`stryd_mass_kg`:** Needs adding to athlete.yml for athletes whose Stryd weight differs from actual.

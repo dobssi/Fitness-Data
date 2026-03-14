@@ -31,6 +31,8 @@ v53 is a mature multi-athlete running analytics pipeline (Stryd/GAP/SIM modes) p
 - s4/s5 eras merged for A001 (firmware shift <1.2%, below noise floor)
 
 ### What's in progress
+- **A001 workflow missing `merge_user_data.py`** — Bespoke workflow doesn't download/process `user_data/` from Dropbox. Training plan not picked up. Root cause identified, fix not yet applied. Need to add step matching template-generated workflows.
+- **A001 TSS z5_frac cache miss** — Mar 14 parkrun TSS was 103.5 (should be ~137). NPZ cache wasn't found during StepB, so z5_frac=NaN and Z5 intensity boost skipped. UPDATE triggered — verify TSS corrected on next session start.
 - **Johan A007 INITIAL** — rebuilding with dedup fix. Previous runs had 59 duplicate pairs (Polar FIT + Strava TCX), inflating volume/CTL. Dashboard predictions and headline stats also being fixed.
 - **athlete.yml Dropbox drift** — ✅ FIXED. Removed athlete.yml from all Dropbox sync steps. PEAK_CP bootstrap now commits back to git via `[skip ci]` commit. Stale DataPipeline copies deleted. Git is sole source of truth.
 
@@ -149,7 +151,12 @@ Stale subset of `CLAUDE_RUNNING_PROJECT_OVERVIEW.md`. Delete if still present �
 
 ---
 
-## Recently completed (2026-03-14 — Claude Code)
+## Recently completed (2026-03-14, session 2 — Claude Code)
+
+- **HR spike filter — settling time fix** — Swiss cheese settling now scales with pause duration for long pauses (>200s). Formula: `max(min(pause, 60), min(pause*0.3, 180)) + HR_LAG_S`. 686s pause: 75s → 195s, was 75s. Overshoot filter attempted but reverted (5% threshold too aggressive, 66 runs lost >50% data). Overshoot deferred to own session.
+- **TSS discrepancy diagnosed** — A001 parkrun TSS 103.5 vs A005/A006 ~168. Root cause: z5_frac=NaN from NPZ cache miss during StepB. Base TSS identical (~71.7); gap is Z5 intensity boost (×1.9). UPDATE triggered to fix.
+
+## Recently completed (2026-03-14, session 1 — Claude Code)
 
 - **GAP prediction chart trend line fix** — JS fallback from `trend_values_gap` → `trend_values` and `predicted_gap` → `predicted`. Green trend line now renders for all GAP athletes.
 - **Upcoming Sessions card polish** — Added CTL/ATL/TSB projected columns (post-workout values from Daily sheet). TSB colour-coded green/red. First week total now includes already-completed TSS. Today's planned races show even when no actual run yet. Styling: CTL/ATL subtle, TSB prominent.
