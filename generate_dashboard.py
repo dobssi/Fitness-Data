@@ -435,14 +435,18 @@ def get_upcoming_sessions(master_file):
         today = pd.Timestamp(datetime.now().date())
 
         # Check if today already has an actual run (non-planned TSS)
+        # But still show today if it's a planned race that hasn't been run yet
         today_row = df[df['Date'] == today]
         has_actual_today = False
+        today_is_planned_race = False
         if len(today_row) > 0:
             row = today_row.iloc[0]
             src = str(row.get('Planned_Source', ''))
             has_actual_today = row.get('TSS_Running', 0) > 0 and src in ('', 'nan')
+            today_is_planned_race = src == 'race'
 
-        start_date = today + timedelta(days=1) if has_actual_today else today
+        # Skip today only if we have actual data AND it's not a planned race day
+        start_date = today + timedelta(days=1) if (has_actual_today and not today_is_planned_race) else today
 
         # Filter to future planned sessions
         future = df[
@@ -476,6 +480,9 @@ def get_upcoming_sessions(master_file):
                 'tss': round(row.get('TSS_Running', 0)),
                 'source': str(row.get('Planned_Source', '')),
                 'is_race': str(row.get('Planned_Source', '')) == 'race',
+                'ctl': round(row.get('CTL', 0), 1) if pd.notna(row.get('CTL', None)) else None,
+                'atl': round(row.get('ATL', 0), 1) if pd.notna(row.get('ATL', None)) else None,
+                'tsb': round(row.get('TSB', 0), 1) if pd.notna(row.get('TSB', None)) else None,
             })
 
         return sessions, completed_tss_this_week
@@ -4551,7 +4558,7 @@ def _build_upcoming_sessions_html(sessions):
             label = f'Week total ({done} done + {total - done} planned)'
         else:
             label = 'Week total'
-        return f'<tr class="upcoming-week-total"><td colspan="2" style="text-align:right">{label}</td><td style="text-align:right">{total}</td></tr>'
+        return f'<tr class="upcoming-week-total"><td colspan="2" style="text-align:right">{label}</td><td style="text-align:right">{total}</td><td colspan="3"></td></tr>'
 
     # Build rows
     rows = []
@@ -4581,11 +4588,24 @@ def _build_upcoming_sessions_html(sessions):
         tss_str = str(s['tss']) if s['tss'] > 0 else ''
         desc = _truncate_desc(s['description'])
 
+        # CTL/ATL/TSB values (projected after planned session)
+        ctl_str = f'{s["ctl"]:.0f}' if s.get('ctl') is not None else ''
+        atl_str = f'{s["atl"]:.0f}' if s.get('atl') is not None else ''
+        tsb_val = s.get('tsb')
+        if tsb_val is not None:
+            tsb_color = '#4ade80' if tsb_val >= 0 else '#f87171'
+            tsb_str = f'<span style="color:{tsb_color}">{tsb_val:+.0f}</span>'
+        else:
+            tsb_str = ''
+
         rows.append(
             f'<tr class="{row_class}">'
             f'<td style="white-space:nowrap;opacity:0.5;font-size:0.85em">{s["date_str"]}</td>'
             f'<td class="upcoming-desc">{desc}</td>'
             f'<td style="text-align:right;opacity:0.5">{tss_str}</td>'
+            f'<td style="text-align:right;opacity:0.4;font-size:0.85em">{ctl_str}</td>'
+            f'<td style="text-align:right;opacity:0.4;font-size:0.85em">{atl_str}</td>'
+            f'<td style="text-align:right;font-size:0.85em">{tsb_str}</td>'
             f'</tr>'
         )
 
@@ -4621,6 +4641,9 @@ def _build_upcoming_sessions_html(sessions):
             <th style="text-align:left;padding:4px 8px;opacity:0.6">Date</th>
             <th style="text-align:left;padding:4px 8px;opacity:0.6">Session</th>
             <th style="text-align:right;padding:4px 8px;opacity:0.6">TSS</th>
+            <th style="text-align:right;padding:4px 8px;opacity:0.4;font-size:0.85em">CTL</th>
+            <th style="text-align:right;padding:4px 8px;opacity:0.4;font-size:0.85em">ATL</th>
+            <th style="text-align:right;padding:4px 8px;opacity:0.4;font-size:0.85em">TSB</th>
         </tr></thead>
         <tbody>{"".join(rows)}</tbody>
         </table>

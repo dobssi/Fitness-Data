@@ -1,5 +1,5 @@
 # Pipeline TODO — v53
-## Updated: 2026-03-12
+## Updated: 2026-03-14
 
 ---
 
@@ -44,9 +44,6 @@ Current name references a specific era (s4) that may not exist for all athletes.
 
 ### Dashboard features
 
-**Upcoming Sessions card styling** *(next session)*
-Card works but needs polish to match dark theme: rest rows more subtle, better description truncation, weekly total rows with more visual separation. Partial first week shows lower TSS than expected.
-
 **Upcoming Sessions projection overshoot**
 CTL/ATL projection extends to race date from PDF even if athlete doesn't have that race. Should cap at last planned session + 1 day, not race day, unless race is in `athlete.yml` `planned_races`.
 
@@ -54,7 +51,7 @@ CTL/ATL projection extends to race date from PDF even if athlete doesn't have th
 Continuously updated age grade rating on the dashboard (already have AG% on stat card). Express age-adjusted RFL as current AG% divided by peak AG%. Gives a "how fit am I relative to my age-adjusted best" metric that's more meaningful than raw RFL for ageing athletes. The AG% trend already exists — this is presenting it as a relative fitness signal.
 
 **Prediction tuning — Stryd mode possibly over-pessimistic**
-Paul's Stryd mode predictions feel too slow. GAP prediction chart trend line fix done (2026-03-13). Revisit Stryd-specific tuning in own session.
+Paul's Stryd mode predictions feel too slow. GAP predictions seem closer. Revisit Stryd-specific tuning in own session.
 
 **RE condition-adjusted prediction scaling**
 RE_Adj era bias fixed (era-normalised). But RE% still maps ~1:1 to time%, which may be too aggressive even after normalisation. A 4.7% RE improvement on flat Battersea gave adjusted 5K of ~17:00 (pre-fix). Monitor after next rebuild to see if era normalisation alone is sufficient, or if attenuation (×0.5?) is still needed.
@@ -144,6 +141,7 @@ Stale subset of `CLAUDE_RUNNING_PROJECT_OVERVIEW.md`. Delete if still present �
 ## Recently completed (2026-03-14 — Claude Code)
 
 - **GAP prediction chart trend line fix** — JS fallback from `trend_values_gap` → `trend_values` and `predicted_gap` → `predicted`. Green trend line now renders for all GAP athletes.
+- **Upcoming Sessions card polish** — Added CTL/ATL/TSB projected columns (post-workout values from Daily sheet). TSB colour-coded green/red. First week total now includes already-completed TSS. Today's planned races show even when no actual run yet. Styling: CTL/ATL subtle, TSB prominent.
 
 ## Recently completed (2026-03-13, session 2 — Claude Code)
 
