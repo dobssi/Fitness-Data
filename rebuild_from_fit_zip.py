@@ -3666,9 +3666,29 @@ def main():
                          and os.path.isfile(args.extra_summaries))
             if not _has_extra:
                 print(f"No new running activities found. Using existing master ({len(base_master_df)} rows).")
+                # v53.1: Still refresh activity names from pending before writing
+                if pending_activities is not None and len(pending_activities) > 0 and "file" in base_master_df.columns:
+                    _name_refreshed = 0
+                    for pkey in pending_activities.index:
+                        prow = pending_activities.loc[pkey]
+                        if isinstance(prow, pd.DataFrame):
+                            prow = prow.iloc[0]
+                        pend_name = prow.get("activity_name")
+                        if pd.isna(pend_name) or pend_name == "":
+                            continue
+                        _match = base_master_df["file"] == str(pkey)
+                        if _match.any():
+                            for idx in base_master_df.index[_match]:
+                                current = base_master_df.at[idx, "activity_name"]
+                                if pd.notna(current) and current == str(pend_name):
+                                    continue
+                                base_master_df.at[idx, "activity_name"] = str(pend_name)
+                                _name_refreshed += 1
+                    if _name_refreshed > 0:
+                        print(f"  Refreshed {_name_refreshed} activity names from pending_activities")
                 out_path = args.out
                 base_master_df.to_excel(out_path, index=False, sheet_name="Master")
-                print(f"Output (unchanged): {out_path}")
+                print(f"Output: {out_path}")
                 return 0
             else:
                 print(f"No FIT files found, but extra summaries available — continuing.")
@@ -4600,6 +4620,31 @@ def main():
 
     # v41: Ensure output is sorted by date (critical for append mode where new runs get concatenated at end)
     df = df.sort_values("date").reset_index(drop=True)
+
+    # v53.1: Refresh activity names from pending_activities on existing rows.
+    # On UPDATE, existing rows may have generic auto-names ("Easy morning 5km")
+    # because the intervals.icu name wasn't available at the time. The pending
+    # file is refreshed each run, so apply any newer names now.
+    if pending_activities is not None and len(pending_activities) > 0 and "file" in df.columns:
+        _name_refreshed = 0
+        for pkey in pending_activities.index:
+            prow = pending_activities.loc[pkey]
+            if isinstance(prow, pd.DataFrame):
+                prow = prow.iloc[0]
+            pend_name = prow.get("activity_name")
+            if pd.isna(pend_name) or pend_name == "":
+                continue
+            # Match by filename
+            _match = df["file"] == str(pkey)
+            if _match.any():
+                for idx in df.index[_match]:
+                    current = df.at[idx, "activity_name"]
+                    if pd.notna(current) and current == str(pend_name):
+                        continue  # Already correct
+                    df.at[idx, "activity_name"] = str(pend_name)
+                    _name_refreshed += 1
+        if _name_refreshed > 0:
+            print(f"  Refreshed {_name_refreshed} activity names from pending_activities")
 
     write_master(args.template, args.out, df, df_fail=df_fail)
     # --- v37 fix2: cache-write health summary ---
