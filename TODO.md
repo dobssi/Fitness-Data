@@ -95,8 +95,8 @@ Leaflet.js + OpenStreetMap, no API key. Per-second lat/lon from NPZ. Show route 
 
 ### Pipeline / data quality
 
-**HR spike filter for mid-session pauses**
-Currently only handles HR spikes at session start. Extend to detect timestamp gaps > 60s in per-second array and apply spike cleanup after each resume. Found during F9 session analysis (11-min pause caused HR 101→186 spike).
+**HR spike filter for mid-session pauses** ✅
+Swiss cheese model settling time now scales with pause duration: `max(min(pause, 60), min(pause*0.3, 180)) + HR_LAG_S`. Unchanged for pauses ≤200s (75s settling). For long pauses (e.g. 686s → 195s settling, was 75s). Mar 10 run: removed 79 contaminated seconds with inflated power:HR ratios (2.0-2.8) after 11-min pause, RF ratio dropped 0.85%.
 
 **classify_races.py < 3km**
 Only missing Golden Stag track mile (2019) in Paul Test. Other sub-3km races now classified.
@@ -156,6 +156,7 @@ Stale subset of `CLAUDE_RUNNING_PROJECT_OVERVIEW.md`. Delete if still present �
 - **A001 workflow fix** — `apply_run_metadata.py` arg names corrected (`--overrides` → `--override-file`, `--pending` → `--pending-file`). UPDATE runs with parkrun metadata were failing.
 - **A001/A005 athlete.yml planned_races synced** from Dropbox edits.
 - **athlete.yml removed from Dropbox sync** — all 7 workflows + template updated. PEAK_CP write-back now commits to git instead of Dropbox round-trip. Stale DataPipeline copies deleted. Prevents config drift between git and Dropbox.
+- **HR spike filter for mid-session pauses** — Swiss cheese model settling time now scales with pause duration for long pauses (>200s). Formula: `max(min(pause, 60), min(pause*0.3, 180)) + HR_LAG_S`. 686s pause: settling 75s → 195s. Verified on Mar 10 run (11-min pause): 79 contaminated seconds removed, RF ratio corrected by −0.85%.
 
 ## Recently completed (2026-03-13, session 2 — Claude Code)
 

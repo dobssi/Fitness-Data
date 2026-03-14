@@ -2523,16 +2523,21 @@ def _rf_metrics(t: np.ndarray, v: np.ndarray, p: np.ndarray, hr: np.ndarray, mas
     pause_periods.sort(key=lambda x: x[0])
     
     # Build exclusion mask for pauses within our window
-    # Exclude: pause duration + min(pause_duration, 60s) settling time
+    # Exclude: pause duration + settling time (HR ramp-up after resume)
     exclude_mask = np.zeros(n, dtype=bool)
-    
+
     for pause_start, pause_end, pause_duration in pause_periods:
         # Only process pauses that overlap with our window
         if pause_end < start_s or pause_start > end_s:
             continue
-        
-        # Settling time after pause: min(pause_duration, 60s) + HR_LAG_S
-        settling_time = min(pause_duration, 60.0) + HR_LAG_S
+
+        # Settling time after pause: scales with pause duration.
+        # Short pauses: min(pause, 60s) + lag (original behaviour, 75s max).
+        # Long pauses: 30% of pause duration + lag (cap 180s). After a 10-min
+        # pause the athlete is near-resting; HR needs ~3 min to equilibrate.
+        # max() ensures long pauses never get LESS settling than short ones.
+        settling_time = max(min(pause_duration, 60.0),
+                            min(pause_duration * 0.3, 180.0)) + HR_LAG_S
         exclude_end = pause_end + settling_time
         
         # Mark samples to exclude
@@ -2551,7 +2556,8 @@ def _rf_metrics(t: np.ndarray, v: np.ndarray, p: np.ndarray, hr: np.ndarray, mas
                              if pe > start_s and ps < end_s]
             if window_pauses:
                 biggest = max(window_pauses, key=lambda x: x[2])
-                settling_time = min(biggest[2], 60.0) + HR_LAG_S
+                settling_time = max(min(biggest[2], 60.0),
+                                    min(biggest[2] * 0.3, 180.0)) + HR_LAG_S
                 new_start = biggest[1] + settling_time  # After pause + settling
                 new_end = min(new_start + RF_WINDOW_DURATION, tmax)
                 win_shifted = running & (t >= new_start) & (t <= new_end) & (~exclude_mask)
