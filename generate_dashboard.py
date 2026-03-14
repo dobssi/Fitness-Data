@@ -455,6 +455,17 @@ def get_upcoming_sessions(master_file):
         if len(future) == 0:
             return []
 
+        # Calculate actual TSS already completed earlier this week
+        # (so the first week total reflects the full week, not just remaining days)
+        first_future_date = future.iloc[0]['Date']
+        iso_cal = first_future_date.isocalendar()
+        week_start = first_future_date - timedelta(days=first_future_date.weekday())  # Monday
+        earlier_this_week = df[
+            (df['Date'] >= week_start) &
+            (df['Date'] < start_date)
+        ]
+        completed_tss_this_week = round(earlier_this_week['TSS_Running'].fillna(0).sum())
+
         sessions = []
         for _, row in future.iterrows():
             dt = row['Date']
@@ -467,7 +478,7 @@ def get_upcoming_sessions(master_file):
                 'is_race': str(row.get('Planned_Source', '')) == 'race',
             })
 
-        return sessions
+        return sessions, completed_tss_this_week
     except Exception as e:
         print(f"  Warning: could not load upcoming sessions: {e}")
         return []
@@ -4499,15 +4510,22 @@ def _build_upcoming_sessions_html(sessions):
     if not sessions:
         return ''
 
+    # Actual TSS already completed earlier in the current week
+    completed_tss = sessions[0].pop('_completed_tss_this_week', 0) if sessions else 0
+
     # Group by week (ISO week) to show weekly TSS totals
     from collections import OrderedDict
     weeks = OrderedDict()
+    first_week = True
     for s in sessions:
         # Get ISO week from date
         dt = datetime.strptime(s['date_iso'], '%Y-%m-%d')
         week_key = dt.strftime('%Y-W%V')
         if week_key not in weeks:
-            weeks[week_key] = {'sessions': [], 'tss': 0}
+            # First week includes already-completed TSS
+            initial_tss = completed_tss if first_week else 0
+            weeks[week_key] = {'sessions': [], 'tss': initial_tss, 'completed_tss': initial_tss}
+            first_week = False
         weeks[week_key]['sessions'].append(s)
         weeks[week_key]['tss'] += s['tss']
 
@@ -4526,6 +4544,15 @@ def _build_upcoming_sessions_html(sessions):
             return desc[:max_len - 1] + '\u2026'
         return desc[:max_len - 1] + '\u2026'
 
+    def _week_total_row(week_data):
+        total = week_data['tss']
+        done = week_data.get('completed_tss', 0)
+        if done > 0:
+            label = f'Week total ({done} done + {total - done} planned)'
+        else:
+            label = 'Week total'
+        return f'<tr class="upcoming-week-total"><td colspan="2" style="text-align:right">{label}</td><td style="text-align:right">{total}</td></tr>'
+
     # Build rows
     rows = []
     current_week = None
@@ -4536,9 +4563,7 @@ def _build_upcoming_sessions_html(sessions):
         # Week separator
         if week_key != current_week:
             if current_week is not None:
-                # Close previous week with total
-                prev_tss = weeks[current_week]['tss']
-                rows.append(f'<tr class="upcoming-week-total"><td colspan="2" style="text-align:right">Week total</td><td style="text-align:right">{prev_tss}</td></tr>')
+                rows.append(_week_total_row(weeks[current_week]))
             current_week = week_key
 
         # Session row
@@ -4566,8 +4591,7 @@ def _build_upcoming_sessions_html(sessions):
 
     # Final week total
     if current_week:
-        final_tss = weeks[current_week]['tss']
-        rows.append(f'<tr class="upcoming-week-total"><td colspan="2" style="text-align:right">Week total</td><td style="text-align:right">{final_tss}</td></tr>')
+        rows.append(_week_total_row(weeks[current_week]))
 
     # Race countdown
     race_sessions = [s for s in sessions if s.get('is_race')]
@@ -7358,9 +7382,15 @@ def main():
     
     # Upcoming sessions from planned_sessions.yml (via Daily sheet)
     print("Loading upcoming sessions...")
-    upcoming_sessions = get_upcoming_sessions(MASTER_FILE)
-    if upcoming_sessions:
-        print(f"  {len(upcoming_sessions)} upcoming planned sessions")
+    _upcoming_result = get_upcoming_sessions(MASTER_FILE)
+    if _upcoming_result:
+        upcoming_sessions, _completed_tss = _upcoming_result
+        # Attach completed TSS as metadata so card builder can include it in first week total
+        if upcoming_sessions:
+            upcoming_sessions[0]['_completed_tss_this_week'] = _completed_tss
+        print(f"  {len(upcoming_sessions)} upcoming planned sessions (completed this week: {_completed_tss} TSS)")
+    else:
+        upcoming_sessions = None
 
     # Race History data
     print("Computing race history...")
