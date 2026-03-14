@@ -249,6 +249,19 @@ jobs:
             --planned-sessions ${{ env.ATHLETE_DIR }}/planned_sessions.yml \
             --progress-every 50
 
+      # Commit PEAK_CP write-back to git (athlete.yml is source of truth in git, not Dropbox)
+      - name: Commit PEAK_CP update to git
+        if: ${{ env.PIPELINE_MODE == 'UPDATE' || env.PIPELINE_MODE == 'FULL' }}
+        run: |
+          git diff --quiet ${{ env.ATHLETE_CONFIG_PATH }} || {
+            git config user.name "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+            git add ${{ env.ATHLETE_CONFIG_PATH }}
+            git commit -m "Auto-update PEAK_CP from bootstrap [skip ci]"
+            git push
+          }
+        continue-on-error: true
+
       - name: Generate dashboard (UPDATE / FULL)
         if: ${{ env.PIPELINE_MODE == 'UPDATE' || env.PIPELINE_MODE == 'FULL' }}
         env:
@@ -497,6 +510,18 @@ jobs:
             --strava ${{ env.ATHLETE_DIR }}/data/activities.csv \
             --planned-sessions ${{ env.ATHLETE_DIR }}/planned_sessions.yml \
             --progress-every 50
+
+      # Commit PEAK_CP write-back to git (athlete.yml is source of truth in git, not Dropbox)
+      - name: Commit PEAK_CP update to git
+        run: |
+          git diff --quiet ${{ env.ATHLETE_CONFIG_PATH }} || {
+            git config user.name "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+            git add ${{ env.ATHLETE_CONFIG_PATH }}
+            git commit -m "Auto-update PEAK_CP from bootstrap [skip ci]"
+            git push
+          }
+        continue-on-error: true
 
       - name: Generate dashboard
         env:

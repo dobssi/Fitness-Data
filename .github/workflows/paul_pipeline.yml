@@ -201,7 +201,6 @@ jobs:
             --dropbox-base "${{ env.DB_BASE }}" \
             --local-prefix "${{ env.ATHLETE_DIR }}" \
             --items data/activities.csv \
-                    athlete.yml \
                     activity_overrides.xlsx \
                     athlete_data.csv \
                     output/Master_A005_FULL.xlsx \
@@ -357,6 +356,19 @@ jobs:
             --planned-sessions ${{ env.ATHLETE_DIR }}/planned_sessions.yml \
             --progress-every 50
 
+      # Commit PEAK_CP write-back to git (athlete.yml is source of truth in git, not Dropbox)
+      - name: Commit PEAK_CP update to git
+        if: ${{ steps.gate.outputs.continue == 'true' && (env.PIPELINE_MODE == 'UPDATE' || env.PIPELINE_MODE == 'FULL') }}
+        run: |
+          git diff --quiet ${{ env.ATHLETE_CONFIG_PATH }} || {
+            git config user.name "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+            git add ${{ env.ATHLETE_CONFIG_PATH }}
+            git commit -m "Auto-update PEAK_CP from bootstrap [skip ci]"
+            git push
+          }
+        continue-on-error: true
+
       - name: Generate dashboard (UPDATE / FULL)
         if: ${{ steps.gate.outputs.continue == 'true' && (env.PIPELINE_MODE == 'UPDATE' || env.PIPELINE_MODE == 'FULL') }}
         env:
@@ -401,7 +413,6 @@ jobs:
             --dropbox-base "${{ env.DB_BASE }}" \
             --local-prefix "${{ env.ATHLETE_DIR }}" \
             --items activity_overrides.xlsx \
-                    athlete.yml \
                     athlete_data.csv \
                     data/activities.csv \
                     fit_sync_state.json \
@@ -537,7 +548,6 @@ jobs:
             --dropbox-base "${{ env.DB_BASE }}" \
             --local-prefix "${{ env.ATHLETE_DIR }}" \
             --items data/activities.csv \
-                    athlete.yml \
                     activity_overrides.xlsx \
                     athlete_data.csv \
                     output/Master_A005_FULL.xlsx \
@@ -638,6 +648,18 @@ jobs:
             --planned-sessions ${{ env.ATHLETE_DIR }}/planned_sessions.yml \
             --progress-every 50
 
+      # Commit PEAK_CP write-back to git (athlete.yml is source of truth in git, not Dropbox)
+      - name: Commit PEAK_CP update to git
+        run: |
+          git diff --quiet ${{ env.ATHLETE_CONFIG_PATH }} || {
+            git config user.name "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+            git add ${{ env.ATHLETE_CONFIG_PATH }}
+            git commit -m "Auto-update PEAK_CP from bootstrap [skip ci]"
+            git push
+          }
+        continue-on-error: true
+
       - name: Generate dashboard
         env:
           MASTER_FILE:       ${{ env.ATHLETE_DIR }}/output/Master_A005_FULL_post.xlsx
@@ -652,7 +674,6 @@ jobs:
             --dropbox-base "${{ env.DB_BASE }}" \
             --local-prefix "${{ env.ATHLETE_DIR }}" \
             --items activity_overrides.xlsx \
-                    athlete.yml \
                     athlete_data.csv \
                     data/activities.csv \
                     output/Master_A005_FULL_post.xlsx \
