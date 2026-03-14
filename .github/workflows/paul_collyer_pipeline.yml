@@ -235,8 +235,8 @@ jobs:
             ARGS="$ARGS --notes \"${{ github.event.inputs.notes }}\""
           fi
           eval python ci/apply_run_metadata.py \
-            --overrides ${{ env.ATHLETE_DIR }}/activity_overrides.xlsx \
-            --pending ${{ env.ATHLETE_DIR }}/pending_activities.csv \
+            --override-file ${{ env.ATHLETE_DIR }}/activity_overrides.xlsx \
+            --pending-file ${{ env.ATHLETE_DIR }}/pending_activities.csv \
             $ARGS
 
       - name: Upload metadata to Dropbox
