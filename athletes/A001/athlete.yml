@@ -36,16 +36,16 @@ zones:
 # Surface: road, trail, undulating_trail, track, indoor_track
 planned_races:
   - name: "Battersea parkrun"
-    date: "2026-02-21"
-    distance_km: 5.0
+    date: "2026-03-28"
+    distance_km: 5
     priority: C
     surface: road
-  - name: "LFOTM 5K"
-    date: "2026-02-27"
-    distance_km: 5.0
-    priority: B
+  - name: "Haga parkrun"
+    date: "2026-04-18"
+    distance_km: 5
+    priority: C
     surface: road
-  - name: "Premiärhalvan"
+  - name: "PremierHalvan"
     date: "2026-04-25"
     distance_km: 21.097
     priority: A

@@ -26,20 +26,20 @@ athlete:
     Marathon: 0.88
 
 planned_races:
+  - name: "Battersea parkrun"
+    date: "2026-03-28"
+    distance_km: 5
+    priority: C
+    surface: road
+  - name: "Haga parkrun"
+    date: "2026-04-18"
+    distance_km: 5
+    priority: C
+    surface: road
   - name: "PremierHalvan"
     date: "2026-04-25"
     distance_km: 21.097
     priority: A
-    surface: road
-  - name: "Haga parkrun"
-    date: "2026-03-21"
-    distance_km: 5.0
-    priority: B
-    surface: road
-  - name: "Battersea parkrun"
-    date: "2026-03-28"
-    distance_km: 5.0
-    priority: C
     surface: road
 
 power:
