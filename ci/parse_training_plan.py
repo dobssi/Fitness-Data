@@ -233,6 +233,88 @@ def parse_day_line(line: str) -> tuple[str, str] | None:
     return None
 
 
+# ─── Language detection and translation ───────────────────────────────────────
+
+# Swedish → English translation map for common training terms
+_SV_EN_TERMS = {
+    # Session types
+    'långpass': 'Long run',
+    'långlopp': 'Long run',
+    'lugnt': 'Easy',
+    'lugn': 'Easy',
+    'lätt': 'Easy',
+    'vila': 'Rest',
+    'ledigt': 'Rest',
+    'ledig': 'Rest',
+    'fridag': 'Rest',
+    'tempol': 'Tempo run',
+    'tempo': 'Tempo',
+    'tröskel': 'Threshold',
+    'intervall': 'Intervals',
+    'intervaller': 'Intervals',
+    'fartlek': 'Fartlek',
+    'tävling': 'Race',
+    'lopp': 'Race',
+    'stigningar': 'strides',
+    'acceleration': 'strides',
+    'uppvärmning': 'Warmup',
+    'nedvarvning': 'Cooldown',
+    'koordination': 'drills',
+    'sprintbackar': 'hill sprints',
+    # Modifiers
+    'med': 'with',
+    'och': 'and',
+    'min': 'min',
+    'timmar': 'hours',
+    'timme': 'hour',
+    # Cross-training
+    'styrka': 'Strength',
+    'gym': 'Gym',
+    'cykel': 'Bike',
+    'simning': 'Swim',
+    'skidor': 'Ski',
+    'alt träning': 'Cross-train',
+}
+
+# Markers that indicate Swedish text
+_SV_MARKERS = {'vecka', 'må', 'ti', 'on', 'to', 'lö', 'sö', 'långpass',
+               'lugn', 'vila', 'ledigt', 'tröskel', 'tävling', 'och',
+               'med', 'stigningar', 'fridag'}
+
+
+def detect_language(text: str) -> str:
+    """Detect whether plan text is Swedish or English.
+
+    Returns 'sv' or 'en'.
+    """
+    text_lower = text.lower()
+    sv_count = sum(1 for marker in _SV_MARKERS
+                   if re.search(rf'\b{re.escape(marker)}\b', text_lower))
+    return 'sv' if sv_count >= 2 else 'en'
+
+
+def translate_description(desc: str, lang: str) -> str:
+    """Translate a session description to English if Swedish.
+
+    Preserves technical notation (F10:, E4:, 21KP, rep schemes, durations).
+    Only translates known Swedish words.
+    """
+    if lang != 'sv':
+        return desc
+
+    # Don't translate session codes (F10:, E4:, D3:, L5:, S2:, N3:)
+    # or race names (proper nouns starting with uppercase)
+    # or pace notation (21KP, 42KP, @, x, ')
+
+    result = desc
+    for sv_term, en_term in _SV_EN_TERMS.items():
+        # Case-insensitive whole-word replacement, preserving original case position
+        pattern = re.compile(rf'\b{re.escape(sv_term)}\b', re.IGNORECASE)
+        result = pattern.sub(en_term, result)
+
+    return result
+
+
 # ─── Session classification ──────────────────────────────────────────────────
 
 def classify_session(description: str) -> str:
@@ -659,6 +741,11 @@ def parse_plan(text: str, pdf_filename: str, today: date,
     source = detect_plan_source(text, pdf_filename)
     race_date, race_distance = detect_race_info(text)
 
+    # Detect language for translation
+    lang = detect_language(text)
+    if lang == 'sv':
+        print("  Detected Swedish plan — translating to English")
+
     # Find week headers
     week_headers = detect_week_headers(lines)
     if not week_headers:
@@ -689,13 +776,14 @@ def parse_plan(text: str, pdf_filename: str, today: date,
             parsed = parse_day_line(lines[li])
             if parsed:
                 day, desc = parsed
-                stype = classify_session(desc)
+                stype = classify_session(desc)  # Classify on original (handles Swedish)
                 dur = extract_duration_minutes(desc)
                 tss = estimate_tss(stype, dur, calibration)
+                desc_out = translate_description(desc.strip(), lang)
 
                 sessions.append({
                     'day': day,
-                    'description': desc.strip(),
+                    'description': desc_out,
                     'tss': tss,
                 })
 
