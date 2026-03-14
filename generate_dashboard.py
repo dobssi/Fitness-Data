@@ -2742,9 +2742,13 @@ def _rwp_duration(name, ctl_ref):
     return max(10, round(ctl_ref * 0.50 / 5) * 5)
 
 def _solve_taper(ctl0, atl0, days_to_race, ctl_ref, dist_cat, priority,
-                 today_date, recent_runs, race_name, dist_km=None):
+                 today_date, recent_runs, race_name, dist_km=None,
+                 planned_sessions=None):
     """Adaptive taper: CTL-scaled template -> forward project -> reduce if out of zone.
-    
+
+    If planned_sessions is provided (dict of date_iso -> {description, tss}),
+    those sessions override the generic template for matching days.
+
     Returns (plan_info_dict, results_list) where results_list has one entry per day
     from tomorrow through race day, each with date/session/tss/ctl/atl/tsb/tag.
     """
@@ -2829,6 +2833,11 @@ def _solve_taper(ctl0, atl0, days_to_race, ctl_ref, dist_cat, priority,
                 sess, tss_val, tag = act['name'], act['tss'], 'done'
             elif is_race:
                 sess, tss_val, tag = f'\U0001f3c1 {race_name}', 0, 'race'
+            elif planned_sessions and dstr in planned_sessions:
+                # Use uploaded training plan session instead of generic template
+                _ps = planned_sessions[dstr]
+                sess, tss_val = _ps['description'], _ps['tss']
+                tag = 'today' if i_d == 0 else 'plan'
             else:
                 match = [p for p in plan if p['d'] == days_rem]
                 if match:
@@ -2890,7 +2899,7 @@ def _solve_taper(ctl0, atl0, days_to_race, ctl_ref, dist_cat, priority,
 # ============================================================================
 # v51.7: ZONE HTML GENERATOR
 # ============================================================================
-def _generate_zone_html(zone_data, stats=None):
+def _generate_zone_html(zone_data, stats=None, upcoming_sessions=None):
     """Generate the Training Zones, Race Readiness, and Weekly Zone Volume HTML."""
     if zone_data is None:
         return '<!-- zones: no data -->'
@@ -3425,10 +3434,17 @@ def _generate_zone_html(zone_data, stats=None):
             _rwp_ctl0 = zone_data.get('current_ctl', 0)
             _rwp_atl0 = zone_data.get('current_atl', 0)
             _rwp_recent = {r['date']: r for r in zone_data.get('recent_tss', [])}
-            
+
+            # Build planned sessions lookup from uploaded training plan
+            _rwp_planned = None
+            if upcoming_sessions:
+                _rwp_planned = {s['date_iso']: {'description': s['description'], 'tss': s['tss']}
+                                for s in upcoming_sessions if not s.get('is_race')}
+
             _rwp_plan, _rwp_results = _solve_taper(
                 _rwp_ctl0, _rwp_atl0, days_to, _rwp_ctl0, _rwp_dist_cat, priority,
-                _today, _rwp_recent, race['name'], dist_km=dist_km
+                _today, _rwp_recent, race['name'], dist_km=dist_km,
+                planned_sessions=_rwp_planned
             )
             
             _pcts = _rwp_interp_targets(dist_km).get(priority, (2, 18)) if dist_km else _RWP_TSB_TARGETS.get(_rwp_dist_cat, _RWP_TSB_TARGETS['5K']).get(priority, (2, 18))
@@ -3460,7 +3476,8 @@ def _generate_zone_html(zone_data, stats=None):
             _DOW = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
             _MON = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
             
-            _rwp_html = f'<div class="rwp"><div class="rwp-label">📋 Race Week Plan · {_rwp_taper_label} taper</div>'
+            _rwp_source_label = 'from coach plan' if _rwp_planned else f'{_rwp_taper_label} taper'
+            _rwp_html = f'<div class="rwp"><div class="rwp-label">📋 Race Week Plan · {_rwp_source_label}</div>'
             _rwp_html += '<div class="dh"><span>Day</span><span>Session</span><span style="text-align:right">TSS</span><span style="text-align:right">CTL</span><span style="text-align:right">ATL</span><span style="text-align:right">TSB</span></div>'
             
             for _dd in _rwp_results:
@@ -5454,7 +5471,7 @@ function raceAnnotations(dates) {{
     {_generate_recent_achievements_html(milestone_data) if milestone_data else ''}
     
     <!-- Training Zones Section -->
-    {_generate_zone_html(zone_data, stats)}
+    {_generate_zone_html(zone_data, stats, upcoming_sessions=upcoming_sessions)}
     
     <!-- RF Trend Chart -->
     <div class="chart-container">
