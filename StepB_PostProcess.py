@@ -2544,64 +2544,11 @@ def _rf_metrics(t: np.ndarray, v: np.ndarray, p: np.ndarray, hr: np.ndarray, mas
         exclude_mask |= (t >= pause_start) & (t <= exclude_end)
         out["RF_window_shifted"] = True  # Flag that we had to exclude pauses
     
-    # --- Post-pause HR overshoot filter ---
-    # After a long pause (>120s), the cardiovascular system overshoots:
-    # HR ramps past equilibrium, peaks ~10-15 bpm above steady state, then settles.
-    # The basic settling time covers the ramp-up phase but not the overshoot.
-    # Detect: compare 30s rolling power:HR ratio to a stable reference from
-    # the latter portion of the window. Extend exclusion until the 30s rolling
-    # ratio recovers to within 5% of reference.
-    long_pauses = [(ps, pe, pd) for ps, pe, pd in pause_periods if pd > 120.0]
-    if long_pauses and running.sum() > 300:
-        prelim_win = running & (t >= start_s) & (t <= end_s) & (~exclude_mask)
-        if prelim_win.sum() > 200:
-            # Smoothed lagged power for ratio computation
-            _ov_kern = np.ones(30, dtype=float) / 30.0
-            _p_smooth_ov = np.convolve(np.nan_to_num(p, nan=0.0), _ov_kern, mode="same")
-            _lag_ov = int(round(HR_LAG_S))
-            _p_lag_ov = np.full_like(_p_smooth_ov, np.nan)
-            if _lag_ov < n:
-                _p_lag_ov[_lag_ov:] = _p_smooth_ov[:-_lag_ov]
-
-            # Reference: median ratio from the latter 60% of the preliminary window
-            prelim_times = t[prelim_win]
-            t_split = float(np.percentile(prelim_times, 40))
-            ref_mask = prelim_win & (t >= t_split)
-            if ref_mask.sum() > 120:
-                _ref_vals = np.where(
-                    ref_mask & np.isfinite(_p_lag_ov) & (_p_lag_ov > 0) & (hr > 30),
-                    _p_lag_ov / hr, np.nan)
-                _ref_finite = _ref_vals[np.isfinite(_ref_vals)]
-                ref_ratio = float(np.nanmedian(_ref_finite)) if _ref_finite.size > 60 else np.nan
-                overshoot_thr = ref_ratio * 0.95  # within 5% of stable ratio
-
-                if np.isfinite(ref_ratio) and ref_ratio > 0:
-                    for pause_start, pause_end, pause_duration in long_pauses:
-                        stl = max(min(pause_duration, 60.0),
-                                  min(pause_duration * 0.3, 180.0)) + HR_LAG_S
-                        scan_start = pause_end + stl
-                        scan_end = min(scan_start + 360.0, end_s)
-                        # Scan entire range: find LAST below-threshold block,
-                        # then exclude everything from scan_start to that point.
-                        # Overshoot is non-monotonic (initial settling, then peak).
-                        last_bad_t = None
-                        for scan_t in np.arange(scan_start, scan_end, 15.0):
-                            blk = running & (t >= scan_t) & (t < scan_t + 30.0) & (hr > 30)
-                            blk_idx = np.where(blk)[0]
-                            if blk_idx.size < 10:
-                                continue
-                            _r_blk = _p_lag_ov[blk_idx]
-                            _h_blk = hr[blk_idx]
-                            _ok = np.isfinite(_r_blk) & (_r_blk > 0)
-                            if _ok.sum() < 10:
-                                continue
-                            blk_ratio = float(np.mean(_r_blk[_ok] / _h_blk[_ok]))
-                            if blk_ratio < overshoot_thr:
-                                last_bad_t = scan_t + 30.0
-                        # Exclude everything from settling end to last bad block
-                        if last_bad_t is not None:
-                            exclude_mask |= ((t >= scan_start) & (t <= last_bad_t)
-                                             & running)
+    # NOTE: Post-pause HR overshoot (HR peaks ~15bpm above equilibrium after
+    # long pauses) is a known issue but ratio-based filtering was too aggressive
+    # (5% threshold false-positives on hills/effort changes, 66 runs lost >50%
+    # of valid data). The improved settling time above handles the ramp-up phase.
+    # Overshoot correction needs a more surgical approach — own session.
 
     # Final window mask: within time bounds, running, and not excluded
     win = running & (t >= start_s) & (t <= end_s) & (~exclude_mask)
