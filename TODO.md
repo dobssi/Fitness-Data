@@ -32,6 +32,7 @@ v53 is a mature multi-athlete running analytics pipeline (Stryd/GAP/SIM modes) p
 
 ### What's in progress
 - **Johan A007 INITIAL** — rebuilding with dedup fix. Previous runs had 59 duplicate pairs (Polar FIT + Strava TCX), inflating volume/CTL. Dashboard predictions and headline stats also being fixed.
+- **athlete.yml Dropbox drift** — ✅ FIXED. Removed athlete.yml from all Dropbox sync steps. PEAK_CP bootstrap now commits back to git via `[skip ci]` commit. Stale DataPipeline copies deleted. Git is sole source of truth.
 
 ---
 
@@ -44,8 +45,17 @@ Current name references a specific era (s4) that may not exist for all athletes.
 
 ### Dashboard features
 
-**Upcoming Sessions projection overshoot**
-CTL/ATL projection extends to race date from PDF even if athlete doesn't have that race. Should cap at last planned session + 1 day, not race day, unless race is in `athlete.yml` `planned_races`.
+**Upcoming Sessions — first week TSS includes completed runs** ✅
+Done. Week total now sums actual + planned TSS.
+
+**Upcoming Sessions — CTL/ATL/TSB projection columns** ✅
+Done. Post-workout values projected from Daily sheet. TSB colour-coded green/red.
+
+**Upcoming Sessions — week total alignment**
+Week total label should left-align under Session column, not centred. Minor styling.
+
+**Intervals.icu RACE tag ingestion**
+When athlete tags a run as RACE on intervals.icu, pipeline should pick it up. Currently not in FIT sub_sport (always generic) or activities.csv. Need to check intervals.icu API for tags field.
 
 **Age Grade Rating / AG-relative RFL** *(favourite feature idea)*
 Continuously updated age grade rating on the dashboard (already have AG% on stat card). Express age-adjusted RFL as current AG% divided by peak AG%. Gives a "how fit am I relative to my age-adjusted best" metric that's more meaningful than raw RFL for ageing athletes. The AG% trend already exists — this is presenting it as a relative fitness signal.
@@ -68,11 +78,11 @@ Short races showing last row with 60+ min zone data. Needs troubleshooting.
 **Activity search + override editor** *(own session)*
 In-dashboard search of activity log, edit modal for overrides, connects to existing GitHub Actions override dispatch. Replaces spreadsheet editing.
 
-**Scheduled workout planner** *(own session)*
-Planned sessions → TSS estimates → Banister projection → dashed CTL/ATL chart extension + projected TSB on race day card. Foundation partially built with `PlannedSession` dataclass and `planned_sessions` YAML block. Two approaches to populate:
-- **Option 2 (LLM-assisted):** Athlete drops coach's training plan PDF into `user_data/`. Pipeline calls Anthropic API to extract structured sessions (week-by-week, session types, efforts, durations). Athlete confirms, output goes into `planned_sessions` in `athlete.yml`. Prototype tested on Johan's Hannover HM plan — successfully parsed 5 weeks of sessions, estimated TSS, projected Banister to race day (TSB +4.7). Swedish/English mixed notation handled.
-- **Option 3 (parameter-driven):** Athlete provides race date + distance + weekly volume target (or inferred from recent CTL). Script generates generic taper (100→90→80→70% over 4 weeks), distributes key sessions + filler easy runs to hit volume targets. No PDF parsing needed — covers 80% of value.
-Either approach fills `planned_sessions` YAML → StepB Banister projection → dashed CTL/ATL/TSB lines on dashboard → projected TSB on race day card.
+**Scheduled workout planner** *(mostly done)*
+Training plan parser (`ci/parse_training_plan.py`) parses PDF/TXT plans dropped into `user_data/`. Supports Swedish + English (auto-detected, translated to English for dashboard). Classifies sessions, estimates TSS (calibrated from athlete history), outputs `planned_sessions.yml`. StepB reads it for Banister projection. Upcoming Sessions card shows plan with CTL/ATL/TSB. Race Week Plan card uses plan sessions when available.
+Remaining:
+- Wire plan sessions into Race Week Plan taper solver (use real sessions instead of generic taper when dates overlap)
+- Option 3 (parameter-driven generic taper) still available for athletes without coach plans
 
 **Athlete page** *(own session, phase 2 after workout planner)*
 `athlete.html` — forward-looking complement to dashboard. Training plan + projected CTL/ATL, race calendar, goals, profile.
@@ -142,6 +152,10 @@ Stale subset of `CLAUDE_RUNNING_PROJECT_OVERVIEW.md`. Delete if still present �
 
 - **GAP prediction chart trend line fix** — JS fallback from `trend_values_gap` → `trend_values` and `predicted_gap` → `predicted`. Green trend line now renders for all GAP athletes.
 - **Upcoming Sessions card polish** — Added CTL/ATL/TSB projected columns (post-workout values from Daily sheet). TSB colour-coded green/red. First week total now includes already-completed TSS. Today's planned races show even when no actual run yet. Styling: CTL/ATL subtle, TSB prominent.
+- **Swedish→English translation in training plan parser** — Auto-detects language from Swedish markers (vecka, långpass, vila etc.). Translates session descriptions to English while preserving technical notation (F10:, 21KP, rep schemes). Translation map covers ~30 common training terms.
+- **A001 workflow fix** — `apply_run_metadata.py` arg names corrected (`--overrides` → `--override-file`, `--pending` → `--pending-file`). UPDATE runs with parkrun metadata were failing.
+- **A001/A005 athlete.yml planned_races synced** from Dropbox edits.
+- **athlete.yml removed from Dropbox sync** — all 7 workflows + template updated. PEAK_CP write-back now commits to git instead of Dropbox round-trip. Stale DataPipeline copies deleted. Prevents config drift between git and Dropbox.
 
 ## Recently completed (2026-03-13, session 2 — Claude Code)
 
