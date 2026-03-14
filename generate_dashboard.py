@@ -4575,7 +4575,7 @@ def _build_upcoming_sessions_html(sessions):
             label = f'Week total ({done} done + {total - done} planned)'
         else:
             label = 'Week total'
-        return f'<tr class="upcoming-week-total"><td></td><td>{label}</td><td style="text-align:right">{total}</td><td colspan="3"></td></tr>'
+        return f'<tr class="upcoming-week-total"><td colspan="2" style="text-align:left">{label}</td><td style="text-align:right">{total}</td><td colspan="3"></td></tr>'
 
     # Build rows
     rows = []
@@ -5191,8 +5191,9 @@ def generate_html(stats, rf_data, volume_data, ctl_atl_data, ctl_atl_lookup, rfl
             padding-top: 6px !important;
             padding-bottom: 8px !important;
             font-weight: 600;
-            font-size: 0.82em;
+            font-size: 0.75em;
             letter-spacing: 0.02em;
+            color: rgba(255,255,255,0.55);
         }}
         .upcoming-week-total + tr td {{ padding-top: 8px !important; }}
         .chart-container tbody tr td {{ padding: 3px 8px; }}
