@@ -61,24 +61,6 @@ planned_races:
     priority: A
     surface: undulating_trail
 
-# Planned training sessions — up to 2 weekly templates, repeating until taper
-# Sessions on race days (from planned_races) are auto-replaced with estimated race TSS
-# These override Race Readiness taper suggestions when they fall in the taper window
-planned_sessions:
-  week_1:
-    - day: mon
-      description: "Easy 50'"
-      tss: 55
-    - day: tue
-      description: "FKS intervals"
-      tss: 120
-    - day: thu
-      description: "Easy 60'"
-      tss: 65
-    - day: sat
-      description: "Long run + parkrun sandwich 120'"
-      tss: 200
-
 # Power mode configuration
 power:
   mode: "stryd"           # Options: "stryd" (power meter), "gap" (Grade Adjusted Pace/HR)
