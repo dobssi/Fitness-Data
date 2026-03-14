@@ -36,6 +36,11 @@ planned_races:
     distance_km: 16.2
     priority: C
     surface: road
+  - name: "Haga Parkrun"
+    date: "2026-03-21"
+    distance_km: 5.0
+    priority: B
+    surface: road
 
 power:
   mode: "gap"
