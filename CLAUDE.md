@@ -143,6 +143,14 @@ python StepB_PostProcess.py
 python generate_dashboard.py
 ```
 
+**Git push / GitHub CLI (macOS):**
+Homebrew is at `/opt/homebrew/bin/brew` but not on PATH in Claude Code's shell. Run this before `gh` or `git push`:
+```bash
+eval "$(/opt/homebrew/bin/brew shellenv)"
+gh auth setup-git  # configures git credential helper
+```
+GitHub account: `dobssi`. Workflow dispatch input is `mode` (not `run_mode`).
+
 **Onboard new athlete:**
 ```bash
 python onboard_athlete.py  # processes onboarding JSON from onboard.html
