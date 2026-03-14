@@ -219,8 +219,8 @@ def parse_day_line(line: str) -> tuple[str, str] | None:
         return None
 
     # Match day prefix: "Ti:", "Tue:", "Må:", "Mon:", "Sö:", etc.
-    # Also handle "Ti " (space without colon)
-    m = re.match(r'([A-Za-zÅÄÖåäö]{2,3})\s*[:.]\s*(.*)', line)
+    # Also handle "Ti " or "Sun " (space without colon/dot)
+    m = re.match(r'([A-Za-zÅÄÖåäö]{2,3})\s*[:.]?\s+(.*)', line)
     if not m:
         return None
 

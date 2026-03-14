@@ -4575,7 +4575,7 @@ def _build_upcoming_sessions_html(sessions):
             label = f'Week total ({done} done + {total - done} planned)'
         else:
             label = 'Week total'
-        return f'<tr class="upcoming-week-total"><td colspan="2" style="text-align:right">{label}</td><td style="text-align:right">{total}</td><td colspan="3"></td></tr>'
+        return f'<tr class="upcoming-week-total"><td></td><td>{label}</td><td style="text-align:right">{total}</td><td colspan="3"></td></tr>'
 
     # Build rows
     rows = []
